@@ -5,7 +5,10 @@
   "version": "0.1.0",
   "author": "jyooi",
   "description": "Grammar and spelling checks for any selected text",
-  "kinds": ["bar-widget", "overlay"],
+  "kinds": [
+    "bar-widget",
+    "overlay"
+  ],
   "keepLoaded": true,
   "entryPoints": {
     "barWidget": "BarWidget.qml",
@@ -16,6 +19,77 @@
     "description": "Checks the grammar and spelling of the selected text",
     "category": "Text",
     "allowMultiple": false,
-    "defaultSection": "right"
+    "defaultSection": "right",
+    "defaults": {
+      "nativeLanguage": "none",
+      "targetEnglish": "en-US",
+      "engine": "languagetool",
+      "autoReplace": false,
+      "openaiBaseUrl": "http://127.0.0.1:8080",
+      "openaiModel": "gemma-4-e4b-it",
+      "openaiApiKey": ""
+    },
+    "schema": [
+      {
+        "key": "nativeLanguage",
+        "type": "string",
+        "label": "Native language",
+        "options": [
+          "none",
+          "zh",
+          "ms",
+          "es",
+          "fr",
+          "de",
+          "pt",
+          "ja"
+        ],
+        "defaultValue": "none"
+      },
+      {
+        "key": "targetEnglish",
+        "type": "string",
+        "label": "Target English",
+        "options": [
+          "en-US"
+        ],
+        "defaultValue": "en-US"
+      },
+      {
+        "key": "engine",
+        "type": "string",
+        "label": "Engine",
+        "options": [
+          "languagetool",
+          "openai",
+          "harper"
+        ],
+        "defaultValue": "languagetool"
+      },
+      {
+        "key": "autoReplace",
+        "type": "boolean",
+        "label": "Auto-replace the selection",
+        "defaultValue": false
+      },
+      {
+        "key": "openaiBaseUrl",
+        "type": "string",
+        "label": "Local LLM base URL",
+        "defaultValue": "http://127.0.0.1:8080"
+      },
+      {
+        "key": "openaiModel",
+        "type": "string",
+        "label": "Local LLM model",
+        "defaultValue": "gemma-4-e4b-it"
+      },
+      {
+        "key": "openaiApiKey",
+        "type": "string",
+        "label": "Local LLM API key",
+        "defaultValue": ""
+      }
+    ]
   }
 }

@@ -45,10 +45,15 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   `cli/src/doctor/facts.rs` is the only place that reads the machine, so the report is a pure function of recorded `Facts` and no test reads real hardware.
 - `manifest.json` version must equal the crate version; `cli/tests/manifest.rs` enforces that.
 - The Omarchy plugin is the repo root: `manifest.json`, `BarWidget.qml`, `Overlay.qml`, and `ui/`.
-  `Overlay.qml` owns capture, the CLI run, and the review state; `ui/QuickCard.qml` and `ui/MarkedText.qml` only draw.
-  `ui/splice.js` and `ui/tokens.js` are loaded by QML and by node, so they may use neither's API.
-  `ui/splice.test.js` and `ui/tokens.test.js` run them under `node --test`.
+  `Overlay.qml` owns capture, the CLI run, the review state, and the settings storage; `ui/QuickCard.qml`, `ui/SettingsView.qml`, and `ui/MarkedText.qml` only draw.
+  `ui/splice.js`, `ui/tokens.js`, and `ui/settings.js` are loaded by QML and by node, so they may use neither's API.
+  Their `*.test.js` siblings run under `node --test`; add a new one to `.github/workflows/ci.yml` and to `docs/dev.md`.
   `docs/dev.md` is the only route onto a live desktop, including the manual smoke items.
+- Settings storage is the plugin entry in `shell.json`, read through `Overlay.setting(name, fallback)` and written through `Overlay.persistSetting(name, value)`; nothing else may touch the file.
+  `ui/settings.js` owns the spec section 7 rules and is the shell-side counterpart of `cli/src/settings.rs`; the two must agree on the entry lookup and on what counts as unknown.
+  `shell.updateEntryInline` replaces the entry rather than merging into it, so every write carries the whole stored entry, which is what keeps the file-only keys and any untouched unknown value.
+  `Dropdown` writes its own `value` on select, which drops a declarative binding, so a live external write needs the `onXChanged` re-assert in `ui/SettingsView.qml`.
+  The manifest `barWidget.defaults` and `barWidget.schema` are documentation: the shell stores them and never merges them, so no QML may read them.
 - The plugin CI job clones `basecamp/omarchy` at the tag in `OMARCHY_REF`, because both the `qs.*` QML modules and `omarchy-plugin-validate` come from that tree.
   Raise the tag when the plugin starts to need a newer shell.
 - The `qmllint` on `PATH` is the Qt 5 syntax verifier: it prints nothing and reports a syntax error through its exit status alone.

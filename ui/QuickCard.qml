@@ -6,8 +6,12 @@ import qs.Ui
 // The quick popup card, spec section 6, laid out after variant B of the
 // HUF-174 prototype: hero, marked text, inspector strip, footer.
 //
-// The card renders state and reports intent. Capture, the Check, and the
-// clipboard all live in Overlay.qml.
+// The gear in the hero flips the body to the Settings view of spec section 7
+// and back, so the check view itself stays clean. The check state lives on
+// behind it: flipping back shows the same Issues with the same decisions.
+//
+// The card renders state and reports intent. Capture, the Check, the
+// clipboard, and the settings storage all live in Overlay.qml.
 BorderSurface {
   id: root
 
@@ -24,6 +28,17 @@ BorderSurface {
   property string noticeTitle: ""
   property string noticeBody: ""
 
+  // The Settings view, spec section 7. The values arrive already resolved
+  // through the defaults, so an unknown stored value shows the default here.
+  // `engineSetting` is the stored choice; `engine` above is what ran the
+  // Check that is on screen, which the meta line names.
+  property bool settingsOpen: false
+  property string nativeLanguage: "none"
+  property string engineSetting: "languagetool"
+  property bool autoReplace: false
+  property string openaiBaseUrl: ""
+  property string openaiModel: ""
+
   property int cardWidth: Style.space(680)
   property int maxTextHeight: Style.space(360)
 
@@ -33,12 +48,16 @@ BorderSurface {
   signal copyRequested()
   signal focusRequested(int index)
   signal closeRequested()
+  signal settingsToggled()
+  signal settingChanged(string name, var value)
 
   readonly property int issueCount: issues ? issues.length : 0
   readonly property int acceptedCount: root.countOf(true)
   readonly property int skippedCount: root.countOf(false)
   readonly property int openCount: root.issueCount - root.acceptedCount - root.skippedCount
   readonly property bool hasIssues: root.phase === "result" && root.issueCount > 0
+  // The Settings view takes the body over; every check row hangs off this.
+  readonly property bool showsCheck: !root.settingsOpen
   readonly property var focusedIssue: root.hasIssues && root.focusIndex >= 0 && root.focusIndex < root.issueCount
     ? root.issues[root.focusIndex] : null
 
@@ -114,6 +133,20 @@ BorderSurface {
           font.pixelSize: Style.font.bodySmall
         }
       }
+
+      // The one control that flips the body, spec section 7. It sits in the
+      // hero so it is reachable from every phase, the notice card included,
+      // and it stays a gear both ways so the hero never shifts under a click.
+      Button {
+        Layout.alignment: Qt.AlignVCenter
+        iconText: "󰒓"
+        tooltipText: root.settingsOpen ? "Back to the check" : "Settings"
+        bordered: true
+        selected: root.settingsOpen
+        foreground: Color.popups.text
+        fontFamily: Style.font.family
+        onClicked: root.settingsToggled()
+      }
     }
 
     Rectangle {
@@ -126,7 +159,7 @@ BorderSurface {
       Layout.fillWidth: true
       Layout.topMargin: Style.spacing.lg
       Layout.bottomMargin: Style.spacing.lg
-      visible: root.phase === "checking"
+      visible: root.showsCheck && root.phase === "checking"
       text: "Checking the selection..."
       color: Color.muted
       font.family: Style.font.family
@@ -137,7 +170,7 @@ BorderSurface {
       Layout.fillWidth: true
       Layout.topMargin: Style.spacing.md
       Layout.bottomMargin: Style.spacing.md
-      visible: root.phase === "notice"
+      visible: root.showsCheck && root.phase === "notice"
       spacing: Style.spacing.md
 
       Text {
@@ -164,7 +197,7 @@ BorderSurface {
       Layout.fillWidth: true
       Layout.topMargin: Style.spacing.lg
       Layout.bottomMargin: Style.spacing.lg
-      visible: root.phase === "result" && root.issueCount === 0
+      visible: root.showsCheck && root.phase === "result" && root.issueCount === 0
       spacing: Style.spacing.sm
 
       Text {
@@ -185,12 +218,26 @@ BorderSurface {
       }
     }
 
+    SettingsView {
+      Layout.fillWidth: true
+      Layout.topMargin: Style.spacing.md
+      Layout.bottomMargin: Style.spacing.md
+      visible: root.settingsOpen
+
+      nativeLanguage: root.nativeLanguage
+      engine: root.engineSetting
+      autoReplace: root.autoReplace
+      openaiBaseUrl: root.openaiBaseUrl
+      openaiModel: root.openaiModel
+      onSettingChanged: function(name, value) { root.settingChanged(name, value) }
+    }
+
     MarkedText {
       id: marked
 
       Layout.fillWidth: true
       Layout.preferredHeight: Math.min(marked.contentHeight, root.maxTextHeight)
-      visible: root.hasIssues
+      visible: root.showsCheck && root.hasIssues
 
       sourceText: root.sourceText
       issues: root.issues
@@ -201,7 +248,7 @@ BorderSurface {
 
     BorderSurface {
       Layout.fillWidth: true
-      visible: root.hasIssues
+      visible: root.showsCheck && root.hasIssues
       color: "transparent"
       radius: Style.cornerRadius
       padding: Style.spacing.lg
@@ -314,7 +361,7 @@ BorderSurface {
       spacing: Style.spacing.lg
 
       Row {
-        visible: root.hasIssues
+        visible: root.showsCheck && root.hasIssues
         spacing: Style.spacing.xxl
 
         Text {
@@ -342,7 +389,7 @@ BorderSurface {
       Item { Layout.fillWidth: true }
 
       Button {
-        visible: root.hasIssues
+        visible: root.showsCheck && root.hasIssues
         enabled: root.openCount > 0
         opacity: enabled ? 1.0 : 0.4
         text: "Accept all open"
@@ -353,7 +400,7 @@ BorderSurface {
       }
 
       Button {
-        visible: root.hasIssues
+        visible: root.showsCheck && root.hasIssues
         // Spec 6: Apply stays off until the user accepts one Fix, because
         // copying the Selection back unchanged is never what they asked for.
         enabled: root.acceptedCount > 0 && !root.copied
@@ -366,12 +413,23 @@ BorderSurface {
       }
 
       Button {
-        visible: !root.hasIssues
+        visible: root.showsCheck && !root.hasIssues
         text: "Close"
         bordered: true
         foreground: Color.popups.text
         fontFamily: Style.font.family
         onClicked: root.closeRequested()
+      }
+
+      // Settings persists on change, so the only thing left to do is leave.
+      // Spec section 7: there is no Save button.
+      Button {
+        visible: root.settingsOpen
+        text: "Back"
+        bordered: true
+        foreground: Color.accent
+        fontFamily: Style.font.family
+        onClicked: root.settingsToggled()
       }
     }
   }

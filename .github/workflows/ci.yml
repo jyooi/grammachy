@@ -68,5 +68,5 @@ jobs:
         run: |
           "$RUNNER_TEMP/omarchy/bin/omarchy-plugin-validate" .
 
-      - name: Test the corrected-text splice
-        run: node --test ui/splice.test.js ui/tokens.test.js
+      - name: Test the shared plugin JavaScript
+        run: node --test ui/splice.test.js ui/tokens.test.js ui/settings.test.js
