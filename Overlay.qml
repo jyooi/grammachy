@@ -125,9 +125,14 @@ Item {
   // ---------------------------------------------------------------- capture
 
   function startQuick() {
+    settleTimer.stop()
+    primaryPaste.running = false
+    savedClipboard.running = false
+    copyKeystroke.running = false
+    fallbackPaste.running = false
+    checkProcess.running = false
     // New capture.
     root.runGeneration += 1
-    settleTimer.stop()
     // Reset state.
     root.phase = "capturing"
     root.selectionText = ""
@@ -204,6 +209,7 @@ Item {
     root.selectionText = text
     root.phase = "checking"
     checkProcess.generation = root.runGeneration
+    checkProcess.stdinText = text
     checkProcess.command = root.checkCommand()
     // Writing to stdin closes it, so every run arms the channel again.
     checkProcess.stdinEnabled = true
@@ -280,28 +286,37 @@ Item {
   Process {
     id: primaryPaste
     property int generation: 0
+    property int startedGeneration: 0
+    // Snapshot at start.
     command: ["wl-paste", "--primary", "--no-newline"]
+    onStarted: primaryPaste.startedGeneration = root.runGeneration
     stdout: StdioCollector {
       waitForEnd: true
-      onStreamFinished: root.onPrimaryCaptured(text, primaryPaste.generation)
+      onStreamFinished: root.onPrimaryCaptured(text, primaryPaste.startedGeneration)
     }
   }
 
   Process {
     id: savedClipboard
     property int generation: 0
+    property int startedGeneration: 0
+    // Snapshot at start.
     command: ["wl-paste", "--no-newline"]
+    onStarted: savedClipboard.startedGeneration = root.runGeneration
     stdout: StdioCollector {
       waitForEnd: true
-      onStreamFinished: root.onClipboardBorrowed(text, savedClipboard.generation)
+      onStreamFinished: root.onClipboardBorrowed(text, savedClipboard.startedGeneration)
     }
   }
 
   Process {
     id: copyKeystroke
     property int generation: 0
+    property int startedGeneration: 0
+    // Snapshot at start.
     command: ["wtype", "-M", "ctrl", "c", "-m", "ctrl"]
-    onExited: root.onCopyKeystrokeSent(copyKeystroke.generation)
+    onStarted: copyKeystroke.startedGeneration = root.runGeneration
+    onExited: root.onCopyKeystrokeSent(copyKeystroke.startedGeneration)
   }
 
   Timer {
@@ -319,10 +334,13 @@ Item {
   Process {
     id: fallbackPaste
     property int generation: 0
+    property int startedGeneration: 0
+    // Snapshot at start.
     command: ["wl-paste", "--no-newline"]
+    onStarted: fallbackPaste.startedGeneration = root.runGeneration
     stdout: StdioCollector {
       waitForEnd: true
-      onStreamFinished: root.onFallbackCaptured(text, fallbackPaste.generation)
+      onStreamFinished: root.onFallbackCaptured(text, fallbackPaste.startedGeneration)
     }
   }
 
@@ -341,13 +359,17 @@ Item {
   Process {
     id: checkProcess
     property int generation: 0
+    property int startedGeneration: 0
+    property string stdinText: ""
     onStarted: {
-      write(root.selectionText)
+      checkProcess.startedGeneration = root.runGeneration
+      write(checkProcess.stdinText)
+      // Close stdin.
       checkProcess.stdinEnabled = false
     }
     stdout: StdioCollector {
       waitForEnd: true
-      onStreamFinished: root.onCheckOutput(text, checkProcess.generation)
+      onStreamFinished: root.onCheckOutput(text, checkProcess.startedGeneration)
     }
     stderr: StdioCollector {
       waitForEnd: true
