@@ -1,7 +1,7 @@
 # Running Grammachy in a live Omarchy shell
 
 This page is for a developer or a reviewer who wants the plugin on a real desktop.
-The automated checks in CI cover the QML, the manifest, and the splice.
+The automated checks in spec section 13 run in CI.
 They cannot cover capture, because capture needs a compositor, a focused window, and a real selection.
 Smoke items 1 and 2 of spec section 13 are therefore run by hand, and this page is how.
 
