@@ -4,7 +4,7 @@
 const test = require("node:test")
 const assert = require("node:assert/strict")
 
-const { correctedText, displaySpans, verifiedIssues } = require("./splice.js")
+const { correctedText, displaySpans, verifiedIssues, firstUnits } = require("./splice.js")
 
 // One Selection reused across the tests. The spans are UTF-16 code units into
 // exactly this string.
@@ -89,4 +89,27 @@ test("an empty Issue list is a no-op everywhere", () => {
   assert.equal(correctedText(TEXT, [], []), TEXT)
   assert.deepEqual(displaySpans([], []), [])
   assert.deepEqual(verifiedIssues(TEXT, []), { issues: [], dropped: [] })
+})
+
+test("firstUnits keeps a text that already fits", () => {
+  assert.equal(firstUnits(TEXT, 5000), TEXT)
+  assert.equal(firstUnits(TEXT, TEXT.length), TEXT)
+})
+
+test("firstUnits cuts at the limit in UTF-16 code units", () => {
+  assert.equal(firstUnits(TEXT, 5), "I has")
+  assert.equal(firstUnits(TEXT, 0), "")
+})
+
+test("firstUnits never splits a surrogate pair", () => {
+  // Two code units per emoji, so a limit of 3 lands inside the second pair.
+  const pairs = "\u{1F600}\u{1F600}"
+  assert.equal(firstUnits(pairs, 3), "\u{1F600}")
+  assert.equal(firstUnits(pairs, 2), "\u{1F600}")
+  assert.equal(firstUnits(pairs, 4), pairs)
+})
+
+test("firstUnits treats a missing text as empty", () => {
+  assert.equal(firstUnits(undefined, 10), "")
+  assert.equal(firstUnits(null, 10), "")
 })

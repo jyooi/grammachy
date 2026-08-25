@@ -44,10 +44,14 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   `docs/doctor.md` documents its envelope, exit code, and hardware tiers.
   `cli/src/doctor/facts.rs` is the only place that reads the machine, so the report is a pure function of recorded `Facts` and no test reads real hardware.
 - `manifest.json` version must equal the crate version; `cli/tests/manifest.rs` enforces that.
+  The Check limit lives twice, in `check::MAX_UTF16_UNITS` and in the QML that draws the too-long card; `cli/tests/overlay_limit.rs` keeps the copies equal.
 - The Omarchy plugin is the repo root: `manifest.json`, `BarWidget.qml`, `Overlay.qml`, and `ui/`.
-  `Overlay.qml` owns capture, the CLI run, the review state, and the settings storage; `ui/QuickCard.qml`, `ui/SettingsView.qml`, and `ui/MarkedText.qml` only draw.
-  `ui/splice.js`, `ui/tokens.js`, and `ui/settings.js` are loaded by QML and by node, so they may use neither's API.
+  `Overlay.qml` owns capture, the CLI run, the key map dispatch, the Apply path, the review state, and the settings storage; `ui/QuickCard.qml`, `ui/SettingsView.qml`, and `ui/MarkedText.qml` only draw.
+  `ui/splice.js`, `ui/tokens.js`, `ui/keymap.js`, and `ui/settings.js` are loaded by QML and by node, so they may use neither's API.
   Their `*.test.js` siblings run under `node --test`; add a new one to `.github/workflows/ci.yml` and to `docs/dev.md`.
+  `keymap.js` takes the Qt key codes as an argument, which is what lets node run it.
+  Anything worth a test belongs in one of those rather than in QML, because the repo has no QML test harness: `Overlay.qml` cannot be instantiated outside the shell's plugin loader, so a standalone Quickshell config hangs on it.
+  `QuickCard.maxCardHeight` is the whole bound of spec section 6; the card measures its own chrome and gives the rest to the scrolling text, so no part of the layout carries a guessed reserve.
   `docs/dev.md` is the only route onto a live desktop, including the manual smoke items.
 - Settings storage is the plugin entry in `shell.json`, read through `Overlay.setting(name, fallback)` and written through `Overlay.persistSetting(name, value)`; nothing else may touch the file.
   `ui/settings.js` owns the spec section 7 rules and is the shell-side counterpart of `cli/src/settings.rs`; the two must agree on the entry lookup and on what counts as unknown.

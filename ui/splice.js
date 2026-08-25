@@ -57,6 +57,26 @@ function verifiedIssues(text, issues) {
   return { issues: kept, dropped: dropped }
 }
 
+// The head of a text that one Check can take, for the `Check the first N only`
+// button of the too-long card (spec sections 6 and 8).
+//
+// A plain slice at the limit can cut a surrogate pair in half, and a lone
+// surrogate is not UTF-8, so the CLI would never see the character the user
+// typed. Backing off one unit keeps the pair whole and costs one character.
+function firstUnits(text, limit) {
+  var source = text === undefined || text === null ? "" : String(text)
+  var end = Math.max(0, Math.floor(limit))
+  if (source.length <= end) return source
+  var last = source.charCodeAt(end - 1)
+  if (last >= 0xD800 && last <= 0xDBFF) end -= 1
+  return source.slice(0, end)
+}
+
 if (typeof module !== "undefined" && module.exports) {
-  module.exports = { correctedText: correctedText, displaySpans: displaySpans, verifiedIssues: verifiedIssues }
+  module.exports = {
+    correctedText: correctedText,
+    displaySpans: displaySpans,
+    verifiedIssues: verifiedIssues,
+    firstUnits: firstUnits
+  }
 }
