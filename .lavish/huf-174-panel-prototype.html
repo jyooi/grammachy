@@ -1,0 +1,431 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HUF-174 Panel prototype</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+/* PROTOTYPE. Three variants of the Grammachy panel, switchable via ?variant=, mounted under a mock Omarchy top bar. */
+:root {
+  --bg: #1a1b26; --bg-dark: #13141c; --bg-darker: #0e0e14; --bg-light: #24283b;
+  --fg: #a9b1d6; --fg-dark: #565f89; --fg-light: #b4bee6; --fg-bright: #c0caf5;
+  --accent: #7aa2f7; --muted: #414868; --selection: #292e42;
+  --red: #f7768e; --yellow: #e0af68; --green: #9ece6a; --magenta: #bb9af7;
+  --font: "JetBrains Mono", ui-monospace, monospace;
+  --radius: 0px;
+}
+*, *::before, *::after { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg-darker); color: var(--fg); font-family: var(--font); font-size: 13px; }
+body { min-height: 100vh; padding-bottom: 120px; }
+
+/* mock desktop */
+.desktop { min-height: 720px; background: var(--bg-darker); position: relative; }
+.bar { height: 28px; background: var(--bg); display: flex; align-items: center; padding: 0 14px; gap: 18px; font-size: 12px; color: var(--fg); }
+.bar .ws { display: flex; gap: 10px; } .bar .ws b { color: var(--fg-bright); }
+.bar .right { margin-left: auto; display: flex; gap: 14px; align-items: center; }
+.bar .gw { color: var(--accent); font-weight: 700; padding: 0 6px; background: rgba(169,177,214,.08); height: 22px; line-height: 22px; }
+.window { position: absolute; left: 40px; top: 60px; right: 40px; height: 560px; background: var(--bg); border: 2px solid var(--muted); padding: 22px 26px; color: var(--fg-dark); line-height: 1.6; font-size: 13px; }
+.window .sel { background: var(--selection); color: var(--fg-light); }
+
+/* popup card, matches Ui/PopupCard */
+.card { position: absolute; top: 36px; right: 8px; background: var(--bg); border: 2px solid var(--accent); border-radius: var(--radius); padding: 10px; color: var(--fg); display: flex; flex-direction: column; gap: 8px; }
+.hero { display: flex; align-items: center; gap: 14px; padding: 2px 4px 6px; }
+.hero .icon { font-size: 22px; color: var(--accent); }
+.hero .title { font-weight: 700; font-size: 14px; color: var(--fg-bright); }
+.hero .meta { font-size: 11px; color: var(--fg-dark); }
+.hero .trail { margin-left: auto; }
+.sep { height: 1px; background: rgba(169,177,214,.18); }
+
+/* controls, match [controls] tokens */
+.btn { font: inherit; font-size: 12px; color: var(--fg); background: rgba(169,177,214,.04); border: 1px solid rgba(169,177,214,.4); padding: 6px 10px; height: 28px; cursor: pointer; border-radius: var(--radius); white-space: nowrap; }
+.btn:hover { background: rgba(169,177,214,.08); border-color: rgba(169,177,214,.25); }
+.btn.primary { border-color: var(--accent); color: var(--accent); }
+.btn.primary:hover { background: rgba(122,162,247,.12); }
+.btn.sm { height: 22px; padding: 0 7px; font-size: 11px; }
+.btn[disabled] { opacity: .4; cursor: default; }
+.toggle { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--fg-dark); cursor: pointer; user-select: none; }
+.toggle .sw { width: 26px; height: 14px; border: 1px solid rgba(169,177,214,.4); position: relative; }
+.toggle .sw::after { content: ""; position: absolute; top: 2px; left: 2px; width: 8px; height: 8px; background: var(--fg-dark); }
+.toggle.on .sw { border-color: var(--accent); } .toggle.on .sw::after { left: 14px; background: var(--accent); }
+.toggle.on { color: var(--fg); }
+.footer { display: flex; gap: 8px; align-items: center; padding-top: 2px; }
+.footer .spacer { flex: 1; }
+.key { font-size: 10px; color: var(--fg-dark); border: 1px solid rgba(169,177,214,.25); padding: 0 4px; line-height: 14px; }
+.orig { color: var(--red); text-decoration: line-through; text-decoration-color: rgba(247,118,142,.6); }
+.fix { color: var(--green); font-weight: 600; }
+.reason { color: var(--fg-dark); font-size: 11px; line-height: 1.45; }
+.cat { font-size: 10px; color: var(--fg-dark); border: 1px solid rgba(169,177,214,.25); padding: 0 4px; line-height: 14px; }
+.err { padding: 14px 8px; display: flex; flex-direction: column; gap: 8px; }
+.err .t { color: var(--red); font-weight: 700; font-size: 14px; }
+.err .m { color: var(--fg); font-size: 12px; line-height: 1.5; }
+.err .bar { height: 4px; background: rgba(169,177,214,.18); position: relative; }
+.err .bar i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--accent); }
+.err .bar b { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--fg-bright); }
+.err .cap { font-size: 11px; color: var(--fg-dark); display: flex; justify-content: space-between; }
+.window.huge { overflow: hidden; }
+.editor { position: absolute; inset: 28px 0 0 0; background: rgba(14,14,20,.7); display: flex; align-items: flex-start; justify-content: center; padding: 24px; }
+.editor .ecard { position: static; width: min(900px, 100%); max-height: 640px; }
+.editor .etext { max-height: 400px; }
+.window.huge::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 120px; background: linear-gradient(transparent, var(--bg)); }
+.empty { text-align: center; padding: 18px 8px; color: var(--fg-dark); }
+.empty .big { font-size: 26px; color: var(--green); }
+.empty .t { color: var(--fg-bright); font-weight: 700; margin-top: 6px; }
+
+/* A: list */
+.A .card { width: 420px; }
+.A .row { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 6px 10px; padding: 8px 6px; border-bottom: 1px solid rgba(169,177,214,.1); }
+.A .row:last-child { border-bottom: 0; }
+.A .row.skipped { opacity: .45; }
+.A .row.cur { background: rgba(169,177,214,.05); }
+.A .row .line { font-size: 13px; }
+.A .row .acts { display: flex; gap: 4px; align-self: center; }
+.A .row .acts .pick { width: 26px; height: 22px; font-size: 12px; padding: 0; }
+.A .row.accepted .acc { color: var(--green); border-color: var(--green); }
+.A .row.skipped .skp { color: var(--fg); border-color: var(--fg); }
+.A .list { max-height: 340px; overflow-y: auto; }
+
+/* B: text with marks */
+.B .card { width: 680px; }
+.B .text { padding: 8px 6px; line-height: 1.8; font-size: 13px; color: var(--fg-light); overflow-y: auto; max-height: 360px; scrollbar-width: thin; scrollbar-color: var(--muted) transparent; }
+.B .text .para { margin: 0 0 10px; }
+.B .text .more { color: var(--fg-dark); font-size: 11px; text-align: center; padding-top: 4px; }
+.B mark { background: transparent; color: inherit; cursor: pointer; padding: 1px 0; border-bottom: 2px solid var(--red); }
+.B mark.spelling { border-bottom-style: dotted; }
+.B mark.accepted { border-bottom-color: var(--green); color: var(--green); }
+.B mark.skipped { border-bottom-color: transparent; color: var(--fg-dark); }
+.B mark.focus { background: var(--selection); }
+.B .inspector { border: 1px solid rgba(169,177,214,.25); padding: 8px 10px; display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 4px 12px; align-items: center; min-height: 64px; }
+.B .inspector .acts { display: flex; gap: 6px; }
+.B .inspector .hint { grid-column: 1 / -1; color: var(--fg-dark); font-size: 11px; }
+.B .counts { display: flex; gap: 10px; font-size: 11px; color: var(--fg-dark); }
+.B .counts b { color: var(--fg); }
+
+/* C: one at a time */
+.C .card { width: 460px; }
+.C .progress { display: flex; gap: 3px; padding: 0 4px; }
+.C .progress i { flex: 1; height: 3px; background: rgba(169,177,214,.18); }
+.C .progress i.acc { background: var(--green); } .C .progress i.skp { background: var(--fg-dark); } .C .progress i.cur { background: var(--accent); }
+.C .focus { padding: 14px 8px 8px; display: flex; flex-direction: column; gap: 10px; }
+.C .focus .ctx { color: var(--fg-dark); font-size: 12px; line-height: 1.6; }
+.C .focus .ctx b { color: var(--fg-bright); font-weight: 400; background: var(--selection); }
+.C .focus .swap { font-size: 18px; display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap; }
+.C .focus .swap .arrow { color: var(--fg-dark); font-size: 14px; }
+.C .focus .reason { font-size: 12px; }
+.C .acts { display: flex; gap: 8px; }
+.C .acts .btn { flex: 1; height: 34px; }
+.C .done { padding: 12px 8px; display: flex; flex-direction: column; gap: 8px; }
+.C .done .sum { font-size: 14px; color: var(--fg-bright); font-weight: 700; }
+.C .done .out { background: var(--bg-dark); padding: 8px; font-size: 12px; line-height: 1.6; color: var(--fg-light); max-height: 130px; overflow: auto; }
+.C .done .out .chg { color: var(--green); }
+
+/* debug state */
+.debug { position: absolute; left: 40px; bottom: 30px; right: 40px; font-size: 11px; color: var(--fg-dark); background: var(--bg-dark); padding: 8px 12px; border: 1px dashed var(--muted); }
+.debug b { color: var(--fg); }
+.debug code { color: var(--fg-light); }
+
+/* switcher + review chrome (not part of the design) */
+.switcher { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: #fff; color: #111; font-family: system-ui, sans-serif; font-size: 13px; padding: 6px 8px; border-radius: 999px; box-shadow: 0 6px 24px rgba(0,0,0,.5); display: flex; gap: 10px; align-items: center; z-index: 50; }
+.switcher button { font: inherit; background: #111; color: #fff; border: 0; border-radius: 999px; width: 30px; height: 30px; cursor: pointer; }
+.switcher .lab { min-width: 220px; text-align: center; }
+.switcher .sub { color: #666; font-size: 12px; }
+.knobs { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; background: var(--bg); padding: 8px 14px; font-size: 12px; color: var(--fg-dark); border-bottom: 1px solid var(--muted); }
+.knobs label { display: inline-flex; gap: 4px; align-items: center; cursor: pointer; color: var(--fg); }
+.review { max-width: 860px; margin: 28px auto; padding: 0 20px; font-family: system-ui, sans-serif; color: #ddd; }
+.review h2 { font-size: 18px; margin: 0 0 6px; color: #fff; }
+.review p { color: #aaa; line-height: 1.5; }
+.review form { display: grid; gap: 8px; margin: 12px 0 24px; }
+.review label { display: flex; gap: 8px; align-items: flex-start; line-height: 1.4; }
+.review textarea { font: inherit; width: 100%; min-height: 70px; background: #111; color: #eee; border: 1px solid #444; padding: 8px; }
+.review button { font: inherit; background: #fff; color: #111; border: 0; padding: 8px 14px; cursor: pointer; justify-self: start; }
+.review .queued { color: #9ece6a; font-size: 12px; }
+</style>
+</head>
+<body>
+
+<div class="knobs">
+  <span>Prototype knobs (not part of the design):</span>
+  <label><input type="radio" name="data" value="issues" checked onchange="setData(this.value)"> 7 Issues</label>
+  <label><input type="radio" name="data" value="empty" onchange="setData(this.value)"> No Issues</label>
+  <label><input type="radio" name="data" value="long" onchange="setData(this.value)"> Long text (3 paragraphs, about 1,100 chars, 21 Issues)</label>
+  <label><input type="radio" name="data" value="toolong" onchange="setData(this.value)"> Too much text (about 12,000 chars, over the limit)</label>
+  <label><input type="checkbox" id="autoReplace" onchange="setAuto(this.checked)"> Setting: auto-replace opt-in</label>
+  <span>Keys: <span class="key">Enter</span> accept <span class="key">Space</span> skip <span class="key">Up Down</span> move <span class="key">A</span> accept all <span class="key">Left Right</span> variant</span>
+</div>
+
+<div class="desktop" id="desktop">
+  <div class="bar">
+    <div class="ws"><b>1</b><span>2</span><span>3</span><span>4</span></div>
+    <span>Obsidian</span>
+    <div class="right"><span>15:42</span><span>wifi</span><span>81%</span><span class="gw" title="Grammachy">G</span></div>
+  </div>
+  <div class="window" id="window"></div>
+  <div id="mount"></div>
+  <div class="debug" id="debug"></div>
+</div>
+
+<div class="switcher" aria-label="prototype switcher">
+  <button onclick="cycle(-1)" title="previous">&larr;</button>
+  <div class="lab"><span id="vkey"></span> <span class="sub" id="vname"></span></div>
+  <button onclick="cycle(1)" title="next">&rarr;</button>
+</div>
+
+<section class="review">
+  <h2>Decide the panel shape</h2>
+  <p>Flip the variants with the bottom bar or the arrow keys. Each variant renders the same Check result. Each uses the Issue contract from HUF-173 and computes the Corrected text the same way. Pick one, or name the pieces to combine. The answer goes into the ticket resolution.</p>
+  <form data-lavish-question="variant" onsubmit="queueAnswer(event)">
+    <label><input type="radio" name="variant" value="A"> <span><b>A. Issue list.</b> Compact card under the bar widget. Every Issue is a row: original, fix, reason, accept and skip buttons. Footer holds Accept all and the Apply action.</span></label>
+    <label><input type="radio" name="variant" value="B"> <span><b>B. Marked text.</b> Wide card that shows the whole Selection with each Issue underlined. Click or arrow to an Issue to see the reason. Accept or skip it in the inspector strip.</span></label>
+    <label><input type="radio" name="variant" value="C"> <span><b>C. One at a time.</b> Review deck. One Issue fills the card with context, a large swap, and the reason. Enter accepts, Space skips. Ends in a done screen with the Corrected text and the Apply action.</span></label>
+    <label><input type="checkbox" name="mix" value="skipped Issues stay visible but dim"> Keep skipped Issues visible but dim (as in A and B)</label>
+    <label><input type="checkbox" name="mix" value="Apply button label depends on the auto-replace setting: Copy corrected text or Replace selection"> Apply button label switches with the auto-replace setting (as prototyped)</label>
+    <label><input type="checkbox" name="mix" value="show elapsedMs and engine name in the hero meta line"> Show engine and elapsed time in the hero meta line</label>
+    <label><input type="checkbox" name="mix" value="empty state closes the panel by itself after a short delay"> Empty state: auto-close after a short delay instead of a button</label>
+    <textarea name="notes" placeholder="Anything to change, steal, or drop. Which parts of which variant."></textarea>
+    <button type="submit">Queue this answer</button>
+    <span class="queued" id="queuedNote"></span>
+  </form>
+
+  <h2>Long Selection</h2>
+  <p>Two knobs cover this. "Long text" is under the limit: the panel shows every Issue. "Too much text" is over the limit: the CLI answers <code>text_too_long</code> and the panel shows an error card with a size bar and an offer to check only the first N characters. That offer re-runs the CLI on a slice, and the hero line then says "first N of M chars". The placeholder limit here is 5,000. Proposal for the under-limit case: the text region scrolls inside the card, the card never grows past the screen (PopupCard caps it), the inspector and footer stay pinned, and the focused mark scrolls into view as you move with Up and Down. The hard ceiling is the CLI limit from HUF-173 (<code>text_too_long</code>), whose number the engine lifecycle ticket sets. Above that the panel shows the error state, not a truncated list.</p>
+  <form data-lavish-question="long" onsubmit="queueLong(event)">
+    <p style="margin:0;color:#aaa">Tick one for under the limit and one for over the limit.</p>
+    <label><input type="checkbox" name="long" value="scroll inside the card, pinned inspector, CLI limit is the only cap"> Scroll inside the card as prototyped. The CLI limit is the only cap.</label>
+    <label><input type="checkbox" name="long" value="scroll inside the card, plus a soft panel limit that offers to check only the first N characters"> Scroll as prototyped, plus a soft panel limit: above N characters offer to check only the first N.</label>
+    <label><input type="checkbox" name="long" value="over the limit: error card that hands the text to the Grammachy editor (Compose window), which becomes part of v1"> Over the limit: error card hands the text to the Grammachy editor. The Compose window joins v1.</label>
+    <label><input type="checkbox" name="long" value="over the limit: error card says paste into the Grammachy editor, but the editor ships after v1, so v1 shows only the message and Close"> Over the limit: same message, but the editor ships after v1. v1 shows the message and Close only.</label>
+    <label><input type="checkbox" name="long" value="over the limit: error card also keeps the 'check the first N only' button"> Also keep the "check the first N only" button next to the editor handoff.</label>
+    <label><input type="checkbox" name="long" value="over the limit: plain error card, no offer, the user selects less"> Over the limit: plain error card, no offer. The user selects less.</label>
+    <label><input type="checkbox" name="long" value="collapse to marks only: show only sentences that contain an Issue, hide clean sentences behind an expander"> Collapse clean sentences: show only the sentences that hold an Issue, with an expander for the rest.</label>
+    <textarea name="lnotes" placeholder="Other ideas, or a number for the limit if you have one in mind."></textarea>
+    <button type="submit">Queue this answer</button>
+    <span class="queued" id="queuedLong"></span>
+  </form>
+</section>
+
+<script>
+// ----- data, shaped like the HUF-173 result envelope
+const TEXT = "Yesterday I go to the library and borrow three book. She dont like the idea, because it is very expensive and not worth to buy. We discussed about the plan on last Monday.";
+const RAW = [
+  ["go", "went", "grammar", "The sentence refers to yesterday, so the verb needs the past tense."],
+  ["borrow", "borrowed", "grammar", "The verb needs the past tense to match the first verb in the sentence."],
+  ["book", "books", "grammar", "'three' needs a plural noun."],
+  ["dont", "doesn't", "spelling", "Possible spelling mistake. Did you mean 'doesn't'?"],
+  ["worth to buy", "worth buying", "grammar", "'worth' takes an -ing form, not 'to' plus a verb."],
+  ["discussed about", "discussed", "grammar", "'discuss' takes a direct object. Do not add 'about'."],
+  ["on last Monday", "last Monday", "grammar", "Time phrases with 'last' do not take 'on'."],
+];
+let scan = 0;
+const ISSUES = RAW.map(([o, f, c, r]) => { const s = TEXT.indexOf(o, scan); scan = s + o.length; return { start: s, end: s + o.length, original: o, fix: f, category: c, reason: r }; });
+const ENVELOPE = { contractVersion: 1, engine: "languagetool", elapsedMs: 23, issues: ISSUES };
+const FILLER = [
+  "The meeting was long but useful, and everyone left with a clear list of tasks for the week.",
+  "Our team plans to finish the report by Friday and send it to the client before the weekend.",
+  "The library near the station closes early on public holidays, so plan your visit ahead.",
+];
+const LONG_TEXT = [0,1,2].map(k => `${FILLER[k]} ${TEXT} ${FILLER[(k+1)%3]}`).join("\n\n");
+const LONG_ISSUES = [];
+{ let from = 0; for (let k = 0; k < 3; k++) { let sc = LONG_TEXT.indexOf(TEXT, from); for (const [o, f, c, r] of RAW) { const i = LONG_TEXT.indexOf(o, sc); sc = i + o.length; LONG_ISSUES.push({ start: i, end: i + o.length, original: o, fix: f, category: c, reason: r }); } from = sc; } }
+const LONG = { contractVersion: 1, engine: "languagetool", elapsedMs: 210, issues: LONG_ISSUES };
+// Limit placeholder. The real number is set in "Default engine and its lifecycle".
+const LIMIT = 5000;
+const HUGE_TEXT = Array.from({ length: 12 }, () => LONG_TEXT).join("\n\n");
+const TOO_LONG = { contractVersion: 1, error: { code: "text_too_long", message: `The selection has ${HUGE_TEXT.length.toLocaleString()} characters. The limit is ${LIMIT.toLocaleString()}.` }, issues: [] };
+const EMPTY = { contractVersion: 1, engine: "languagetool", elapsedMs: 19, issues: [] };
+
+// ----- state
+const VARIANTS = { A: "Issue list", B: "Marked text", C: "One at a time" };
+let variant = new URLSearchParams(location.search).get("variant") || "A";
+if (!VARIANTS[variant]) variant = "A";
+let result = ENVELOPE;
+let accepted = [];      // per Issue: true, false, or null (undecided)
+let focus = 0;          // current Issue index
+let autoReplace = false;
+let applied = null;     // "clipboard" | "replace" after Apply
+let editor = false;     // mock Grammachy editor overlay (Compose window)
+function src() { return result === LONG || result.partial ? LONG_TEXT : result === TOO_LONG ? HUGE_TEXT : TEXT; }
+
+function reset() { accepted = result.issues.map(() => null); focus = 0; applied = null; editor = false; }
+reset();
+
+function corrected() {
+  let out = src();
+  for (let i = result.issues.length - 1; i >= 0; i--) {
+    if (accepted[i] === true) { const is = result.issues[i]; out = out.slice(0, is.start) + is.fix + out.slice(is.end); }
+  }
+  return out;
+}
+function acceptCount() { return accepted.filter(a => a === true).length; }
+function setData(v) { result = v === "empty" ? EMPTY : v === "long" ? LONG : v === "toolong" ? TOO_LONG : ENVELOPE; reset(); render(); }
+function setAuto(v) { autoReplace = v; render(); }
+function nextOpen(from) { const n = accepted.findIndex((a, k) => k > from && a === null); return n === -1 ? (variant === "C" ? accepted.length : Math.min(from + 1, accepted.length - 1)) : n; }
+function decide(i, v) { accepted[i] = v; focus = nextOpen(i); render(); }
+function acceptAll() { accepted = accepted.map(a => a === false ? false : true); if (variant === "C") focus = accepted.length; render(); }
+function apply() { applied = autoReplace ? "replace" : "clipboard"; render(); }
+function esc(s) { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;"); }
+
+// ----- shared pieces
+function hero(sub) {
+  const n = result.issues.length;
+  const part = result.partial ? `first ${LIMIT.toLocaleString()} of ${HUGE_TEXT.length.toLocaleString()} chars, ` : "";
+  const meta = n === 0 ? `no issues, ${result.engine}, ${result.elapsedMs} ms` : `${part}${n} issue${n > 1 ? "s" : ""}, ${acceptCount()} accepted, ${result.engine}, ${result.elapsedMs} ms`;
+  return `<div class="hero"><span class="icon">G</span><div><div class="title">Grammachy</div><div class="meta">${sub || meta}</div></div><div class="trail">${autoToggle()}</div></div>`;
+}
+function autoToggle() {
+  return `<span class="toggle ${autoReplace ? "on" : ""}" onclick="document.getElementById('autoReplace').click()" title="Setting: replace the selection instead of copying"><span class="sw"></span>auto-replace</span>`;
+}
+function applyButton() {
+  const label = autoReplace ? "Replace selection" : "Copy corrected text";
+  const none = acceptCount() === 0;
+  if (applied) return `<button class="btn" disabled>${applied === "replace" ? "Replaced" : "Copied"}</button>`;
+  return `<button class="btn primary" ${none ? "disabled" : ""} onclick="apply()">${label} <span class="key">${autoReplace ? "Ctrl Enter" : "Ctrl C"}</span></button>`;
+}
+function errorCard() {
+  const n = HUGE_TEXT.length, pct = Math.min(100, LIMIT / n * 100);
+  return `<div class="card">${hero("check failed")}<div class="sep"></div><div class="err">
+    <div class="t">Selection too long</div>
+    <div class="m">${result.error.message}</div>
+    <div class="bar"><i style="width:${pct}%"></i><b style="left:${pct}%"></b></div>
+    <div class="cap"><span>limit ${LIMIT.toLocaleString()}</span><span>selected ${n.toLocaleString()}</span></div>
+    <div class="reason">The popup handles a paragraph or a few pages. For a long text, paste it into the Grammachy editor. It checks the whole text and shows the Issues page by page.</div>
+  </div><div class="footer"><button class="btn" onclick="void 0">Close <span class="key">Esc</span></button><span class="spacer"></span><button class="btn" onclick="firstN()">Check the first ${LIMIT.toLocaleString()} only</button><button class="btn primary" onclick="openEditor()">Open in Grammachy editor <span class="key">Enter</span></button></div></div>`;
+}
+function openEditor() { editor = true; render(); }
+function editorOverlay() {
+  const T = HUGE_TEXT;
+  let html = "", pos = 0, k = 0;
+  const issues = LONG_ISSUES.map(is => ({ ...is }));
+  issues.forEach((is, i) => { html += esc(T.slice(pos, is.start)); html += `<mark class="${is.category} ${i === 0 ? "focus" : ""}">${esc(is.original)}</mark>`; pos = is.end; });
+  html += esc(T.slice(pos));
+  html = html.split("\n\n").map(p => `<p class="para">${p}</p>`).join("");
+  return `<div class="editor B"><div class="ecard card">
+    <div class="hero"><span class="icon">G</span><div><div class="title">Grammachy editor</div><div class="meta">${T.length.toLocaleString()} chars, pasted from the selection, checked in ${Math.ceil(T.length / LIMIT)} chunks, ${issues.length} issues in the first chunk so far</div></div><div class="trail"><button class="btn sm" onclick="editor=false;render()">Back to popup</button></div></div>
+    <div class="sep"></div>
+    <div class="etext text">${html}</div>
+    <div class="inspector"><div><div><span class="orig">go</span> &rarr; <span class="fix">went</span> <span class="cat">grammar</span></div><div class="reason">The sentence refers to yesterday, so the verb needs the past tense.</div></div><div class="acts"><button class="btn">Accept <span class="key">Enter</span></button><button class="btn">Skip <span class="key">Space</span></button></div><div class="hint">Issue 1 of ${issues.length}. The editor is a full window, not a popup. Same list, same keys, room for the whole text.</div></div>
+    <div class="footer"><div class="counts"><span><b>0</b> accepted</span><span><b>0</b> skipped</span><span><b>${issues.length}</b> open</span></div><span class="spacer"></span><button class="btn">Accept all open</button><button class="btn primary">Copy corrected text</button></div>
+  </div></div>`;
+}
+function firstN() { result = { contractVersion: 1, engine: "languagetool", elapsedMs: 480, issues: LONG_ISSUES, partial: true }; reset(); render(); }
+function emptyCard() {
+  return `<div class="card">${hero()}<div class="sep"></div><div class="empty"><div class="big">&#10003;</div><div class="t">No issues found</div><div>${src().length} characters checked, ${result.engine}, ${result.elapsedMs} ms</div></div><div class="footer"><span class="spacer"></span><button class="btn">Close <span class="key">Esc</span></button></div></div>`;
+}
+
+// ----- variant A: issue list
+function renderA() {
+  if (result.error) return errorCard();
+  if (result.issues.length === 0) return emptyCard();
+  const rows = result.issues.map((is, i) => {
+    const st = accepted[i] === true ? "accepted" : accepted[i] === false ? "skipped" : "";
+    return `<div class="row ${st} ${i === focus ? "cur" : ""}">
+      <div><div class="line"><span class="orig">${esc(is.original)}</span> &rarr; <span class="fix">${esc(is.fix)}</span> <span class="cat">${is.category}</span></div><div class="reason">${esc(is.reason)}</div></div>
+      <div class="acts"><button class="btn pick acc" title="Accept" onclick="decide(${i},true)">&#10003;</button><button class="btn pick skp" title="Skip" onclick="decide(${i},false)">&#10005;</button></div>
+    </div>`;
+  }).join("");
+  return `<div class="card">${hero()}<div class="sep"></div><div class="list">${rows}</div><div class="sep"></div>
+    <div class="footer"><button class="btn" onclick="acceptAll()">Accept all <span class="key">A</span></button><span class="spacer"></span>${applyButton()}</div></div>`;
+}
+
+// ----- variant B: marked text with inspector
+function renderB() {
+  if (result.error) return errorCard();
+  if (result.issues.length === 0) return emptyCard();
+  const T = src();
+  let html = "", pos = 0;
+  result.issues.forEach((is, i) => {
+    html += esc(T.slice(pos, is.start));
+    const st = accepted[i] === true ? "accepted" : accepted[i] === false ? "skipped" : "";
+    const shown = accepted[i] === true ? is.fix : is.original;
+    html += `<mark id="m${i}" class="${is.category} ${st} ${i === focus ? "focus" : ""}" onclick="focus=${i};render()">${esc(shown)}</mark>`;
+    pos = is.end;
+  });
+  html += esc(T.slice(pos));
+  html = html.split("\n\n").map(p => `<p class="para">${p}</p>`).join("");
+  const is = result.issues[Math.min(focus, result.issues.length - 1)];
+  const f = Math.min(focus, result.issues.length - 1);
+  const insp = `<div><div><span class="orig">${esc(is.original)}</span> &rarr; <span class="fix">${esc(is.fix)}</span> <span class="cat">${is.category}</span></div><div class="reason">${esc(is.reason)}</div></div>
+    <div class="acts"><button class="btn" onclick="decide(${f},true)">Accept <span class="key">Enter</span></button><button class="btn" onclick="decide(${f},false)">Skip <span class="key">Space</span></button></div>
+    <div class="hint">Issue ${f + 1} of ${result.issues.length}. Up, Down, or click a mark to move.</div>`;
+  const open = accepted.filter(a => a === null).length;
+  return `<div class="card">${hero()}<div class="sep"></div><div class="text">${html}</div><div class="inspector">${insp}</div>
+    <div class="footer"><div class="counts"><span><b>${acceptCount()}</b> accepted</span><span><b>${accepted.filter(a => a === false).length}</b> skipped</span><span><b>${open}</b> open</span></div><span class="spacer"></span><button class="btn" onclick="acceptAll()">Accept all open <span class="key">A</span></button>${applyButton()}</div></div>`;
+}
+
+// ----- variant C: one at a time
+function renderC() {
+  if (result.error) return errorCard();
+  if (result.issues.length === 0) return emptyCard();
+  const n = result.issues.length;
+  const bar = `<div class="progress">${accepted.map((a, i) => `<i class="${a === true ? "acc" : a === false ? "skp" : i === focus ? "cur" : ""}"></i>`).join("")}</div>`;
+  if (focus >= n) {
+    let out = "", pos = 0;
+    result.issues.forEach((is, i) => { out += esc(src().slice(pos, is.start)); out += accepted[i] === true ? `<span class="chg">${esc(is.fix)}</span>` : esc(is.original); pos = is.end; });
+    out += esc(src().slice(pos));
+    return `<div class="card">${hero(`${acceptCount()} of ${n} fixes accepted`)}${bar}<div class="done"><div class="sum">Corrected text</div><div class="out">${out}</div></div>
+      <div class="footer"><button class="btn" onclick="focus=0;render()">Review again</button><span class="spacer"></span>${applyButton()}</div></div>`;
+  }
+  const is = result.issues[focus];
+  const T = src(), before = T.slice(Math.max(0, T.lastIndexOf(". ", is.start) + 2), is.start), after = T.slice(is.end, T.indexOf(".", is.end) + 1);
+  return `<div class="card">${hero(`Issue ${focus + 1} of ${n}`)}${bar}
+    <div class="focus">
+      <div class="ctx">${esc(before)}<b>${esc(is.original)}</b>${esc(after)}</div>
+      <div class="swap"><span class="orig">${esc(is.original)}</span><span class="arrow">&rarr;</span><span class="fix">${esc(is.fix)}</span><span class="cat">${is.category}</span></div>
+      <div class="reason">${esc(is.reason)}</div>
+    </div>
+    <div class="acts"><button class="btn primary" onclick="decide(${focus},true)">Accept <span class="key">Enter</span></button><button class="btn" onclick="decide(${focus},false)">Skip <span class="key">Space</span></button></div>
+    <div class="footer"><button class="btn sm" onclick="acceptAll()">Accept all remaining <span class="key">A</span></button><span class="spacer"></span><span class="reason">Apply comes at the end</span></div></div>`;
+}
+
+// ----- render
+function render() {
+  document.getElementById("desktop").className = "desktop " + variant;
+  document.getElementById("mount").innerHTML = editor ? editorOverlay() : ({ A: renderA, B: renderB, C: renderC })[variant]();
+  const note = applied === "clipboard" ? "<span style='color:var(--green)'>Clipboard now holds the corrected text. Paste it where you want it.</span>" : "";
+  document.getElementById("window").className = "window" + (result === TOO_LONG ? " huge" : "");
+  document.getElementById("window").innerHTML = `<div style="color:var(--fg-dark);margin-bottom:10px">notes/2026-08-25.md</div><span class="sel">${esc(applied === "replace" ? corrected() : src()).replace(/\n\n/g, "<br><br>")}</span><br><br>${note}`;
+  document.getElementById("debug").innerHTML = `<b>state</b> variant=${variant} accepted=<code>[${accepted.map(a => a === null ? "." : a ? "1" : "0").join("")}]</code> focus=${focus} autoReplace=${autoReplace} applied=${applied}<br><b>corrected</b> <code>${esc(corrected())}</code>`;
+  const m = document.getElementById("m" + focus); if (m) m.scrollIntoView({ block: "nearest" });
+  document.getElementById("vkey").textContent = variant;
+  document.getElementById("vname").textContent = "(" + VARIANTS[variant] + ")";
+}
+function cycle(d) { const keys = Object.keys(VARIANTS); variant = keys[(keys.indexOf(variant) + d + keys.length) % keys.length]; history.replaceState(null, "", "?variant=" + variant); reset(); render(); }
+document.addEventListener("keydown", e => {
+  if (e.target.matches("input, textarea, [contenteditable]")) return;
+  if (e.key === "ArrowLeft") return cycle(-1);
+  if (e.key === "ArrowRight") return cycle(1);
+  const n = result.issues.length;
+  if (n === 0) return;
+  if (e.key === "Enter") { e.preventDefault(); if (e.ctrlKey || focus >= n) return apply(); decide(focus, true); }
+  else if (e.key === " ") { e.preventDefault(); if (focus < n) decide(focus, false); }
+  else if (e.key === "ArrowDown") { focus = Math.min(focus + 1, n - 1); render(); }
+  else if (e.key === "ArrowUp") { focus = Math.max(focus - 1, 0); render(); }
+  else if (e.key.toLowerCase() === "a") acceptAll();
+});
+render();
+
+function queueLong(ev) {
+  ev.preventDefault();
+  const fd = new FormData(ev.currentTarget);
+  const v = fd.getAll("long").join(" | ");
+  if (!v) { document.getElementById("queuedLong").textContent = "Pick an option first."; return; }
+  const notes = (fd.get("lnotes") || "").trim();
+  const msg = `Long Selection decision: ${v}.` + (notes ? ` Notes: ${notes}` : "");
+  if (window.lavish) { window.lavish.queuePrompt(msg, { tag: "decision", text: msg, element: ev.currentTarget, queueKey: "long", data: { long: v, notes } }); document.getElementById("queuedLong").textContent = "Queued. Press Send to Agent."; }
+  else document.getElementById("queuedLong").textContent = msg;
+}
+
+// ----- lavish answer
+function queueAnswer(ev) {
+  ev.preventDefault();
+  const fd = new FormData(ev.currentTarget);
+  const v = fd.get("variant");
+  if (!v) { document.getElementById("queuedNote").textContent = "Pick a variant first."; return; }
+  const mix = fd.getAll("mix"); const notes = (fd.get("notes") || "").trim();
+  const msg = `Panel prototype decision: variant ${v} (${VARIANTS[v]}).` + (mix.length ? ` Also keep: ${mix.join("; ")}.` : "") + (notes ? ` Notes: ${notes}` : "");
+  if (window.lavish) { window.lavish.queuePrompt(msg, { tag: "decision", text: msg, element: ev.currentTarget, queueKey: "variant", data: { variant: v, mix, notes } }); document.getElementById("queuedNote").textContent = "Queued. Press Send to Agent."; }
+  else document.getElementById("queuedNote").textContent = msg;
+}
+</script>
+</body>
+</html>
