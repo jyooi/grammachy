@@ -500,6 +500,7 @@ Item {
     root.chunkCancelled = false
     root.chunkStartedAt = Date.now()
     root.chunkTickMs = 0
+    root.engine = ""
     root.phase = "checking"
     chunkTicker.start()
   }
