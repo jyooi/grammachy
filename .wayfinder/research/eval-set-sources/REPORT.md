@@ -230,6 +230,14 @@ Question: which public grammatical error correction corpora carry a writer nativ
 - Do not spend time on Lang-8, ICNALE, or LENS for v1.
   Revisit ICNALE Edited Essays only if a second zh or ja source is wanted, and LENS only once its repository is populated.
 
+## Second pass
+
+A second, independent pass on the same question is `REPORT-second-pass.md` beside this file.
+It agrees on every source and licence verdict.
+It differs in the FCE filter: it also drops spelling and punctuation edits, which gives fr 679, es 669, ja 446, zh 392, de 342, pt 238 single-edit items.
+It adds that TLE (UD English-ESL) is a 500 per L1 subset of the same FCE text with the text withheld, so it is no new source.
+It proposes a committed sidecar of ids, offsets, codes, and fixes, with the sentence text filled at fetch time.
+
 ## Open points
 
 - The FCE licence is a research licence; the bench is a developer tool, and the fixture never ships in the product, but a lawyer has not read clause 4 against an open-source product that is free.
