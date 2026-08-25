@@ -144,9 +144,9 @@ fn replace_asks_for_the_source_window_before_it_types() {
     let timer = source
         .find("id: pasteTimer")
         .expect("the overlay waits before it pastes");
-    let timer_body = &source[timer..timer + 200];
+    let timer_body = &source[timer..timer + 400];
     assert!(
-        timer_body.contains("root.focusSourceWindow()"),
+        timer_body.contains("root.focusSourceWindow("),
         "the wait ends on the ask, not on the keystroke: {timer_body}"
     );
     assert!(
@@ -173,14 +173,14 @@ fn replace_asks_for_the_source_window_before_it_types() {
         .find("Anchor.isFocused(")
         .expect("the paste is gated on the check");
     let typed = verified
-        .find("pasteKeystroke.running = true")
+        .find("root.launchPasteKeystroke(")
         .expect("the paste happens once the check passes");
     assert!(
         checked < typed,
         "nothing is typed before the check answers: {verified}"
     );
     assert!(
-        verified.contains("root.showSourceGone()"),
+        verified.contains("root.showSourceGone("),
         "a window that is gone gets the notice instead: {verified}"
     );
 }
@@ -225,7 +225,7 @@ fn a_compositor_that_never_answers_still_ends_the_apply() {
 
     let focus = function_body(&source, "focusSourceWindow");
     assert!(
-        focus.contains("address.length === 0") && focus.contains("pasteKeystroke.running = true"),
+        focus.contains("address.length === 0") && focus.contains("root.launchPasteKeystroke("),
         "with no source window recorded the paste is what it always was: {focus}"
     );
 }
@@ -247,5 +247,74 @@ fn the_notice_wording_lives_in_one_place() {
     assert!(
         !read("Overlay.qml").contains("The source window closed"),
         "the overlay names the wording rather than repeating it"
+    );
+}
+
+/// A summon that cancels Replace must not type into the next Check, and must
+/// not open the gone-window notice on it. The capture path already keeps its
+/// callbacks behind `runGeneration`; Replace has to do the same.
+#[test]
+fn replace_ignores_callbacks_from_a_cancelled_run() {
+    let source = read("Overlay.qml");
+
+    let reset = function_body(&source, "resetRun");
+    let pending = reset
+        .find("focusSource.launchPending = false")
+        .expect("resetRun drops the focus start flag");
+    let bump = reset
+        .find("root.runGeneration += 1")
+        .expect("resetRun bumps the generation");
+    let stop = reset
+        .find("focusSource.running = false")
+        .expect("resetRun stops the focus process");
+    assert!(
+        pending < bump && bump < stop,
+        "a cancelled Replace is stale before it is stopped: {reset}"
+    );
+
+    let copy = function_body(&source, "runCopy");
+    assert!(
+        copy.contains("copyProcess.generation = root.runGeneration"),
+        "Replace records the generation when it starts: {copy}"
+    );
+
+    for name in [
+        "focusSourceWindow",
+        "verifySourceFocus",
+        "onSourceFocusVerified",
+        "showSourceGone",
+        "launchPasteKeystroke",
+    ] {
+        let body = function_body(&source, name);
+        assert!(
+            body.contains("root.isLive("),
+            "{name} refuses work from a cancelled Replace: {body}"
+        );
+    }
+
+    let launch = function_body(&source, "launchPasteKeystroke");
+    assert!(
+        launch.contains("pasteKeystroke.running = true"),
+        "the keystroke is the one launch that types: {launch}"
+    );
+
+    for process in ["id: focusSource", "id: verifySource"] {
+        let at = source
+            .find(process)
+            .unwrap_or_else(|| panic!("the overlay declares {process}"));
+        let body = &source[at..at + 900];
+        assert!(
+            body.contains("startedGeneration = root.runGeneration"),
+            "{process} snapshots the generation when it starts: {body}"
+        );
+    }
+
+    let timer = source
+        .find("id: pasteTimer")
+        .expect("the overlay waits before it pastes");
+    let timer_body = &source[timer..timer + 400];
+    assert!(
+        timer_body.contains("root.isLive(pasteTimer.generation)"),
+        "the wait itself is generation-gated: {timer_body}"
     );
 }

@@ -249,30 +249,30 @@ Item {
   // still in flight, and no Check is on screen. The check view is what a
   // summon shows, spec section 7, and the Draft is what it never touches.
   function resetRun() {
+    sourceProbe.launchPending = false
+    focusSource.launchPending = false
+    verifySource.launchPending = false
+    checkProcess.launchPending = false
+    chunkProcess.launchPending = false
+    copyProcess.pasteAfter = false
+    // Whatever answers next belongs to an older run than this one.
+    root.runGeneration += 1
     settleTimer.stop()
     pasteTimer.stop()
     chunkTicker.stop()
-    sourceProbe.launchPending = false
     sourceProbe.running = false
-    focusSource.launchPending = false
     focusSource.running = false
-    verifySource.launchPending = false
     verifySource.running = false
     primaryPaste.running = false
     savedClipboard.running = false
     copyKeystroke.running = false
     fallbackPaste.running = false
-    checkProcess.launchPending = false
     checkProcess.restartQueued = false
     checkProcess.running = false
-    chunkProcess.launchPending = false
     chunkProcess.restartQueued = false
     chunkProcess.running = false
     doctorProcess.restartQueued = false
     doctorProcess.running = false
-    copyProcess.pasteAfter = false
-    // Whatever answers next belongs to an older run than this one.
-    root.runGeneration += 1
     root.settingsOpen = false
     root.selectionText = ""
     root.truncated = false
@@ -916,6 +916,7 @@ Item {
 
   function runCopy(pasteAfter) {
     copyProcess.pasteAfter = pasteAfter
+    copyProcess.generation = root.runGeneration
     copyProcess.text = root.correctedText()
     copyProcess.stdinEnabled = true
     copyProcess.running = true
@@ -925,10 +926,11 @@ Item {
   // Step one of the Replace: ask for the source window by address. With no
   // address there is nothing to ask for, so the paste goes out as it always
   // did rather than being refused over a window nobody recorded.
-  function focusSourceWindow() {
+  function focusSourceWindow(generation) {
+    if (!root.isLive(generation)) return
     var address = Anchor.windowAddress(root.sourceWindow)
     if (address.length === 0) {
-      pasteKeystroke.running = true
+      root.launchPasteKeystroke(generation)
       return
     }
     focusSource.command = Anchor.focusCommand(address)
@@ -938,27 +940,35 @@ Item {
 
   // Step two: the dispatch exits 0 for a window that is gone, so the only
   // honest answer comes from asking the compositor who holds the keyboard now.
-  function verifySourceFocus() {
+  function verifySourceFocus(generation) {
+    if (!root.isLive(generation)) return
     verifySource.command = Anchor.activeWindowCommand()
     verifySource.launchPending = true
     verifySource.running = true
   }
 
-  function onSourceFocusVerified(text) {
+  function onSourceFocusVerified(text, generation) {
+    if (!root.isLive(generation)) return
     if (Anchor.isFocused(text, Anchor.windowAddress(root.sourceWindow))) {
-      pasteKeystroke.running = true
+      root.launchPasteKeystroke(generation)
       return
     }
-    root.showSourceGone()
+    root.showSourceGone(generation)
   }
 
   // The source window is gone, so there is nothing to replace. Nothing is
   // typed anywhere, and the card comes back to say where the text went.
-  function showSourceGone() {
+  function showSourceGone(generation) {
+    if (!root.isLive(generation)) return
     root.opened = true
     root.surface = "quick"
     root.settingsOpen = false
     root.showNotice(Anchor.SOURCE_GONE_TITLE, Anchor.SOURCE_GONE_BODY, Anchor.SOURCE_GONE_META)
+  }
+
+  function launchPasteKeystroke(generation) {
+    if (!root.isLive(generation)) return
+    pasteKeystroke.running = true
   }
 
   // ------------------------------------------------------------------- keys
@@ -1233,6 +1243,7 @@ Item {
   Process {
     id: copyProcess
     property string text: ""
+    property int generation: 0
     // Replace the Selection once the clipboard holds the Corrected text.
     property bool pasteAfter: false
     command: ["wl-copy"]
@@ -1243,8 +1254,10 @@ Item {
     onExited: {
       if (!copyProcess.pasteAfter) return
       copyProcess.pasteAfter = false
+      if (!root.isLive(copyProcess.generation)) return
       // wl-copy has claimed the selection by now, so the paste will find it.
       root.close()
+      pasteTimer.generation = copyProcess.generation
       pasteTimer.restart()
     }
   }
@@ -1254,20 +1267,28 @@ Item {
   // waits, for the same reason.
   Timer {
     id: pasteTimer
+    property int generation: 0
     interval: 150
     repeat: false
-    onTriggered: root.focusSourceWindow()
+    onTriggered: {
+      if (!root.isLive(pasteTimer.generation)) return
+      root.focusSourceWindow(pasteTimer.generation)
+    }
   }
 
   // `hyprctl dispatch` for the source window. It answers 0 whether or not the
   // window is still there, so nothing is typed on its word alone.
   Process {
     id: focusSource
+    property int startedGeneration: 0
     property bool launchPending: false
-    onStarted: focusSource.launchPending = false
+    onStarted: {
+      focusSource.launchPending = false
+      focusSource.startedGeneration = root.runGeneration
+    }
     onExited: {
       if (focusSource.launchPending) return
-      root.verifySourceFocus()
+      root.verifySourceFocus(focusSource.startedGeneration)
     }
     onRunningChanged: {
       if (focusSource.running) return
@@ -1275,7 +1296,7 @@ Item {
       focusSource.launchPending = false
       // No `hyprctl` to ask, so the source window cannot be reached and the
       // Corrected text stays on the clipboard rather than landing anywhere.
-      root.showSourceGone()
+      root.showSourceGone(root.runGeneration)
     }
     stderr: StdioCollector {
       waitForEnd: true
@@ -1287,17 +1308,21 @@ Item {
   // go out.
   Process {
     id: verifySource
+    property int startedGeneration: 0
     property bool launchPending: false
-    onStarted: verifySource.launchPending = false
+    onStarted: {
+      verifySource.launchPending = false
+      verifySource.startedGeneration = root.runGeneration
+    }
     onRunningChanged: {
       if (verifySource.running) return
       if (!verifySource.launchPending) return
       verifySource.launchPending = false
-      root.showSourceGone()
+      root.showSourceGone(root.runGeneration)
     }
     stdout: StdioCollector {
       waitForEnd: true
-      onStreamFinished: root.onSourceFocusVerified(text)
+      onStreamFinished: root.onSourceFocusVerified(text, verifySource.startedGeneration)
     }
   }
 
