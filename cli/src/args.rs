@@ -26,7 +26,7 @@ pub enum Command {
 
 #[derive(Debug, Parser)]
 pub struct CheckArgs {
-    /// The language the user thinks in. Omitted means none.
+    /// The language the user thinks in. Omitted uses the stored entry, then none.
     #[arg(long, value_enum)]
     pub native: Option<NativeLanguage>,
 
