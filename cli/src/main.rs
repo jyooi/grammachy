@@ -6,6 +6,7 @@ use clap::Parser;
 use grammachy::args::{CheckArgs, CheckOptions, Cli, Command};
 use grammachy::envelope::{Envelope, ErrorCode};
 use grammachy::settings::StoredSettings;
+use grammachy::setup::{Setup, SetupEnvelope};
 use grammachy::{bench, check, chunk, doctor};
 
 /// What a run prints on stdout, already rendered.
@@ -13,6 +14,7 @@ use grammachy::{bench, check, chunk, doctor};
 /// `check` and `chunk` render one JSON envelope (spec section 5.1).
 /// `bench` renders its Markdown report, and still renders the error envelope
 /// when it fails. `doctor` renders its report (spec section 10).
+/// `setup` renders its JSON envelope (spec section 10).
 struct Output {
     text: String,
     exit_code: i32,
@@ -41,6 +43,15 @@ impl From<doctor::DoctorOutput> for Output {
         Output {
             text: output.text.trim_end().to_string(),
             exit_code: output.exit_code,
+        }
+    }
+}
+
+impl From<SetupEnvelope> for Output {
+    fn from(envelope: SetupEnvelope) -> Self {
+        Output {
+            text: envelope.to_json(),
+            exit_code: envelope.exit_code(),
         }
     }
 }
@@ -114,6 +125,25 @@ fn run() -> Option<Output> {
             );
             let facts = doctor::Facts::collect(&options);
             Some(doctor::run(&facts, options.engine, args.json).into())
+        }
+        // Setup reads no stdin: the engine and the model name come from the
+        // Settings entry, the same source a Check uses (spec section 7).
+        Command::Setup(args) => {
+            let defaults = CheckOptions::default();
+            let stored = StoredSettings::load();
+            let setup = match Setup::from_env() {
+                Ok(setup) => setup,
+                Err(message) => return Some(SetupEnvelope::error(message).into()),
+            };
+            let envelope = if args.remove {
+                setup.remove()
+            } else {
+                setup.install(
+                    stored.engine.unwrap_or(defaults.engine),
+                    &stored.openai_model.unwrap_or(defaults.openai_model),
+                )
+            };
+            Some(envelope.into())
         }
     }
 }

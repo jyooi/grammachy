@@ -47,6 +47,16 @@ cp target/release/grammachy ../bin/grammachy
 
 `bin/grammachy` is gitignored, so a fresh clone never carries a stale binary.
 
+Then write the hotkeys and the menu entry (spec section 10):
+
+```bash
+../bin/grammachy setup
+```
+
+The command edits `~/.config/hypr/bindings.lua` and the Omarchy menu extension.
+It then reloads Hyprland.
+Press SUPER + G on a selection to confirm the hotkeys.
+
 ## 3. Enable it and put the button on the bar
 
 ```bash
@@ -256,7 +266,10 @@ cargo test
 
 ## 13. Removing it
 
+Remove the hotkeys and the menu entry first (spec section 10):
+
 ```bash
+~/.config/omarchy/plugins/io.github.jyooi.grammachy/bin/grammachy setup --remove
 omarchy plugin disable io.github.jyooi.grammachy
 rm -rf ~/.config/omarchy/plugins/io.github.jyooi.grammachy
 omarchy-shell shell rescanPlugins
