@@ -1,11 +1,11 @@
 // The error cards of spec section 8.
 //
-// Loaded twice: by Overlay.qml through `import "errors.js" as Errors`, and by
-// `errors.test.js` under node. Nothing here may touch a QML or a node API,
-// because each side only has one of them.
+// Loaded twice: by QML as `Errors`, and by `errors.test.js` under node.
+// Nothing here may touch a QML or a node API, because each side only has one
+// of them.
 //
 // This file owns the whole route from one run of `grammachy check` to the card
-// the popup draws: `errorOf` reads the stdout of spec section 5.1, and `card`
+// the popup draws: `readCheck` reads the stdout of spec section 5.1, and `card`
 // turns a code into the title, the body, and the buttons of section 8. Keeping
 // both halves here is what lets a node test run a stub binary and read the
 // card back, which no test of the QML could do.
