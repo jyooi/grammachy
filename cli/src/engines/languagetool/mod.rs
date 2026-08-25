@@ -255,6 +255,7 @@ mod tests {
             native,
             target: TargetEnglish::EnUs,
             engine: EngineSlug::Languagetool,
+            ..CheckOptions::default()
         }
     }
 

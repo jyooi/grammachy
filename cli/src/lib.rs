@@ -6,4 +6,5 @@ pub mod chunk;
 pub mod engine;
 pub mod engines;
 pub mod envelope;
+pub mod settings;
 pub mod text;

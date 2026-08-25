@@ -2,6 +2,8 @@
 
 use clap::{Parser, Subcommand, ValueEnum};
 
+use crate::settings::{self, StoredSettings};
+
 #[derive(Debug, Parser)]
 #[command(
     name = "grammachy",
@@ -63,6 +65,22 @@ pub enum EngineSlug {
 }
 
 impl NativeLanguage {
+    /// The stored value of `nativeLanguage`, or `None` for anything the spec
+    /// does not list, which then reads as the default (spec section 7).
+    pub fn from_stored(value: &str) -> Option<Self> {
+        match value {
+            "none" => Some(NativeLanguage::None),
+            "zh" => Some(NativeLanguage::Zh),
+            "ms" => Some(NativeLanguage::Ms),
+            "es" => Some(NativeLanguage::Es),
+            "fr" => Some(NativeLanguage::Fr),
+            "de" => Some(NativeLanguage::De),
+            "pt" => Some(NativeLanguage::Pt),
+            "ja" => Some(NativeLanguage::Ja),
+            _ => None,
+        }
+    }
+
     pub fn as_str(self) -> &'static str {
         match self {
             NativeLanguage::None => "none",
@@ -78,6 +96,14 @@ impl NativeLanguage {
 }
 
 impl TargetEnglish {
+    /// The stored value of `targetEnglish`, or `None` for anything else.
+    pub fn from_stored(value: &str) -> Option<Self> {
+        match value {
+            "en-US" => Some(TargetEnglish::EnUs),
+            _ => None,
+        }
+    }
+
     pub fn as_str(self) -> &'static str {
         match self {
             TargetEnglish::EnUs => "en-US",
@@ -86,6 +112,17 @@ impl TargetEnglish {
 }
 
 impl EngineSlug {
+    /// The stored value of `engine`, or `None` for a slug with no adapter in
+    /// the spec, such as the reserved `gector`.
+    pub fn from_stored(value: &str) -> Option<Self> {
+        match value {
+            "languagetool" => Some(EngineSlug::Languagetool),
+            "openai" => Some(EngineSlug::Openai),
+            "harper" => Some(EngineSlug::Harper),
+            _ => None,
+        }
+    }
+
     pub fn as_str(self) -> &'static str {
         match self {
             EngineSlug::Languagetool => "languagetool",
@@ -98,14 +135,17 @@ impl EngineSlug {
 /// What one Check runs with.
 ///
 /// Flags win over the Settings entry in `shell.json`, which wins over these
-/// built-in defaults (spec section 7). Only the flag layer exists so far; the
-/// `shell.json` layer arrives with the settings ticket and fills the gap
-/// between [`CheckArgs`] and this type.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// built-in defaults (spec section 7).
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CheckOptions {
     pub native: NativeLanguage,
     pub target: TargetEnglish,
     pub engine: EngineSlug,
+    /// The chat endpoint of the `openai` engine. Its host must be loopback
+    /// (spec section 4); the adapter, not this layer, enforces that.
+    pub openai_base_url: String,
+    pub openai_model: String,
+    pub openai_api_key: String,
 }
 
 impl Default for CheckOptions {
@@ -114,18 +154,34 @@ impl Default for CheckOptions {
             native: NativeLanguage::None,
             target: TargetEnglish::EnUs,
             engine: EngineSlug::Languagetool,
+            openai_base_url: settings::DEFAULT_OPENAI_BASE_URL.to_string(),
+            openai_model: settings::DEFAULT_OPENAI_MODEL.to_string(),
+            openai_api_key: String::new(),
         }
     }
 }
 
 impl CheckOptions {
-    /// Layer the flags over the built-in defaults.
-    pub fn resolve(args: &CheckArgs) -> Self {
+    /// Layer the flags over the stored Settings over the built-in defaults.
+    ///
+    /// `shell.json` holds no key for a flag the spec does not define, so the
+    /// two OpenAI text fields and the API key resolve from the file and the
+    /// defaults only.
+    pub fn resolve(args: &CheckArgs, stored: &StoredSettings) -> Self {
         let defaults = CheckOptions::default();
         CheckOptions {
-            native: args.native.unwrap_or(defaults.native),
-            target: args.target.unwrap_or(defaults.target),
-            engine: args.engine.unwrap_or(defaults.engine),
+            native: args.native.or(stored.native).unwrap_or(defaults.native),
+            target: args.target.or(stored.target).unwrap_or(defaults.target),
+            engine: args.engine.or(stored.engine).unwrap_or(defaults.engine),
+            openai_base_url: stored
+                .openai_base_url
+                .clone()
+                .unwrap_or(defaults.openai_base_url),
+            openai_model: stored.openai_model.clone().unwrap_or(defaults.openai_model),
+            openai_api_key: stored
+                .openai_api_key
+                .clone()
+                .unwrap_or(defaults.openai_api_key),
         }
     }
 }
