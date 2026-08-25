@@ -9,6 +9,7 @@ import "ui/settings.js" as Settings
 import "ui/keymap.js" as Keymap
 import "ui/splice.js" as Splice
 import "ui/format.js" as Format
+import "ui/anchor.js" as Anchor
 
 // The overlay entry point. `open(payload)` routes a summon to a surface, spec
 // section 2. Quick mode captures the Selection (section 3), runs one Check
@@ -38,6 +39,10 @@ import "ui/format.js" as Format
 // on the same Selection with no second capture, Settings flips the same card
 // to the Settings view, Open Compose opens the Compose surface, and Setup
 // still lands on a notice until that card arrives.
+//
+// Capture also records which window the Selection came from, and that one
+// fact answers two questions the popup used to guess at: where the card opens,
+// and where Replace types. `ui/anchor.js` owns both answers.
 Item {
   id: root
 
@@ -118,6 +123,12 @@ Item {
   // setting, until an envelope says which engine actually ran.
   readonly property string runningEngine: root.engine.length > 0
     ? root.engine : String(root.setting("engine"))
+
+  // The window that held the Selection, read from the compositor at capture
+  // time and kept until the next summon: `{ address, x, y, width, height }`
+  // in the global layout, or null when nothing was focused. The quick popup
+  // opens beside it and Replace types into it, so both stop guessing.
+  property var sourceWindow: null
 
   // The clipboard the Ctrl + C fallback borrowed, put back once the Selection
   // is in hand. Spec section 3.
@@ -238,24 +249,30 @@ Item {
   // still in flight, and no Check is on screen. The check view is what a
   // summon shows, spec section 7, and the Draft is what it never touches.
   function resetRun() {
+    sourceProbe.launchPending = false
+    focusSource.launchPending = false
+    verifySource.launchPending = false
+    checkProcess.launchPending = false
+    chunkProcess.launchPending = false
+    copyProcess.pasteAfter = false
+    // Whatever answers next belongs to an older run than this one.
+    root.runGeneration += 1
     settleTimer.stop()
     pasteTimer.stop()
     chunkTicker.stop()
+    sourceProbe.running = false
+    focusSource.running = false
+    verifySource.running = false
     primaryPaste.running = false
     savedClipboard.running = false
     copyKeystroke.running = false
     fallbackPaste.running = false
-    checkProcess.launchPending = false
     checkProcess.restartQueued = false
     checkProcess.running = false
-    chunkProcess.launchPending = false
     chunkProcess.restartQueued = false
     chunkProcess.running = false
     doctorProcess.restartQueued = false
     doctorProcess.running = false
-    copyProcess.pasteAfter = false
-    // Whatever answers next belongs to an older run than this one.
-    root.runGeneration += 1
     root.settingsOpen = false
     root.selectionText = ""
     root.truncated = false
@@ -269,6 +286,7 @@ Item {
     root.errorCard = null
     root.errorDiagnosis = ""
     root.pendingDraft = ""
+    root.sourceWindow = null
     root.clearChunkRun()
     // End the last borrow.
     if (root.clipboardBorrowed && !restoreClipboard.running)
@@ -334,11 +352,30 @@ Item {
 
   // ---------------------------------------------------------------- capture
 
+  // The popup window is still hidden here, so the compositor still calls the
+  // window the user selected in the active one. That is the only moment it can
+  // be read, which is why the capture waits on the answer rather than racing
+  // it: a card that opened first would open at the wrong place and then jump.
   function startQuick() {
     root.resetRun()
     root.surface = "quick"
     root.phase = "capturing"
     root.capturedText = ""
+    root.probeSourceWindow()
+  }
+
+  function probeSourceWindow() {
+    sourceProbe.command = Anchor.activeWindowCommand()
+    sourceProbe.launchPending = true
+    sourceProbe.running = true
+  }
+
+  // With no answer there is no source window, and every step after this one
+  // already knows what to do without one: the card takes the bar corner and
+  // Replace types wherever the keyboard went.
+  function onSourceProbed(text, generation) {
+    if (!root.isLive(generation)) return
+    root.sourceWindow = Anchor.readActiveWindow(text)
     root.beginPrimaryPaste()
   }
 
@@ -845,9 +882,14 @@ Item {
   // ------------------------------------------------------------------ apply
   //
   // Spec section 6. `autoReplace` off copies the Corrected text and stops.
-  // `autoReplace` on copies it, closes the popup so the focus goes back to the
-  // source window, and only then pastes over the Selection that is still
-  // highlighted there. The Corrected text stays in the clipboard either way.
+  // `autoReplace` on copies it, closes the popup, asks the compositor for the
+  // window the Selection came from, and only then pastes over the Selection
+  // that is still highlighted there. The Corrected text stays in the clipboard
+  // either way.
+  //
+  // The ask is the whole point: closing the popup hands the keyboard to
+  // whatever the compositor picks, which is not the source window whenever
+  // another window sits under the card. A paste without the ask lands there.
 
   function correctedText() {
     return Splice.correctedText(root.selectionText, root.issues, root.decisions)
@@ -874,10 +916,61 @@ Item {
 
   function runCopy(pasteAfter) {
     copyProcess.pasteAfter = pasteAfter
+    copyProcess.generation = root.runGeneration
     copyProcess.text = root.correctedText()
     copyProcess.stdinEnabled = true
     copyProcess.running = true
     root.applied = true
+  }
+
+  // Step one of the Replace: ask for the source window by address. With no
+  // address there is nothing to ask for, so the paste goes out as it always
+  // did rather than being refused over a window nobody recorded.
+  function focusSourceWindow(generation) {
+    if (!root.isLive(generation)) return
+    var address = Anchor.windowAddress(root.sourceWindow)
+    if (address.length === 0) {
+      root.launchPasteKeystroke(generation)
+      return
+    }
+    focusSource.command = Anchor.focusCommand(address)
+    focusSource.launchPending = true
+    focusSource.generation = root.runGeneration
+    focusSource.running = true
+  }
+
+  // Step two: the dispatch exits 0 for a window that is gone, so the only
+  // honest answer comes from asking the compositor who holds the keyboard now.
+  function verifySourceFocus(generation) {
+    if (!root.isLive(generation)) return
+    verifySource.command = Anchor.activeWindowCommand()
+    verifySource.launchPending = true
+    verifySource.generation = generation
+    verifySource.running = true
+  }
+
+  function onSourceFocusVerified(text, generation) {
+    if (!root.isLive(generation)) return
+    if (Anchor.isFocused(text, Anchor.windowAddress(root.sourceWindow))) {
+      root.launchPasteKeystroke(generation)
+      return
+    }
+    root.showSourceGone(generation)
+  }
+
+  // The source window is gone, so there is nothing to replace. Nothing is
+  // typed anywhere, and the card comes back to say where the text went.
+  function showSourceGone(generation) {
+    if (!root.isLive(generation)) return
+    root.opened = true
+    root.surface = "quick"
+    root.settingsOpen = false
+    root.showNotice(Anchor.SOURCE_GONE_TITLE, Anchor.SOURCE_GONE_BODY, Anchor.SOURCE_GONE_META)
+  }
+
+  function launchPasteKeystroke(generation) {
+    if (!root.isLive(generation)) return
+    pasteKeystroke.running = true
   }
 
   // ------------------------------------------------------------------- keys
@@ -934,6 +1027,30 @@ Item {
   }
 
   // --------------------------------------------------------------- processes
+
+  // Which window the Selection is being taken from, spec section 3. It runs
+  // before the capture, because the popup window is what would take that
+  // answer away. `launchPending` is what a missing `hyprctl` falls through:
+  // the capture has to go on either way.
+  Process {
+    id: sourceProbe
+    property int startedGeneration: 0
+    property bool launchPending: false
+    onStarted: {
+      sourceProbe.launchPending = false
+      sourceProbe.startedGeneration = root.runGeneration
+    }
+    onRunningChanged: {
+      if (sourceProbe.running) return
+      if (!sourceProbe.launchPending) return
+      sourceProbe.launchPending = false
+      root.onSourceProbed("", root.runGeneration)
+    }
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root.onSourceProbed(text, sourceProbe.startedGeneration)
+    }
+  }
 
   Process {
     id: primaryPaste
@@ -1128,6 +1245,7 @@ Item {
   Process {
     id: copyProcess
     property string text: ""
+    property int generation: 0
     // Replace the Selection once the clipboard holds the Corrected text.
     property bool pasteAfter: false
     command: ["wl-copy"]
@@ -1138,20 +1256,70 @@ Item {
     onExited: {
       if (!copyProcess.pasteAfter) return
       copyProcess.pasteAfter = false
+      if (!root.isLive(copyProcess.generation)) return
       // wl-copy has claimed the selection by now, so the paste will find it.
       root.close()
+      pasteTimer.generation = copyProcess.generation
       pasteTimer.restart()
     }
   }
 
-  // The compositor needs a moment to give the keyboard back to the source
-  // window after the layer-shell surface goes away. The same 150 ms the
-  // Ctrl + C capture waits, for the same reason.
+  // The compositor needs a moment to take the layer-shell surface down before
+  // it will move the keyboard anywhere. The same 150 ms the Ctrl + C capture
+  // waits, for the same reason.
   Timer {
     id: pasteTimer
+    property int generation: 0
     interval: 150
     repeat: false
-    onTriggered: pasteKeystroke.running = true
+    onTriggered: {
+      if (!root.isLive(pasteTimer.generation)) return
+      root.focusSourceWindow(pasteTimer.generation)
+    }
+  }
+
+  // `hyprctl dispatch` for the source window. It answers 0 whether or not the
+  // window is still there, so nothing is typed on its word alone.
+  Process {
+    id: focusSource
+    property int generation: 0
+    property bool launchPending: false
+    onStarted: focusSource.launchPending = false
+    onExited: {
+      if (focusSource.launchPending) return
+      root.verifySourceFocus(focusSource.generation)
+    }
+    onRunningChanged: {
+      if (focusSource.running) return
+      if (!focusSource.launchPending) return
+      focusSource.launchPending = false
+      // No `hyprctl` to ask, so the source window cannot be reached and the
+      // Corrected text stays on the clipboard rather than landing anywhere.
+      root.showSourceGone(focusSource.generation)
+    }
+    stderr: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: if (text.length > 0) console.warn("grammachy focus:", text)
+    }
+  }
+
+  // Who holds the keyboard now. This answer, and only this one, lets the paste
+  // go out.
+  Process {
+    id: verifySource
+    property int generation: 0
+    property bool launchPending: false
+    onStarted: verifySource.launchPending = false
+    onRunningChanged: {
+      if (verifySource.running) return
+      if (!verifySource.launchPending) return
+      verifySource.launchPending = false
+      root.showSourceGone(verifySource.generation)
+    }
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root.onSourceFocusVerified(text, verifySource.generation)
+    }
   }
 
   Process {
@@ -1216,13 +1384,28 @@ Item {
 
         visible: root.surface === "quick"
 
-        // The bar widget sits on the trailing edge, so the card hangs from the
-        // same corner, under the bar. The overlay cannot see the widget's own
-        // position; the bar's edge and size are what it does know.
-        x: root.barPosition === "left" ? root.gap + root.barSize
-          : parent.width - card.width - root.gap - (root.barPosition === "right" ? root.barSize : 0)
-        y: root.barPosition === "bottom" ? parent.height - card.height - root.gap - root.barSize
-          : root.gap + (root.barPosition === "top" ? root.barSize : 0)
+        // The card opens beside the window the Selection came from, so it is
+        // near the text it is about rather than in a corner of the screen.
+        // `ui/anchor.js` owns that arithmetic, including the bar corner it
+        // falls back to when no window on this monitor held the Selection.
+        //
+        // Hyprland reports a window in the global layout and this surface
+        // covers one monitor of it, so the surface's own origin is what turns
+        // the one into the other.
+        readonly property var placement: Anchor.placeCard({
+          window: root.sourceWindow,
+          origin: {
+            x: panel.screen ? panel.screen.x : 0,
+            y: panel.screen ? panel.screen.y : 0
+          },
+          bounds: { width: parent.width, height: parent.height },
+          card: { width: card.width, height: card.height },
+          bar: { position: root.barPosition, size: root.barSize },
+          gap: root.gap
+        })
+
+        x: card.placement.x
+        y: card.placement.y
 
         cardWidth: Math.min(Style.space(680), parent.width - root.gap * 2)
         maxCardHeight: parent.height - root.barSize - root.gap * 2

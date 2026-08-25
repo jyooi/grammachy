@@ -32,7 +32,7 @@ ln -s /path/to/grammachy ~/.config/omarchy/plugins/io.github.jyooi.grammachy
 ```
 
 The link works, but the shell's file watcher does not follow it.
-After every edit, force the reload by hand with the command in step 4.
+After every QML edit, restart the shell as step 4 says.
 
 ## 2. Build the companion binary
 
@@ -72,8 +72,17 @@ Move it with `omarchy bar move io.github.jyooi.grammachy --section right`.
 
 ## 4. Reload after an edit
 
-A saved file under `~/.config/omarchy/plugins/` reloads by itself.
-Force it when the plugin folder is a link, or when a reload does not seem to happen:
+A saved file under `~/.config/omarchy/plugins/` reloads by itself when the folder is a real clone.
+A plugin folder that is a symlink does not.
+The watcher does not follow the link.
+`omarchy-shell shell rescanPlugins` leaves an already loaded overlay on the code from the first load.
+After a QML edit on a symlink, restart the shell:
+
+```bash
+omarchy restart shell
+```
+
+Use a rescan only when the shell must discover a new plugin:
 
 ```bash
 omarchy-shell shell rescanPlugins
@@ -84,12 +93,17 @@ Read them with `journalctl --user -f` or from the terminal that started the shel
 
 ## 5. Smoke item 1: a terminal primary selection
 
-1. Open a terminal and print a sentence with a mistake, for example `echo "I has two book."`.
-2. Highlight the sentence with the mouse.
-   The highlight alone is the primary selection; no copy is needed.
-3. Click the `G` button on the bar.
+Run this item with **two windows side by side**, because one window cannot tell a card that opens beside the selection from a card that always opens in the same corner.
 
-Expected: the popup opens under the bar on the trailing edge.
+1. Open two terminals on an empty workspace so they tile into a left half and a right half.
+   The right one only has to sit under the top-right corner of the screen; nothing is done in it.
+2. In the **left** terminal, print a sentence with a mistake, for example `echo "I has two book."`.
+3. Highlight the sentence with the mouse.
+   The highlight alone is the primary selection; no copy is needed.
+4. Click the `G` button on the bar.
+
+Expected: the popup opens beside the **left** terminal, at its top edge, on its trailing side, and not in the top-right corner of the screen.
+It never runs off the screen: its trailing edge stays inside the monitor and its top edge stays under the bar.
 The whole sentence shows, `has` and `book` carry a solid underline, and the hero reads `2 issues, 0 accepted, languagetool, <n> ms`.
 Accept moves the mark to green and shows the Fix in place.
 Skip dims the mark and drops its underline.
@@ -111,6 +125,17 @@ Run the whole key map of spec section 6 on the same card:
 | Esc | Close the popup |
 
 Ctrl + C and Ctrl + Enter stay off until one Fix is accepted, the same as the Apply button.
+
+Finish the item on the placement, which is the half two windows are here for (spec sections 3 and 6):
+
+- **Every bar position.** Move the bar with `omarchy bar position bottom`, then `left`, `right`, and back to `top`, running the item once at each.
+  The card follows the source window every time and never lands under the bar or off an edge.
+- **A window against the trailing edge.** Select in the **right** terminal instead and click `G`.
+  The card opens on that window's leading side, because the trailing side has no room.
+- **A maximized window.** Make the source terminal fullscreen with SUPER + F and run the item again.
+  The card sits inside the window, held to its trailing edge.
+- **No source window.** Clear the selection, click the desktop background so no window is focused, and click `G`.
+  The `empty_selection` card opens in the bar widget's own corner, which is the fallback.
 
 ## 6. Smoke item 2: an Electron text field
 
@@ -346,25 +371,34 @@ Three more Settings checks belong to the same session:
 
 ## 12. Smoke item 8: auto-replace in a terminal and a browser field
 
-Auto-replace copies the Corrected text, closes the popup, and pastes over the still-highlighted Selection.
+Auto-replace copies the Corrected text, closes the popup, asks the compositor for the source window, and pastes over the still-highlighted Selection there.
 It only works while the source window still holds that highlight.
 
-1. Turn the toggle on: click `Auto-replace` in the popup hero.
-   The Apply button then reads `Replace selection` instead of `Copy corrected text`.
-2. In a terminal, type a sentence with a mistake at a shell prompt, for example `echo I has two book.`, and select the text with the mouse.
-   Do not press Enter.
-3. Click the `G` button, accept one Fix, then press `Replace selection` or Ctrl + Enter.
+Run this item with **two windows side by side**, for the same reason smoke item 1 does: one window cannot tell a paste that finds the source window from a paste that lands wherever the keyboard went.
 
-Expected: the popup closes, and the terminal line becomes the corrected sentence.
+1. Open two terminals on an empty workspace so they tile into a left half and a right half.
+   In the **right** one, run `cat` and leave it waiting; anything that lands in the wrong window shows up there.
+2. Turn the toggle on: click `Auto-replace` in the popup hero.
+   The Apply button then reads `Replace selection` instead of `Copy corrected text`.
+3. In the **left** terminal, type a sentence with a mistake at a shell prompt, for example `echo I has two book.`, and select the text with the mouse.
+   Do not press Enter.
+4. Click the `G` button, accept one Fix, then press `Replace selection` or Ctrl + Enter.
+
+Expected: the popup closes, and the **left** terminal line becomes the corrected sentence.
+The right terminal shows nothing at all, even though it is the window under the top-right corner of the screen.
 The button state reads `Replaced`.
 The Corrected text stays in the clipboard, so a further Ctrl + Shift + V pastes it again.
 
-4. Repeat in a browser text field, for example the search box of any page.
-   Type the sentence, select it with the mouse, then run the same steps.
+5. Repeat in a browser text field, for example the search box of any page, with the second terminal still waiting beside it.
 
-Expected: the same replacement in the field.
+Expected: the same replacement in the field, and still nothing in the terminal.
 
-If nothing pastes, the source window lost the highlight before the paste landed.
+6. The source window closes. Run steps 3 and 4 again, but close the left terminal with Ctrl + D while the popup is still on screen, then press `Replace selection`.
+
+Expected: nothing is typed anywhere, and the card comes back reading `The source window closed` over a line saying the corrected text is on the clipboard.
+Paste it somewhere to confirm it is.
+
+If nothing pastes and no card comes back, the source window lost the highlight before the paste landed.
 That is the documented limit of spec section 6, and the hint under the toggle says so.
 
 ## 13. Smoke item 9: settings persist across a shell restart
@@ -496,7 +530,7 @@ The same three plugin checks CI runs, against the shell installed on this machin
 ```bash
 for file in $(find . -name '*.qml' | sort); do qmllint -I /usr/share/omarchy/shell "$file" || echo "FAILED $file"; done
 omarchy-plugin-validate .
-node --test ui/splice.test.js ui/tokens.test.js ui/settings.test.js ui/keymap.test.js ui/errors.test.js ui/format.test.js
+node --test ui/splice.test.js ui/tokens.test.js ui/settings.test.js ui/keymap.test.js ui/errors.test.js ui/format.test.js ui/anchor.test.js
 ```
 
 The `qmllint` on `PATH` reports a syntax error through its exit status alone and prints nothing.

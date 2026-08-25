@@ -69,11 +69,12 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 - `manifest.json` version must equal the crate version; `cli/tests/manifest.rs` enforces that.
   Both size limits live twice, in `check::MAX_UTF16_UNITS` and `chunk::MAX_DRAFT_UTF16_UNITS` and in the QML that draws the too-long card and refuses an oversize Draft; `cli/tests/overlay_limit.rs` keeps the copies equal.
 - The Omarchy plugin is the repo root: `manifest.json`, `BarWidget.qml`, `Overlay.qml`, and `ui/`.
-  `Overlay.qml` owns capture, the CLI run, the key map dispatch, the Apply path, the review state, the Draft, and the settings storage; every file in `ui/` only draws.
+  `Overlay.qml` owns capture, the CLI run, the key map dispatch, the Apply path, the review state, the Draft, and the settings storage.
+  Every QML file in `ui/` only draws.
   `root.surface` is `"quick"` or `"compose"` and is what routes a summon (spec section 2); both surfaces share one `phase`, one Check, one review state, and one key map, so a change to either belongs in `Overlay.qml` rather than in a card.
   `Overlay.keyMode` is where a new `phase` has to be named, or its card silently inherits the review keys.
   `ui/QuickCard.qml` and `ui/ComposeCard.qml` are the two surfaces; `ui/CardHero.qml`, `ui/Inspector.qml`, `ui/ReviewCounts.qml`, `ui/MarkedText.qml`, `ui/ErrorCard.qml`, and `ui/SettingsView.qml` are shared parts, so a change to the hero, the inspector, or the counts reaches both at once.
-  `ui/splice.js`, `ui/tokens.js`, `ui/keymap.js`, `ui/format.js`, `ui/settings.js`, and `ui/errors.js` are loaded by QML and by node, so they may use neither's API.
+  `ui/splice.js`, `ui/tokens.js`, `ui/keymap.js`, `ui/format.js`, `ui/settings.js`, `ui/errors.js`, and `ui/anchor.js` are loaded by QML and by node, so they may use neither's API.
   Their `*.test.js` siblings run under `node --test`; add a new one to `.github/workflows/ci.yml` and to `docs/dev.md`.
   `keymap.js` takes the Qt key codes as an argument, which is what lets node run it, and a mode string that says which card the press landed on.
   Anything worth a test belongs in one of those rather than in QML, because the repo has no QML test harness: `Overlay.qml` cannot be instantiated outside the shell's plugin loader, so a standalone Quickshell config hangs on it.
@@ -81,7 +82,14 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   Offscreen still renders, so `card.grabToImage(function (r) { r.saveToFile(path) })` on a `Timer` that steps a phase and quits at the end gives one PNG per state, which is the cheapest way to actually look at a card.
   `QuickCard.maxCardHeight` is the whole bound of spec section 6; the card measures its own chrome and gives the rest to the scrolling text, so no part of the layout carries a guessed reserve.
   `docs/dev.md` is the only route onto a live desktop, including the manual smoke items and the Compose walkthrough.
+  A plugin folder that is a symlink reloads as `docs/dev.md` step 4 says.
   A leaf card does run outside the shell: a scratch Quickshell config whose root directory holds `Commons` and `Ui` symlinks into `/usr/share/omarchy/shell` plus a `ui` symlink into the repo can instantiate `ComposeCard` or `QuickCard` in a `FloatingWindow`, which is the fastest way to see a layout change without installing the plugin.
+- `ui/anchor.js` owns both answers the source window of spec section 3 gives: where the quick popup opens (`placeCard`) and where Replace types (`focusCommand`, `isFocused`).
+  `Overlay.sourceWindow` is that one recorded fact, read by `hyprctl activewindow -j` before the capture, because the popup window itself takes the answer away.
+  Omarchy answers `configProvider: lua`, so `hyprctl dispatch` reads Lua: the focus is `hl.dsp.focus({ window = "address:0x..." })` and never the `focuswindow address:<addr>` line of the `.conf` provider.
+  That dispatch exits 0 for a window that is gone, so the `activewindow` check, not the exit status, is what lets the keystroke out.
+  `hyprctl repl` is how to find any other dispatcher's Lua name and arguments.
+  `cli/tests/overlay_anchor.rs` keeps `Overlay.qml` on those steps and in that order.
 - `ui/errors.js` owns the whole route from the stdout of one Check to the card of spec section 8: `readCheck` reads the envelope and `card` builds the title, body, and buttons, so a node test can run a stub binary and read the card back.
   It carries its own copy of the per-engine timeout, because a Check that never answered leaves the shell nothing to read it from; `cli/tests/overlay_errors.rs` keeps that copy, the code list, and the no-re-capture promise of Retry in step.
   A test may never reach a real engine or touch the LanguageTool unit the live shell uses; a stub binary is the seam.
