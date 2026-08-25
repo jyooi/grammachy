@@ -35,8 +35,11 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   `block.rs` owns the marked block both configuration files carry and the rule that makes `--remove` byte exact: the region always carries the newline on each side, so insertion and removal are the same substring.
   `bindings.rs` holds the two `hl.unbind` plus `o.bind` pairs of spec section 2 and the `hyprctl reload`; the file is `bindings.lua`, because Omarchy answers `configProvider: lua` and never reads the `.conf` files beside it.
   `menu.rs` holds the `grammachy.compose` row, which names `"parent": "root"` because nothing else creates a `grammachy` submenu.
-  `model.rs` downloads the weights with `curl`, the tool `bin/bootstrap.sh` uses, so TLS stays out of the binary; hardware tiers only name the llama.cpp backend package, because the weights file is the same on both (spec section 4).
-  Every path and both side effects are seams: `GRAMMACHY_BINDINGS_LUA`, `GRAMMACHY_MENU_JSONC`, `GRAMMACHY_MODELS_DIR`, `GRAMMACHY_HYPRCTL_RELOAD=never`, `GRAMMACHY_MODEL_BASE_URL`, plus the `Reloader` and `Downloader` values.
+  `model.rs` downloads the weights with `curl`, the tool `bin/bootstrap.sh` uses, so TLS stays out of the binary.
+  The catalogue file is `unsloth/gemma-4-E4B-it-GGUF` and is pinned by sha256.
+  A failed model step still writes the hotkeys and menu.
+  Hardware tiers only name the llama.cpp backend package, because the weights file is the same on both (spec section 4).
+  Every path and both side effects are seams: `GRAMMACHY_BINDINGS_LUA`, `GRAMMACHY_MENU_JSONC`, `GRAMMACHY_MODELS_DIR`, `GRAMMACHY_HYPRCTL_RELOAD=never`, `GRAMMACHY_MODEL_BASE_URL`, `GRAMMACHY_MODEL_SHA256`, plus the `Reloader` and `Downloader` values.
   No test may touch a real config file, a real compositor, or the real weights host.
 - Settings resolve in `cli/src/settings.rs`: flags, then the plugin entry in `$HOME/.config/omarchy/shell.json`, then the defaults of spec section 7.
   The product path is that HOME path only. The CLI does not read `$XDG_CONFIG_HOME`.

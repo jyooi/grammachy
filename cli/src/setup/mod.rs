@@ -121,14 +121,10 @@ impl Setup {
         })
     }
 
-    /// Steps 1 to 3 of spec section 10, in that order.
+    /// Hotkeys and the menu first, then the model. A failed download still
+    /// leaves the bindings and the compose row in place.
     pub fn install(&self, engine: EngineSlug, model_name: &str) -> SetupEnvelope {
         let mut steps = Vec::with_capacity(4);
-
-        match self.model_step(engine, model_name) {
-            Ok(step) => steps.push(step),
-            Err(message) => return SetupEnvelope::error(message),
-        }
 
         match bindings::install(&self.bindings_path) {
             Ok(changed) => steps.push(Step::new(
@@ -153,6 +149,11 @@ impl Setup {
                 state_of(changed),
                 self.menu_path.display().to_string(),
             )),
+            Err(message) => return SetupEnvelope::error(message),
+        }
+
+        match self.model_step(engine, model_name) {
+            Ok(step) => steps.push(step),
             Err(message) => return SetupEnvelope::error(message),
         }
 

@@ -77,6 +77,7 @@ fn the_weights_arrive_and_a_second_run_skips_them() {
     // Safety: this test binary holds one test, so nothing else reads the
     // environment while it is changed.
     std::env::set_var(model::BASE_URL_ENV, &base);
+    std::env::set_var(model::SHA256_ENV, model::sha256_hex(FAKE_WEIGHTS));
 
     let directory = scratch("weights");
     let download = model::downloader();

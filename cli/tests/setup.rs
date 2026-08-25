@@ -38,6 +38,10 @@ impl Home {
         std::fs::write(&bindings, BINDINGS_FIXTURE).expect("the bindings copy is written");
         std::fs::write(&menu, MENU_FIXTURE).expect("the menu copy is written");
 
+        // Safety: every openai download in this binary writes the same fake
+        // bytes, so the override is the same value in every test.
+        std::env::set_var(model::SHA256_ENV, model::sha256_hex(b"fake weights"));
+
         Home {
             models: directory.join("models"),
             directory,
@@ -218,8 +222,8 @@ fn a_model_the_catalogue_does_not_know_is_an_error() {
 
     assert_eq!(envelope.exit_code(), 1);
     assert_eq!(home.downloads.load(Ordering::SeqCst), 0);
-    // The hotkeys are not written when the run stops on step 1.
-    assert_eq!(home.bindings_text(), BINDINGS_FIXTURE);
+    assert!(home.bindings_text().contains("-- grammachy begin"));
+    assert!(home.menu_text().contains("grammachy.compose"));
 }
 
 #[test]
@@ -255,6 +259,27 @@ fn a_half_finished_download_never_becomes_the_model() {
         .models
         .join("gemma-4-E4B-it-Q4_K_M.gguf.part")
         .is_file());
+    assert!(home.bindings_text().contains("-- grammachy begin"));
+    assert!(home.menu_text().contains("grammachy.compose"));
+}
+
+#[test]
+fn a_download_failure_still_writes_hotkeys_and_menu() {
+    let home = Home::new("download-failure-keeps-config");
+    let setup = Setup {
+        bindings_path: home.bindings.clone(),
+        menu_path: home.menu.clone(),
+        models_directory: home.models.clone(),
+        reload: Box::new(|| Ok(())),
+        download: Box::new(|_url, _path| Err("the host refused".to_string())),
+    };
+
+    let envelope = setup.install(EngineSlug::Openai, "gemma-4-e4b-it");
+
+    assert_eq!(envelope.exit_code(), 1);
+    assert!(home.bindings_text().contains("-- grammachy begin"));
+    assert!(home.menu_text().contains("grammachy.compose"));
+    assert!(!home.models.join("gemma-4-E4B-it-Q4_K_M.gguf").exists());
 }
 
 #[test]
