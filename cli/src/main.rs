@@ -5,6 +5,7 @@ use clap::Parser;
 
 use grammachy::args::{CheckOptions, Cli, Command};
 use grammachy::envelope::{Envelope, ErrorCode};
+use grammachy::settings::StoredSettings;
 use grammachy::{check, chunk};
 
 /// The one envelope a run prints, already rendered.
@@ -64,7 +65,7 @@ fn run() -> Option<Output> {
 
     match cli.command {
         Command::Check(args) => {
-            let options = CheckOptions::resolve(&args);
+            let options = CheckOptions::resolve(&args, &StoredSettings::load());
             let text = match read_stdin() {
                 Ok(text) => text,
                 Err(message) => return Some(bad_stdin(message)),
