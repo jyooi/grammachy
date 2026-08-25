@@ -387,7 +387,8 @@ BorderSurface {
         spacing: Style.spacing.sm
 
         Text {
-          Layout.alignment: Qt.AlignHCenter
+          Layout.fillWidth: true
+          horizontalAlignment: Text.AlignHCenter
           text: "✓"
           color: root.acceptedColor
           font.family: Style.font.family
@@ -395,7 +396,8 @@ BorderSurface {
         }
 
         Text {
-          Layout.alignment: Qt.AlignHCenter
+          Layout.fillWidth: true
+          horizontalAlignment: Text.AlignHCenter
           text: "No issues found"
           color: Color.popups.text
           font.family: Style.font.family
@@ -404,7 +406,9 @@ BorderSurface {
         }
 
         Text {
-          Layout.alignment: Qt.AlignHCenter
+          Layout.fillWidth: true
+          horizontalAlignment: Text.AlignHCenter
+          wrapMode: Text.Wrap
           text: root.sourceText.length + " characters checked, " + root.engine
             + ", " + Format.elapsed(root.elapsedMs)
           color: Color.muted

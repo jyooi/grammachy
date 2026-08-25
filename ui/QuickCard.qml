@@ -281,13 +281,15 @@ BorderSurface {
 
       ColumnLayout {
         Layout.fillWidth: true
+        Layout.maximumWidth: layout.width
         Layout.topMargin: Style.spacing.lg
         Layout.bottomMargin: Style.spacing.lg
         visible: root.showsCheck && root.isEmptyResult
         spacing: Style.spacing.sm
 
         Text {
-          Layout.alignment: Qt.AlignHCenter
+          Layout.fillWidth: true
+          horizontalAlignment: Text.AlignHCenter
           text: "✓"
           color: root.acceptedColor
           font.family: Style.font.family
@@ -295,7 +297,8 @@ BorderSurface {
         }
 
         Text {
-          Layout.alignment: Qt.AlignHCenter
+          Layout.fillWidth: true
+          horizontalAlignment: Text.AlignHCenter
           text: "No issues found"
           color: Color.popups.text
           font.family: Style.font.family
@@ -304,7 +307,9 @@ BorderSurface {
         }
 
         Text {
-          Layout.alignment: Qt.AlignHCenter
+          Layout.fillWidth: true
+          horizontalAlignment: Text.AlignHCenter
+          wrapMode: Text.Wrap
           text: root.sourceText.length + " characters checked, " + root.engine + ", " + root.elapsedMs + " ms"
           color: Color.muted
           font.family: Style.font.family
