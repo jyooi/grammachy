@@ -1,9 +1,15 @@
-//! The two hotkeys of spec section 2, written into `~/.config/hypr/bindings.conf`.
+//! The two hotkeys of spec section 2, written into `~/.config/hypr/bindings.lua`.
 //!
-//! Both lines are `bindd` because Omarchy lists every description in
-//! `omarchy menu keybindings`. The payload is single quoted so Hyprland hands
-//! the JSON to the shell unchanged; it carries no `#`, which Hyprland would
-//! read as the start of a comment.
+//! Omarchy configures Hyprland in Lua: `hyprctl systeminfo` on a current
+//! install answers `configProvider: lua`, so `hyprland.lua` is the entry point
+//! and the `.conf` files beside it are never read. The block therefore holds
+//! Lua, and it uses the two helpers that file is written around: `hl.unbind`
+//! first, because SUPER + SHIFT + G carries an Omarchy default, then `o.bind`,
+//! which is what puts the description into `omarchy menu keybindings`.
+//!
+//! The command is a Lua long bracket string, `[[...]]`, because the payload
+//! already carries both single and double quotes and a long bracket needs no
+//! escape at all.
 //!
 //! Hyprland only reads a changed file when it is told to, so `grammachy setup`
 //! runs `hyprctl reload` after writing. That call is a value here, because no
@@ -15,9 +21,9 @@ use std::process::Command;
 use crate::settings::PLUGIN_ID;
 use crate::setup::block::{self, Anchor, Block};
 
-/// Points the CLI at another `bindings.conf`. The test suite sets it, so no
+/// Points the CLI at another `bindings.lua`. The test suite sets it, so no
 /// test writes the real file. Not a user-facing setting.
-pub const PATH_ENV: &str = "GRAMMACHY_BINDINGS_CONF";
+pub const PATH_ENV: &str = "GRAMMACHY_BINDINGS_LUA";
 
 /// Keeps `setup` from reloading the compositor. Tests and CI set it to
 /// `never`. Not a user-facing setting.
@@ -40,23 +46,30 @@ pub fn path() -> Option<PathBuf> {
         }
     }
     let home = std::env::var_os("HOME").filter(|home| !home.is_empty())?;
-    Some(PathBuf::from(home).join(".config/hypr/bindings.conf"))
+    Some(PathBuf::from(home).join(".config/hypr/bindings.lua"))
 }
 
-/// The one command both hotkeys run, with the payload of spec section 2.
-fn summon(payload: &str) -> String {
-    format!("omarchy-shell shell summon {PLUGIN_ID} '{payload}'")
+/// One hotkey: the default it replaces goes first, the new binding second.
+fn binding(keys: &str, description: &str, payload: &str) -> String {
+    format!(
+        "hl.unbind(\"{keys}\")\n\
+         o.bind(\"{keys}\", \"{description}\", \
+         [[omarchy-shell shell summon {PLUGIN_ID} '{payload}']])\n"
+    )
 }
 
 /// The block spec section 10 puts between the two markers.
 pub fn block() -> Block {
-    let quick = summon(r#"{"mode":"quick"}"#);
-    let compose = summon(r#"{"mode":"compose"}"#);
     Block {
-        markers: block::HYPRLAND,
+        markers: block::LUA,
         body: format!(
-            "bindd = SUPER, G, Grammachy, exec, {quick}\n\
-             bindd = SUPER SHIFT, G, Grammachy compose, exec, {compose}\n"
+            "{}{}",
+            binding("SUPER + G", "Grammachy", r#"{"mode":"quick"}"#),
+            binding(
+                "SUPER + SHIFT + G",
+                "Grammachy compose",
+                r#"{"mode":"compose"}"#
+            ),
         ),
     }
 }
@@ -107,9 +120,9 @@ pub fn reloader_from_env() -> Reloader {
 
 /// Tell the running compositor to read its configuration again.
 ///
-/// No compositor is a fact, not a failure: `grammachy setup` runs from a
-/// terminal that may not be a Hyprland session at all, and the block is
-/// already on disk by then.
+/// No compositor is a fact rather than a failure: `grammachy setup` runs from a
+/// terminal that may not be a Hyprland session at all, and the block is already
+/// on disk by then. The caller decides what to make of the error.
 pub fn reload() -> Result<(), String> {
     let output = Command::new("hyprctl").arg("reload").output();
     match output {
@@ -127,20 +140,30 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_two_lines_are_the_ones_spec_section_2_names() {
+    fn the_two_bindings_are_the_ones_spec_section_2_names() {
         let body = block().body;
 
         assert_eq!(
             body,
-            "bindd = SUPER, G, Grammachy, exec, omarchy-shell shell summon \
-             io.github.jyooi.grammachy '{\"mode\":\"quick\"}'\n\
-             bindd = SUPER SHIFT, G, Grammachy compose, exec, omarchy-shell shell summon \
-             io.github.jyooi.grammachy '{\"mode\":\"compose\"}'\n"
+            "hl.unbind(\"SUPER + G\")\n\
+             o.bind(\"SUPER + G\", \"Grammachy\", \
+             [[omarchy-shell shell summon io.github.jyooi.grammachy '{\"mode\":\"quick\"}']])\n\
+             hl.unbind(\"SUPER + SHIFT + G\")\n\
+             o.bind(\"SUPER + SHIFT + G\", \"Grammachy compose\", \
+             [[omarchy-shell shell summon io.github.jyooi.grammachy '{\"mode\":\"compose\"}']])\n"
         );
     }
 
     #[test]
-    fn the_payload_carries_no_hyprland_comment_character() {
-        assert!(!block().body.contains('#'));
+    fn the_payload_needs_no_escape_inside_the_long_bracket() {
+        // A `]]` in the command would close the long bracket early. The two
+        // payloads carry none, and this is the guard if one ever does.
+        for line in block().body.lines().filter(|line| line.contains("[[")) {
+            let command = line
+                .split_once("[[")
+                .and_then(|(_, rest)| rest.split_once("]]"))
+                .expect("every long bracket is closed");
+            assert!(!command.0.contains("]]"), "{}", command.0);
+        }
     }
 }

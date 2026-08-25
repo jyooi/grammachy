@@ -1,7 +1,7 @@
 //! The marked block both configuration files carry.
 //!
-//! Spec section 10 fixes the shape for `bindings.conf`: everything Grammachy
-//! owns sits between `# grammachy begin` and `# grammachy end`, so a second
+//! Spec section 10 fixes the shape for `bindings.lua`: everything Grammachy
+//! owns sits between `-- grammachy begin` and `-- grammachy end`, so a second
 //! `grammachy setup` replaces the block instead of adding one, and
 //! `grammachy setup --remove` takes exactly that block out again.
 //!
@@ -26,9 +26,9 @@ pub struct Markers {
     pub indent: &'static str,
 }
 
-/// The markers of `~/.config/hypr/bindings.conf`.
-pub const HYPRLAND: Markers = Markers {
-    comment: "#",
+/// The markers of `~/.config/hypr/bindings.lua`.
+pub const LUA: Markers = Markers {
+    comment: "--",
     indent: "",
 };
 
@@ -52,7 +52,7 @@ impl Markers {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Anchor {
     /// After everything the file already holds, which is where a Hyprland
-    /// binding block belongs: the last `bindd` for a key wins.
+    /// binding block belongs: a later `o.bind` for a key wins.
     EndOfFile,
     /// Directly after the opening brace of a JSON object, so the new member
     /// never needs a comma in front of it and the members already there keep
@@ -169,20 +169,20 @@ mod tests {
 
     fn block() -> Block {
         Block {
-            markers: HYPRLAND,
-            body: "bindd = SUPER, G, Grammachy, exec, true\n".to_string(),
+            markers: LUA,
+            body: "o.bind(\"SUPER + G\", \"Grammachy\", \"true\")\n".to_string(),
         }
     }
 
     #[test]
     fn a_second_run_leaves_one_block() {
-        let original = "bindd = SUPER, RETURN, Terminal, exec, true\n";
+        let original = "o.bind(\"SUPER + RETURN\", \"Terminal\", \"true\")\n";
 
         let once = block().ensure(original, Anchor::EndOfFile).unwrap();
         let twice = block().ensure(&once, Anchor::EndOfFile).unwrap();
 
         assert_eq!(once, twice);
-        assert_eq!(twice.matches("# grammachy begin").count(), 1);
+        assert_eq!(twice.matches("-- grammachy begin").count(), 1);
     }
 
     #[test]
@@ -195,7 +195,7 @@ mod tests {
 
     #[test]
     fn a_hand_edit_inside_the_markers_is_replaced() {
-        let original = "bindd = SUPER, RETURN, Terminal, exec, true\n";
+        let original = "o.bind(\"SUPER + RETURN\", \"Terminal\", \"true\")\n";
         let with = block().ensure(original, Anchor::EndOfFile).unwrap();
         let edited = with.replace("Grammachy", "Edited");
 
@@ -231,8 +231,8 @@ mod tests {
 
     #[test]
     fn a_marker_inside_a_payload_does_not_count() {
-        let content = "bindd = SUPER, G, X, exec, echo '# grammachy begin'\n";
+        let content = "o.bind(\"SUPER + G\", \"X\", \"echo -- grammachy begin\")\n";
 
-        assert!(!is_present(content, &HYPRLAND));
+        assert!(!is_present(content, &LUA));
     }
 }

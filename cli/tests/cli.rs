@@ -329,8 +329,8 @@ fn setup_home(name: &str) -> PathBuf {
     let _ = std::fs::remove_dir_all(&directory);
     std::fs::create_dir_all(&directory).expect("the temporary home is created");
     std::fs::write(
-        directory.join("bindings.conf"),
-        include_str!("fixtures/config/bindings.conf"),
+        directory.join("bindings.lua"),
+        include_str!("fixtures/config/bindings.lua"),
     )
     .expect("the bindings copy is written");
     std::fs::write(
@@ -343,7 +343,7 @@ fn setup_home(name: &str) -> PathBuf {
 
 fn run_setup(args: &[&str], home: &Path) -> Run {
     let output = no_engine(&mut Command::new(env!("CARGO_BIN_EXE_grammachy")))
-        .env("GRAMMACHY_BINDINGS_CONF", home.join("bindings.conf"))
+        .env("GRAMMACHY_BINDINGS_LUA", home.join("bindings.lua"))
         .env("GRAMMACHY_MENU_JSONC", home.join("omarchy-menu.jsonc"))
         .env("GRAMMACHY_MODELS_DIR", home.join("models"))
         .env("GRAMMACHY_HYPRCTL_RELOAD", "never")
@@ -363,7 +363,7 @@ fn run_setup(args: &[&str], home: &Path) -> Run {
 #[test]
 fn setup_writes_the_block_and_the_entry_and_remove_takes_them_out() {
     let home = setup_home("setup");
-    let bindings = home.join("bindings.conf");
+    let bindings = home.join("bindings.lua");
     let menu = home.join("omarchy-menu.jsonc");
     let before = (
         std::fs::read_to_string(&bindings).unwrap(),
@@ -378,7 +378,7 @@ fn setup_writes_the_block_and_the_entry_and_remove_takes_them_out() {
     assert_eq!(value["mode"], "install");
     assert!(std::fs::read_to_string(&bindings)
         .unwrap()
-        .contains("# grammachy begin"));
+        .contains("-- grammachy begin"));
     assert!(std::fs::read_to_string(&menu)
         .unwrap()
         .contains("grammachy.compose"));

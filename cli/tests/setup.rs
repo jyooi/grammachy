@@ -14,7 +14,7 @@ use grammachy::setup::{model, SetupEnvelope, State, Step};
 use grammachy::setup::{Setup, SetupReport};
 
 /// The files a fresh Omarchy install carries, as this repository keeps them.
-const BINDINGS_FIXTURE: &str = include_str!("fixtures/config/bindings.conf");
+const BINDINGS_FIXTURE: &str = include_str!("fixtures/config/bindings.lua");
 const MENU_FIXTURE: &str = include_str!("fixtures/config/omarchy-menu.jsonc");
 
 /// One run's own copy of both files, removed with the target directory.
@@ -33,7 +33,7 @@ impl Home {
         let _ = std::fs::remove_dir_all(&directory);
         std::fs::create_dir_all(&directory).expect("the temporary home is created");
 
-        let bindings = directory.join("bindings.conf");
+        let bindings = directory.join("bindings.lua");
         let menu = directory.join("omarchy-menu.jsonc");
         std::fs::write(&bindings, BINDINGS_FIXTURE).expect("the bindings copy is written");
         std::fs::write(&menu, MENU_FIXTURE).expect("the menu copy is written");
@@ -105,7 +105,10 @@ fn a_second_run_leaves_one_block_and_one_entry() {
     assert_eq!(step(&second, "hotkeys").state, State::Unchanged);
     assert_eq!(step(&second, "menu").state, State::Unchanged);
     assert_eq!((home.bindings_text(), home.menu_text()), after_first);
-    assert_eq!(home.bindings_text().matches("# grammachy begin").count(), 1);
+    assert_eq!(
+        home.bindings_text().matches("-- grammachy begin").count(),
+        1
+    );
     assert_eq!(home.menu_text().matches("grammachy.compose").count(), 1);
 }
 
@@ -139,7 +142,7 @@ fn removing_twice_is_no_error() {
 }
 
 #[test]
-fn the_written_block_carries_the_two_lines_of_spec_section_2() {
+fn the_written_block_carries_the_two_bindings_of_spec_section_2() {
     let home = Home::new("lines");
 
     home.setup().install(EngineSlug::Harper, "gemma-4-e4b-it");
@@ -147,15 +150,17 @@ fn the_written_block_carries_the_two_lines_of_spec_section_2() {
     let text = home.bindings_text();
     assert!(
         text.contains(
-            "bindd = SUPER, G, Grammachy, exec, omarchy-shell shell summon \
-             io.github.jyooi.grammachy '{\"mode\":\"quick\"}'\n"
+            "hl.unbind(\"SUPER + G\")\n\
+             o.bind(\"SUPER + G\", \"Grammachy\", \
+             [[omarchy-shell shell summon io.github.jyooi.grammachy '{\"mode\":\"quick\"}']])\n"
         ),
         "{text}"
     );
     assert!(
         text.contains(
-            "bindd = SUPER SHIFT, G, Grammachy compose, exec, omarchy-shell shell summon \
-             io.github.jyooi.grammachy '{\"mode\":\"compose\"}'\n"
+            "hl.unbind(\"SUPER + SHIFT + G\")\n\
+             o.bind(\"SUPER + SHIFT + G\", \"Grammachy compose\", \
+             [[omarchy-shell shell summon io.github.jyooi.grammachy '{\"mode\":\"compose\"}']])\n"
         ),
         "{text}"
     );
