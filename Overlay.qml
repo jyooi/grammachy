@@ -4,14 +4,20 @@ import Quickshell.Io
 import Quickshell.Wayland
 import qs.Commons
 import "ui"
+import "ui/settings.js" as Settings
 import "ui/splice.js" as Splice
 
 // The overlay entry point. `open(payload)` routes a summon to a surface, spec
 // section 2. Quick mode captures the Selection (section 3), runs one Check
 // through the companion CLI (section 5.1), and shows the marked text.
 //
-// Compose mode, the Settings view, the error cards, and the popup keys are
-// their own tickets; this file shows a plain notice card where they will land.
+// The gear flips the same card to the Settings view of spec section 7. This
+// file is the only thing that touches storage: it reads the plugin's entry in
+// shell.json reactively and writes one key at a time through
+// `shell.updateEntryInline`.
+//
+// Compose mode, the error cards, and the popup keys are their own tickets;
+// this file shows a plain notice card where they will land.
 Item {
   id: root
 
@@ -33,6 +39,7 @@ Item {
   property bool copied: false
   property string noticeTitle: ""
   property string noticeBody: ""
+  property bool settingsOpen: false
 
   // The clipboard the Ctrl + C fallback borrowed, put back once the Selection
   // is in hand. Spec section 3.
@@ -55,43 +62,37 @@ Item {
 
   // ------------------------------------------------------------- settings
   //
-  // Storage is this plugin's inline entry in shell.json, spec section 7. The
-  // Settings view writes it; this ticket only reads what a Check needs.
-  readonly property var entry: root.settingsEntry()
+  // Storage is this plugin's inline entry in shell.json, spec section 7. There
+  // is no own config file. `shell.shellConfig` is reassigned on every write the
+  // shell makes, so `entry` is a live binding: a change from the Settings view,
+  // from `omarchy-shell shell setBarWidget`, or from a hand edit of the file
+  // all reach the view the same way.
+  //
+  // The rules of section 7 live in ui/settings.js so that node can test them
+  // and so that `cli/src/settings.rs` has one shell-side counterpart.
+  readonly property var entry: Settings.entryOf(root.shell ? root.shell.shellConfig : null, root.pluginId)
 
-  function settingsEntry() {
-    var config = root.shell ? root.shell.shellConfig : null
-    if (!Util.isPlainObject(config)) return ({})
-    if (Array.isArray(config.plugins)) {
-      for (var i = 0; i < config.plugins.length; i++) {
-        if (Util.isPlainObject(config.plugins[i]) && String(config.plugins[i].id) === root.pluginId)
-          return config.plugins[i]
-      }
-    }
-    var sections = ["left", "center", "right"]
-    var layout = Util.isPlainObject(config.bar) && Util.isPlainObject(config.bar.layout) ? config.bar.layout : null
-    for (var s = 0; layout && s < sections.length; s++) {
-      var entries = layout[sections[s]]
-      if (!Array.isArray(entries)) continue
-      for (var e = 0; e < entries.length; e++) {
-        if (Util.isPlainObject(entries[e]) && String(entries[e].id) === root.pluginId) return entries[e]
-      }
-    }
-    return ({})
+  // The one settings seam. `fallback` defaults to the spec section 7 default
+  // of that key, and an unknown stored value reads as it without a rewrite.
+  function setting(name, fallback) {
+    return Settings.valueOf(root.entry, name, fallback)
   }
 
-  // An unknown stored value reads as the default, spec section 7.
-  function setting(name, allowed, fallback) {
-    var value = root.entry ? root.entry[name] : undefined
-    if (typeof value !== "string") return fallback
-    return allowed.indexOf(value) === -1 ? fallback : value
+  // Persist on change, spec section 7: no Save button, and the Issues on
+  // screen stay because nothing here touches the Check.
+  function persistSetting(name, value) {
+    if (!root.shell || typeof root.shell.updateEntryInline !== "function") {
+      console.warn("grammachy: no shell to keep the setting in:", name)
+      return
+    }
+    root.shell.updateEntryInline(root.pluginId, Settings.mergedEntry(root.entry, name, value))
   }
 
   function checkCommand() {
     var command = [root.binaryPath, "check"]
-    var nativeLanguage = root.setting("nativeLanguage", ["none", "zh", "ms", "es", "fr", "de", "pt", "ja"], "none")
+    var nativeLanguage = root.setting("nativeLanguage")
     if (nativeLanguage !== "none") command.push("--native", nativeLanguage)
-    command.push("--engine", root.setting("engine", ["languagetool", "openai", "harper"], "languagetool"))
+    command.push("--engine", root.setting("engine"))
     return command
   }
 
@@ -136,7 +137,8 @@ Item {
     checkProcess.running = false
     // New capture.
     root.runGeneration += 1
-    // Reset state.
+    // Reset state. The check view is what a summon shows, spec section 7.
+    root.settingsOpen = false
     root.phase = "capturing"
     root.selectionText = ""
     root.issues = []
@@ -504,6 +506,15 @@ Item {
         noticeTitle: root.noticeTitle
         noticeBody: root.noticeBody
 
+        settingsOpen: root.settingsOpen
+        nativeLanguage: root.setting("nativeLanguage")
+        engineSetting: root.setting("engine")
+        autoReplace: root.setting("autoReplace")
+        openaiBaseUrl: root.setting("openaiBaseUrl")
+        openaiModel: root.setting("openaiModel")
+
+        onSettingsToggled: root.settingsOpen = !root.settingsOpen
+        onSettingChanged: function(name, value) { root.persistSetting(name, value) }
         onAccepted: function(index) { root.decide(index, true) }
         onSkipped: function(index) { root.decide(index, false) }
         onAcceptAllRequested: root.acceptAllOpen()
