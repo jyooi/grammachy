@@ -298,14 +298,29 @@ fn replace_ignores_callbacks_from_a_cancelled_run() {
         "the keystroke is the one launch that types: {launch}"
     );
 
+    let focus = function_body(&source, "focusSourceWindow");
+    assert!(
+        focus.contains("focusSource.generation = root.runGeneration"),
+        "the ask stores the Replace generation before it launches: {focus}"
+    );
+    let verify = function_body(&source, "verifySourceFocus");
+    assert!(
+        verify.contains("verifySource.generation = generation"),
+        "the check carries that same generation, not the live one: {verify}"
+    );
+
     for process in ["id: focusSource", "id: verifySource"] {
         let at = source
             .find(process)
             .unwrap_or_else(|| panic!("the overlay declares {process}"));
         let body = &source[at..at + 900];
         assert!(
-            body.contains("startedGeneration = root.runGeneration"),
-            "{process} snapshots the generation when it starts: {body}"
+            !body.contains("root.runGeneration"),
+            "{process} must not reread the live generation after launch: {body}"
+        );
+        assert!(
+            body.contains(".generation"),
+            "{process} hands the stored generation to the next step: {body}"
         );
     }
 

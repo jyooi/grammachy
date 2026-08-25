@@ -935,6 +935,7 @@ Item {
     }
     focusSource.command = Anchor.focusCommand(address)
     focusSource.launchPending = true
+    focusSource.generation = root.runGeneration
     focusSource.running = true
   }
 
@@ -944,6 +945,7 @@ Item {
     if (!root.isLive(generation)) return
     verifySource.command = Anchor.activeWindowCommand()
     verifySource.launchPending = true
+    verifySource.generation = generation
     verifySource.running = true
   }
 
@@ -1280,15 +1282,12 @@ Item {
   // window is still there, so nothing is typed on its word alone.
   Process {
     id: focusSource
-    property int startedGeneration: 0
+    property int generation: 0
     property bool launchPending: false
-    onStarted: {
-      focusSource.launchPending = false
-      focusSource.startedGeneration = root.runGeneration
-    }
+    onStarted: focusSource.launchPending = false
     onExited: {
       if (focusSource.launchPending) return
-      root.verifySourceFocus(focusSource.startedGeneration)
+      root.verifySourceFocus(focusSource.generation)
     }
     onRunningChanged: {
       if (focusSource.running) return
@@ -1296,7 +1295,7 @@ Item {
       focusSource.launchPending = false
       // No `hyprctl` to ask, so the source window cannot be reached and the
       // Corrected text stays on the clipboard rather than landing anywhere.
-      root.showSourceGone(root.runGeneration)
+      root.showSourceGone(focusSource.generation)
     }
     stderr: StdioCollector {
       waitForEnd: true
@@ -1308,21 +1307,18 @@ Item {
   // go out.
   Process {
     id: verifySource
-    property int startedGeneration: 0
+    property int generation: 0
     property bool launchPending: false
-    onStarted: {
-      verifySource.launchPending = false
-      verifySource.startedGeneration = root.runGeneration
-    }
+    onStarted: verifySource.launchPending = false
     onRunningChanged: {
       if (verifySource.running) return
       if (!verifySource.launchPending) return
       verifySource.launchPending = false
-      root.showSourceGone(root.runGeneration)
+      root.showSourceGone(verifySource.generation)
     }
     stdout: StdioCollector {
       waitForEnd: true
-      onStreamFinished: root.onSourceFocusVerified(text, verifySource.startedGeneration)
+      onStreamFinished: root.onSourceFocusVerified(text, verifySource.generation)
     }
   }
 
