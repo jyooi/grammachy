@@ -38,6 +38,7 @@ Item {
   // is in hand. Spec section 3.
   property string borrowedClipboard: ""
   property bool clipboardBorrowed: false
+  property bool pendingPrimaryPaste: false
   property int runGeneration: 0
 
   readonly property string pluginId: root.manifest && root.manifest.id
@@ -130,6 +131,7 @@ Item {
     savedClipboard.running = false
     copyKeystroke.running = false
     fallbackPaste.running = false
+    checkProcess.launchPending = false
     checkProcess.running = false
     // New capture.
     root.runGeneration += 1
@@ -143,10 +145,19 @@ Item {
     root.elapsedMs = 0
     root.copied = false
     // End the last borrow.
-    if (root.clipboardBorrowed) root.restoreBorrowedClipboard()
+    if (root.clipboardBorrowed && !restoreClipboard.running)
+      root.restoreBorrowedClipboard()
     root.borrowedClipboard = ""
     root.clipboardBorrowed = false
-    primaryPaste.running = false
+    root.beginPrimaryPaste()
+  }
+
+  function beginPrimaryPaste() {
+    if (restoreClipboard.running) {
+      root.pendingPrimaryPaste = true
+      return
+    }
+    root.pendingPrimaryPaste = false
     primaryPaste.generation = root.runGeneration
     primaryPaste.running = true
   }
@@ -213,6 +224,7 @@ Item {
     checkProcess.command = root.checkCommand()
     // Writing to stdin closes it, so every run arms the channel again.
     checkProcess.stdinEnabled = true
+    checkProcess.launchPending = true
     checkProcess.running = true
   }
 
@@ -354,18 +366,35 @@ Item {
       write(restoreClipboard.text)
       restoreClipboard.stdinEnabled = false
     }
+    onExited: {
+      if (!root.pendingPrimaryPaste) return
+      root.beginPrimaryPaste()
+    }
   }
 
   Process {
     id: checkProcess
+    // Check launch.
     property int generation: 0
     property int startedGeneration: 0
     property string stdinText: ""
+    property bool launchPending: false
+    // Start hook.
     onStarted: {
+      checkProcess.launchPending = false
       checkProcess.startedGeneration = root.runGeneration
       write(checkProcess.stdinText)
       // Close stdin.
       checkProcess.stdinEnabled = false
+    }
+
+    onRunningChanged: {
+      if (checkProcess.running) return
+      if (!checkProcess.launchPending) return
+      checkProcess.launchPending = false
+      if (root.phase !== "checking") return
+      root.showNotice("Grammachy could not run the check",
+        "The companion tool is missing or out of date. See docs/dev.md for how to put a binary in bin/grammachy.")
     }
     stdout: StdioCollector {
       waitForEnd: true
