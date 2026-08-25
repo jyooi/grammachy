@@ -40,6 +40,7 @@ Nothing downloads it yet, so build it and copy it in.
 ```bash
 cd ~/.config/omarchy/plugins/io.github.jyooi.grammachy/cli
 cargo build --release
+mkdir -p ../bin
 cp target/release/grammachy ../bin/grammachy
 ```
 

@@ -37,6 +37,8 @@ Item {
   // The clipboard the Ctrl + C fallback borrowed, put back once the Selection
   // is in hand. Spec section 3.
   property string borrowedClipboard: ""
+  property bool clipboardBorrowed: false
+  property int runGeneration: 0
 
   readonly property string pluginId: root.manifest && root.manifest.id
     ? String(root.manifest.id) : "io.github.jyooi.grammachy"
@@ -123,6 +125,10 @@ Item {
   // ---------------------------------------------------------------- capture
 
   function startQuick() {
+    // New capture.
+    root.runGeneration += 1
+    settleTimer.stop()
+    // Reset state.
     root.phase = "capturing"
     root.selectionText = ""
     root.issues = []
@@ -131,40 +137,62 @@ Item {
     root.engine = ""
     root.elapsedMs = 0
     root.copied = false
+    // End the last borrow.
+    if (root.clipboardBorrowed) root.restoreBorrowedClipboard()
     root.borrowedClipboard = ""
+    root.clipboardBorrowed = false
+    primaryPaste.running = false
+    primaryPaste.generation = root.runGeneration
     primaryPaste.running = true
+  }
+
+  function isLive(generation) {
+    return generation === root.runGeneration
   }
 
   function isSelection(text) {
     return typeof text === "string" && text.replace(/^\s+|\s+$/g, "").length > 0
   }
 
-  function onPrimaryCaptured(text) {
+  function onPrimaryCaptured(text, generation) {
+    if (!root.isLive(generation)) return
     if (root.isSelection(text)) root.runCheck(text)
-    else savedClipboard.running = true
+    else {
+      savedClipboard.generation = generation
+      savedClipboard.running = true
+    }
   }
 
   // Step 2 of spec section 3: no primary selection, so borrow the clipboard,
   // send Ctrl + C to the window that still holds focus, and read what lands.
   // The popup window stays hidden until this finishes, so the keystroke
   // reaches the source window rather than the overlay.
-  function onClipboardBorrowed(text) {
+  function onClipboardBorrowed(text, generation) {
+    if (!root.isLive(generation)) return
     root.borrowedClipboard = typeof text === "string" ? text : ""
+    root.clipboardBorrowed = true
+    copyKeystroke.generation = generation
     copyKeystroke.running = true
   }
 
-  function onCopyKeystrokeSent() {
+  function onCopyKeystrokeSent(generation) {
+    if (!root.isLive(generation)) return
+    settleTimer.generation = generation
     settleTimer.restart()
   }
 
-  function onFallbackCaptured(text) {
+  function onFallbackCaptured(text, generation) {
+    if (!root.isLive(generation)) return
     root.restoreBorrowedClipboard()
     if (root.isSelection(text)) root.runCheck(text)
     else root.showNotice("Nothing selected", "Highlight some text, then press SUPER + G.")
   }
 
   function restoreBorrowedClipboard() {
+    if (!root.clipboardBorrowed) return
+    root.clipboardBorrowed = false
     var hasText = root.borrowedClipboard.length > 0
+    restoreClipboard.text = root.borrowedClipboard
     restoreClipboard.command = hasText ? ["wl-copy"] : ["wl-copy", "--clear"]
     restoreClipboard.stdinEnabled = hasText
     restoreClipboard.running = true
@@ -175,13 +203,15 @@ Item {
   function runCheck(text) {
     root.selectionText = text
     root.phase = "checking"
+    checkProcess.generation = root.runGeneration
     checkProcess.command = root.checkCommand()
     // Writing to stdin closes it, so every run arms the channel again.
     checkProcess.stdinEnabled = true
     checkProcess.running = true
   }
 
-  function onCheckOutput(text) {
+  function onCheckOutput(text, generation) {
+    if (!root.isLive(generation)) return
     var envelope = null
     try {
       envelope = JSON.parse(text)
@@ -249,41 +279,50 @@ Item {
 
   Process {
     id: primaryPaste
+    property int generation: 0
     command: ["wl-paste", "--primary", "--no-newline"]
     stdout: StdioCollector {
       waitForEnd: true
-      onStreamFinished: root.onPrimaryCaptured(text)
+      onStreamFinished: root.onPrimaryCaptured(text, primaryPaste.generation)
     }
   }
 
   Process {
     id: savedClipboard
+    property int generation: 0
     command: ["wl-paste", "--no-newline"]
     stdout: StdioCollector {
       waitForEnd: true
-      onStreamFinished: root.onClipboardBorrowed(text)
+      onStreamFinished: root.onClipboardBorrowed(text, savedClipboard.generation)
     }
   }
 
   Process {
     id: copyKeystroke
+    property int generation: 0
     command: ["wtype", "-M", "ctrl", "c", "-m", "ctrl"]
-    onExited: root.onCopyKeystrokeSent()
+    onExited: root.onCopyKeystrokeSent(copyKeystroke.generation)
   }
 
   Timer {
     id: settleTimer
+    property int generation: 0
     interval: 150
     repeat: false
-    onTriggered: fallbackPaste.running = true
+    onTriggered: {
+      if (!root.isLive(settleTimer.generation)) return
+      fallbackPaste.generation = settleTimer.generation
+      fallbackPaste.running = true
+    }
   }
 
   Process {
     id: fallbackPaste
+    property int generation: 0
     command: ["wl-paste", "--no-newline"]
     stdout: StdioCollector {
       waitForEnd: true
-      onStreamFinished: root.onFallbackCaptured(text)
+      onStreamFinished: root.onFallbackCaptured(text, fallbackPaste.generation)
     }
   }
 
@@ -291,22 +330,24 @@ Item {
   // restoreBorrowedClipboard() sets the command and arms stdin.
   Process {
     id: restoreClipboard
+    property string text: ""
     onStarted: {
       if (!restoreClipboard.stdinEnabled) return
-      write(root.borrowedClipboard)
+      write(restoreClipboard.text)
       restoreClipboard.stdinEnabled = false
     }
   }
 
   Process {
     id: checkProcess
+    property int generation: 0
     onStarted: {
       write(root.selectionText)
       checkProcess.stdinEnabled = false
     }
     stdout: StdioCollector {
       waitForEnd: true
-      onStreamFinished: root.onCheckOutput(text)
+      onStreamFinished: root.onCheckOutput(text, checkProcess.generation)
     }
     stderr: StdioCollector {
       waitForEnd: true
