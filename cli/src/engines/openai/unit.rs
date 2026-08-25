@@ -37,8 +37,8 @@ pub const UNIT_NAME: &str = "grammachy-llama";
 /// Context window in tokens, sized for one whole Check.
 const CONTEXT_SIZE: usize = 4_096;
 
-/// Where the `llama-cpp` package installs the server.
-const PACKAGE_SERVER: &str = "/usr/bin/llama-server";
+/// Where the `llama-cpp` package installs the server. `doctor` looks for it too.
+pub const PACKAGE_SERVER: &str = "/usr/bin/llama-server";
 
 /// The install line `doctor` prints when the package is missing, CPU first and
 /// the Vulkan backend beside it (spec section 4: hardware tiers change only the

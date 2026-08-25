@@ -36,8 +36,8 @@ pub const UNIT_NAME: &str = "grammachy-languagetool";
 /// `maxTextLength` handed to the server, the same cap the CLI applies itself.
 const MAX_TEXT_LENGTH: usize = 5_000;
 
-/// The launcher the pacman package installs.
-const PACKAGE_LAUNCHER: &str = "/usr/bin/languagetool";
+/// The launcher the pacman package installs. `doctor` looks for it too.
+pub const PACKAGE_LAUNCHER: &str = "/usr/bin/languagetool";
 
 /// Where `archlinux-java` points at the selected JVM.
 const DEFAULT_JVM: &str = "/usr/lib/jvm/default";
@@ -63,8 +63,8 @@ pub fn server_command(port: u16, config: &Path) -> Result<ServerCommand, StartFa
     })
 }
 
-/// The JVM the launcher runs `bin/java` from.
-fn java_home() -> Result<String, StartFailure> {
+/// The JVM the launcher runs `bin/java` from. `doctor` reports the same one.
+pub fn java_home() -> Result<String, StartFailure> {
     if let Some(value) = std::env::var_os("JAVA_HOME") {
         let value = value.to_string_lossy().to_string();
         if !value.is_empty() {

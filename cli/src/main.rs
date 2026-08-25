@@ -3,16 +3,16 @@ use std::process::ExitCode;
 
 use clap::Parser;
 
-use grammachy::args::{CheckOptions, Cli, Command};
+use grammachy::args::{CheckArgs, CheckOptions, Cli, Command};
 use grammachy::envelope::{Envelope, ErrorCode};
 use grammachy::settings::StoredSettings;
-use grammachy::{bench, check, chunk};
+use grammachy::{bench, check, chunk, doctor};
 
 /// What a run prints on stdout, already rendered.
 ///
-/// Every subcommand but `bench` renders one JSON envelope here (spec section
-/// 5.1). `bench` renders its Markdown report instead, and still renders the
-/// error envelope when it fails.
+/// `check` and `chunk` render one JSON envelope (spec section 5.1).
+/// `bench` renders its Markdown report, and still renders the error envelope
+/// when it fails. `doctor` renders its report (spec section 10).
 struct Output {
     text: String,
     exit_code: i32,
@@ -32,6 +32,15 @@ impl From<chunk::ChunkEnvelope> for Output {
         Output {
             text: envelope.to_json(),
             exit_code: envelope.exit_code(),
+        }
+    }
+}
+
+impl From<doctor::DoctorOutput> for Output {
+    fn from(output: doctor::DoctorOutput) -> Self {
+        Output {
+            text: output.text.trim_end().to_string(),
+            exit_code: output.exit_code,
         }
     }
 }
@@ -93,6 +102,19 @@ fn run() -> Option<Output> {
                 Envelope::error(ErrorCode::BadArguments, message).into()
             }
         }),
+        Command::Doctor(args) => {
+            // `doctor` reads no stdin: it reports the machine, not a Selection.
+            let options = CheckOptions::resolve(
+                &CheckArgs {
+                    native: None,
+                    target: None,
+                    engine: args.engine,
+                },
+                &StoredSettings::load(),
+            );
+            let facts = doctor::Facts::collect(&options);
+            Some(doctor::run(&facts, options.engine, args.json).into())
+        }
     }
 }
 
