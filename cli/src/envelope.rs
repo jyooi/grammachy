@@ -47,6 +47,11 @@ pub fn sorted_disjoint(mut issues: Vec<Issue>) -> Vec<Issue> {
 }
 
 /// The codes the shell knows, spec section 5.1.
+///
+/// `SetupFailed` is the one code a Check never answers. `grammachy setup` is a
+/// terminal command rather than a popup card (spec sections 10 and 12), so it
+/// owns a code of its own instead of borrowing an engine code that would tell
+/// the user the wrong thing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ErrorCode {
@@ -56,6 +61,7 @@ pub enum ErrorCode {
     EngineTimeout,
     EngineError,
     BadArguments,
+    SetupFailed,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

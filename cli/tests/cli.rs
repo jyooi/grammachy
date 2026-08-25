@@ -320,3 +320,80 @@ fn a_missing_settings_file_is_fine() {
     assert_eq!(envelope(&result)["error"]["code"], "engine_unavailable");
     assert!(!missing.exists(), "the CLI never creates the settings file");
 }
+
+/// One temporary home for a `setup` run: copies of both configuration files,
+/// no compositor, and a models directory nothing writes to. The real files and
+/// the real `~/.local/share/grammachy/` are never in reach.
+fn setup_home(name: &str) -> PathBuf {
+    let directory = scratch_dir().join(format!("home-{name}"));
+    let _ = std::fs::remove_dir_all(&directory);
+    std::fs::create_dir_all(&directory).expect("the temporary home is created");
+    std::fs::write(
+        directory.join("bindings.conf"),
+        include_str!("fixtures/config/bindings.conf"),
+    )
+    .expect("the bindings copy is written");
+    std::fs::write(
+        directory.join("omarchy-menu.jsonc"),
+        include_str!("fixtures/config/omarchy-menu.jsonc"),
+    )
+    .expect("the menu copy is written");
+    directory
+}
+
+fn run_setup(args: &[&str], home: &Path) -> Run {
+    let output = no_engine(&mut Command::new(env!("CARGO_BIN_EXE_grammachy")))
+        .env("GRAMMACHY_BINDINGS_CONF", home.join("bindings.conf"))
+        .env("GRAMMACHY_MENU_JSONC", home.join("omarchy-menu.jsonc"))
+        .env("GRAMMACHY_MODELS_DIR", home.join("models"))
+        .env("GRAMMACHY_HYPRCTL_RELOAD", "never")
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .expect("the binary runs");
+
+    Run {
+        status: output.status.code().expect("the binary was not signalled"),
+        stdout: String::from_utf8(output.stdout).expect("stdout is UTF-8"),
+    }
+}
+
+#[test]
+fn setup_writes_the_block_and_the_entry_and_remove_takes_them_out() {
+    let home = setup_home("setup");
+    let bindings = home.join("bindings.conf");
+    let menu = home.join("omarchy-menu.jsonc");
+    let before = (
+        std::fs::read_to_string(&bindings).unwrap(),
+        std::fs::read_to_string(&menu).unwrap(),
+    );
+
+    let installed = run_setup(&["setup"], &home);
+    let value = envelope(&installed);
+
+    assert_eq!(installed.status, 0);
+    assert_eq!(value["contractVersion"], 1);
+    assert_eq!(value["mode"], "install");
+    assert!(std::fs::read_to_string(&bindings)
+        .unwrap()
+        .contains("# grammachy begin"));
+    assert!(std::fs::read_to_string(&menu)
+        .unwrap()
+        .contains("grammachy.compose"));
+    // The default engine is `languagetool`, so nothing is downloaded.
+    assert!(!home.join("models").exists());
+
+    let removed = run_setup(&["setup", "--remove"], &home);
+
+    assert_eq!(removed.status, 0);
+    assert_eq!(envelope(&removed)["mode"], "remove");
+    assert_eq!(
+        (
+            std::fs::read_to_string(&bindings).unwrap(),
+            std::fs::read_to_string(&menu).unwrap()
+        ),
+        before
+    );
+}

@@ -29,6 +29,9 @@ pub enum Command {
 
     /// Report what this machine still needs, one line per piece.
     Doctor(DoctorArgs),
+
+    /// Install the hotkeys, the menu entry, and the weights, without a password.
+    Setup(SetupArgs),
 }
 
 #[derive(Debug, Parser)]
@@ -54,6 +57,13 @@ pub struct DoctorArgs {
     /// Print the report as one JSON envelope instead of as text.
     #[arg(long)]
     pub json: bool,
+}
+
+#[derive(Debug, Parser)]
+pub struct SetupArgs {
+    /// Take the hotkeys and the menu entry out again, keeping the weights.
+    #[arg(long)]
+    pub remove: bool,
 }
 
 #[derive(Debug, Parser)]

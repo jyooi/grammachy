@@ -31,6 +31,12 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 - The `openai` base URL host must be loopback, and `cli/src/engines/openai/endpoint.rs` is the only place that decides it.
   A remote host is `bad_arguments` and no request is made; that is a product guarantee, so keep it tested.
   Its prompt in `prompt.rs` is the wording HUF-181 measured, and the "shortest exact substring" rule is what makes the spans usable rather than whole-sentence rewrites.
+- `grammachy setup` lives in `cli/src/setup/`, spec section 10.
+  `block.rs` owns the marked block both configuration files carry and the rule that makes `--remove` byte exact: the region always carries the newline on each side, so insertion and removal are the same substring.
+  `bindings.rs` holds the two `bindd` lines of spec section 2 and the `hyprctl reload`; `menu.rs` holds the `grammachy.compose` row, which names `"parent": "root"` because nothing else creates a `grammachy` submenu.
+  `model.rs` downloads the weights with `curl`, the tool `bin/bootstrap.sh` uses, so TLS stays out of the binary; hardware tiers only name the llama.cpp backend package, because the weights file is the same on both (spec section 4).
+  Every path and both side effects are seams: `GRAMMACHY_BINDINGS_CONF`, `GRAMMACHY_MENU_JSONC`, `GRAMMACHY_MODELS_DIR`, `GRAMMACHY_HYPRCTL_RELOAD=never`, `GRAMMACHY_MODEL_BASE_URL`, plus the `Reloader` and `Downloader` values.
+  No test may touch a real config file, a real compositor, or the real weights host.
 - Settings resolve in `cli/src/settings.rs`: flags, then the plugin entry in `$HOME/.config/omarchy/shell.json`, then the defaults of spec section 7.
   The product path is that HOME path only. The CLI does not read `$XDG_CONFIG_HOME`.
   The entry is looked up by plugin id in `bar.layout.{left,center,right}` first and in the top level `plugins` array next, the order `shell.qml` writes them in.
