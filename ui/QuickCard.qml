@@ -10,12 +10,17 @@ import qs.Ui
 // and back, so the check view itself stays clean. The check state lives on
 // behind it: flipping back shows the same Issues with the same decisions.
 //
+// A failed Check swaps the body for one of the error cards of spec section 8,
+// which `ui/ErrorCard.qml` draws from a model that `ui/errors.js` owns. The
+// too-long card of section 6 is this file's own, because its size bar and its
+// handover to Compose belong to the popup rather than to that model.
+//
 // The card renders state and reports intent. Capture, the Check, the key map,
 // the clipboard, and the settings storage all live in Overlay.qml.
 BorderSurface {
   id: root
 
-  // "checking", "result", "notice", or "toolong".
+  // "checking", "result", "error", "notice", or "toolong".
   property string phase: "checking"
   // The exact text the Check ran on. Every Issue span indexes into it.
   property string sourceText: ""
@@ -35,8 +40,17 @@ BorderSurface {
   property bool autoReplace: false
   property string noticeTitle: ""
   property string noticeBody: ""
+  // The hero line a notice shows, because "check did not finish" is not true
+  // of a surface that is simply not built yet.
+  property string noticeMeta: ""
   // What the CLI said, shown in monospace under the too-long body, spec 8.
   property string engineMessage: ""
+
+  // The error cards of spec section 8. `errorCard` is a model from
+  // `ui/errors.js` and `diagnosis` is the one-line `grammachy doctor` answer
+  // that the `engine_unavailable` card shows under its body.
+  property var errorCard: null
+  property string diagnosis: ""
 
   // The Settings view, spec section 7. The values arrive already resolved
   // through the defaults, so an unknown stored value shows the default here.
@@ -64,6 +78,9 @@ BorderSurface {
   signal closeRequested()
   signal settingsToggled()
   signal settingChanged(string name, var value)
+  // One button of an error card, spec section 8. The action is a button id
+  // from `ui/errors.js`; Overlay.qml owns where each one goes.
+  signal errorActionRequested(string action)
 
   // MarkedText owns the accepted green, so the inspector and the empty state
   // read it from there rather than repeating the literal.
@@ -74,6 +91,7 @@ BorderSurface {
   readonly property int skippedCount: root.countOf(false)
   readonly property int openCount: root.issueCount - root.acceptedCount - root.skippedCount
   readonly property bool hasIssues: root.phase === "result" && root.issueCount > 0
+  readonly property bool hasError: root.phase === "error" && Boolean(root.errorCard)
   // The Settings view takes the body over; every check row hangs off this.
   readonly property bool showsCheck: !root.settingsOpen
   readonly property bool isEmptyResult: root.phase === "result" && root.issueCount === 0
@@ -105,7 +123,8 @@ BorderSurface {
 
   function metaLine() {
     if (root.phase === "checking") return "checking the selection"
-    if (root.phase === "notice") return "check did not finish"
+    if (root.hasError) return String(root.errorCard.meta)
+    if (root.phase === "notice") return root.noticeMeta
     if (root.phase === "toolong") return "selection over the limit"
     var run = root.engine + ", " + root.elapsedMs + " ms"
     if (root.issueCount === 0) return "no issues, " + run
@@ -326,6 +345,19 @@ BorderSurface {
           font.family: Style.font.family
           font.pixelSize: Style.font.body
         }
+      }
+
+      // The error cards of spec section 8. They carry their own buttons, so
+      // the footer below stays out of their way. No bottom margin: the empty
+      // footer already leaves the column's own spacing under them.
+      ErrorCard {
+        Layout.fillWidth: true
+        Layout.topMargin: Style.spacing.md
+        visible: root.showsCheck && root.hasError
+
+        card: root.errorCard
+        diagnosis: root.diagnosis
+        onActionRequested: function(action) { root.errorActionRequested(action) }
       }
 
       // ------------------------------------------------------- empty state
@@ -601,7 +633,8 @@ BorderSurface {
         Item { Layout.fillWidth: true }
 
         Button {
-          visible: root.showsCheck && !root.hasIssues
+          // An error card draws its own Close, in its own button row.
+          visible: root.showsCheck && !root.hasIssues && !root.hasError
           text: "Close"
           tooltipText: "Esc"
           bordered: true

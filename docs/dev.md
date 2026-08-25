@@ -3,14 +3,14 @@
 This page is for a developer or a reviewer who wants the plugin on a real desktop.
 The automated checks in spec section 13 run in CI.
 They cannot cover capture, because capture needs a compositor, a focused window, and a real selection.
-Smoke items 1, 2, 3, 4, 7, 8, and 9 of spec section 13 are therefore run by hand, and this page is how.
+Smoke items 1, 2, 3, 4, 6, 7, 8, and 9 of spec section 13 are therefore run by hand, and this page is how.
 
 ## What you need
 
 - Omarchy 4.0.0 or later, because the plugin imports `qs.Ui` and `qs.Commons` from `/usr/share/omarchy/shell`.
 - A Rust toolchain, to build the companion CLI.
 - `languagetool` from pacman, for a Check that finds anything: `sudo pacman -S languagetool`.
-  Without it the popup shows the notice card instead of marks, which still proves capture works.
+  Without it the popup shows the `engine_unavailable` card instead of marks, which still proves capture works.
   The `harper` engine needs no package and no server, so smoke item 7 works on a bare machine.
 
 `wl-clipboard` and `wtype` already ship with Omarchy.
@@ -21,7 +21,7 @@ The shell loads third-party plugins from `~/.config/omarchy/plugins/<plugin-id>/
 A plain clone is the recommended way, because the shell watches that directory and reloads plugin code when a file changes.
 
 ```bash
-git clone --branch fm/grammachy-huf-193 <repo-url> ~/.config/omarchy/plugins/io.github.jyooi.grammachy
+git clone --branch main <repo-url> ~/.config/omarchy/plugins/io.github.jyooi.grammachy
 ```
 
 To work from an existing checkout instead, link it:
@@ -120,8 +120,9 @@ The paste must give the text you copied first, not the sentence, until you press
 2. Clear the primary selection and the clipboard: `wl-copy --clear; wl-copy --primary --clear`.
 3. Click the `G` button on the bar.
 
-Expected: the popup opens with the `empty_selection` card.
-It reads `Nothing selected` over `Highlight some text, then press SUPER + G.`, with a Close button.
+Expected: the popup opens with the `empty_selection` card of spec section 8.
+It reads `Nothing selected` over `Highlight some text, then press SUPER + G.`, with `Close` and `Open Compose`.
+`Open Compose` shows the Compose notice until the Compose window lands.
 Esc closes it, and so does a click outside the card.
 
 The capture tries the primary selection, then the Ctrl + C fallback, so this item takes about 150 ms longer than the others.
@@ -158,7 +159,60 @@ Check the two bounds that this selection is here to prove:
 
 `Open in Compose` shows the Compose notice until the Compose window lands.
 
-## 9. Smoke item 7: switch to Harper, Check, switch back
+## 9. Smoke item 6: the engine_unavailable card, then Retry
+
+This item proves the error cards of spec section 8: the card names the engine, the `grammachy doctor` line names the missing piece, and Retry re-runs the Check on the same Selection.
+
+The transient unit dies with the session, so nothing here is permanent.
+Stop it with `systemctl --user`, never from a test: only this manual run may touch the unit the live shell uses.
+
+1. Make sure `Engine` reads `LanguageTool` in Settings, which is the default.
+2. Run one Check so the unit is up, then stop it:
+
+```bash
+systemctl --user stop grammachy-languagetool
+systemctl --user is-active grammachy-languagetool
+```
+
+3. Highlight a sentence with a mistake and click `G`.
+
+Expected: the card reads `LanguageTool is not running` over `Grammachy could not reach it on this machine.`.
+Under that comes the one-line `grammachy doctor` diagnosis, and under that the CLI message in monospace, which names the address that stayed silent.
+The hero meta line reads `engine not reachable`.
+The buttons are `Close`, `Retry`, and `Settings`, with `Retry` in the accent colour.
+Compare the diagnosis with the line the CLI prints for itself:
+
+```bash
+bin/grammachy doctor --engine languagetool --json | jq -r .diagnosis
+```
+
+4. Leave the popup open and highlight a **different** sentence in the terminal.
+5. Click `Retry`.
+
+Expected: the popup checks the sentence from step 3, not the one highlighted in step 4.
+Spec section 8 says Retry re-runs the Check with the same Selection and never captures again.
+The unit is still down, so the same card comes back.
+
+6. Start the unit again and click `Retry` once more:
+
+```bash
+systemctl --user start grammachy-languagetool
+```
+
+Expected: the Check succeeds and the marked text of smoke item 1 replaces the card.
+A first start takes a moment, so a `LanguageTool took too long` card on the first Retry is the `engine_timeout` card doing its job; Retry again once the port answers.
+
+Two more cards belong to the same session:
+
+- **Settings from a card.** Bring the `engine_unavailable` card back, click the gear or `Settings`, then click `Back`.
+  The same card is still behind the Settings view, because Settings opens the Settings view of the same card.
+  Switch `Engine` to `Harper` and click `Retry`: the Check now runs in process and succeeds.
+- **No companion binary.** Move `bin/grammachy` aside, reload the plugin, and click `G` on a selection.
+  The card reads `Grammachy could not run the check` with `Close` and `Setup`.
+  `Setup` shows the setup notice until the setup card lands.
+  Put the binary back and reload.
+
+## 10. Smoke item 7: switch to Harper, Check, switch back
 
 This item proves the Settings view of spec section 7: the gear, the storage, and that a change applies to the next Check.
 
@@ -188,7 +242,7 @@ Three more Settings checks belong to the same session:
   Open Settings, change nothing, and close the popup: `"engine": "claude"` is still in the file, because nothing is rewritten until the user changes it.
   Pick `Harper` and the file finally reads `"engine": "harper"`.
 
-## 10. Smoke item 8: auto-replace in a terminal and a browser field
+## 11. Smoke item 8: auto-replace in a terminal and a browser field
 
 Auto-replace copies the Corrected text, closes the popup, and pastes over the still-highlighted Selection.
 It only works while the source window still holds that highlight.
@@ -211,7 +265,7 @@ Expected: the same replacement in the field.
 If nothing pastes, the source window lost the highlight before the paste landed.
 That is the documented limit of spec section 6, and the hint under the toggle says so.
 
-## 11. Smoke item 9: settings persist across a shell restart
+## 12. Smoke item 9: settings persist across a shell restart
 
 1. Open Settings and set `Native language` to `Malay`, `Engine` to `Harper`, and `Auto-replace` on.
 2. Restart the shell:
@@ -226,14 +280,14 @@ Expected: `Malay`, `Harper`, and `Auto-replace` on, all as they were left.
 The plugin keeps no state of its own: the values come back because `~/.config/omarchy/shell.json` holds them, and the shell reads that file at start.
 `targetEnglish` and `openaiApiKey` have no control, so check by hand that an edit of those two keys in the file also survives a round trip through the Settings view.
 
-## 12. Running the automated checks
+## 13. Running the automated checks
 
-The same three checks CI runs, against the shell installed on this machine:
+The same three plugin checks CI runs, against the shell installed on this machine:
 
 ```bash
 for file in $(find . -name '*.qml' | sort); do qmllint -I /usr/share/omarchy/shell "$file" || echo "FAILED $file"; done
 omarchy-plugin-validate .
-node --test ui/splice.test.js ui/tokens.test.js ui/settings.test.js ui/keymap.test.js
+node --test ui/splice.test.js ui/tokens.test.js ui/settings.test.js ui/keymap.test.js ui/errors.test.js
 ```
 
 The `qmllint` on `PATH` reports a syntax error through its exit status alone and prints nothing.
@@ -254,7 +308,7 @@ cargo clippy --all-targets -- -D warnings
 cargo test
 ```
 
-## 13. Removing it
+## 14. Removing it
 
 ```bash
 omarchy plugin disable io.github.jyooi.grammachy

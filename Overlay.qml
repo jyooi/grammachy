@@ -4,6 +4,7 @@ import Quickshell.Io
 import Quickshell.Wayland
 import qs.Commons
 import "ui"
+import "ui/errors.js" as Errors
 import "ui/settings.js" as Settings
 import "ui/keymap.js" as Keymap
 import "ui/splice.js" as Splice
@@ -18,8 +19,13 @@ import "ui/splice.js" as Splice
 // shell.json reactively and writes one key at a time through
 // `shell.updateEntryInline`.
 //
-// Compose mode and the remaining error cards are their own tickets; this file
-// shows a plain notice card where they will land.
+// A Check that fails shows one of the error cards of spec section 8, and this
+// file routes their buttons: Retry re-runs the Check on the same Selection
+// with no second capture, Settings flips the same card to the Settings view,
+// and Setup and Open Compose reach surfaces of their own tickets.
+//
+// Compose mode and the setup card are their own tickets; this file shows a
+// plain notice card where they will land.
 Item {
   id: root
 
@@ -30,7 +36,7 @@ Item {
   // The shell reads `opened` to answer isPluginOpen, and calls close().
   property bool opened: false
 
-  // "capturing", "checking", "result", "notice", or "toolong".
+  // "capturing", "checking", "result", "error", "notice", or "toolong".
   property string phase: "capturing"
   // The whole capture, spec section 3. Every Check runs on this or on its head.
   property string capturedText: ""
@@ -47,8 +53,16 @@ Item {
   property bool applied: false
   property string noticeTitle: ""
   property string noticeBody: ""
+  property string noticeMeta: ""
   property bool settingsOpen: false
   property string engineMessage: ""
+
+  // The error card on screen, spec section 8: a model from `ui/errors.js`, the
+  // `grammachy doctor` line the `engine_unavailable` card shows, and a counter
+  // that tells a late doctor answer whether its card is still the one showing.
+  property var errorCard: null
+  property string errorDiagnosis: ""
+  property int cardSerial: 0
 
   // One Check takes this many UTF-16 code units. This is `MAX_UTF16_UNITS` of
   // `cli/src/check.rs`, which `cli/tests/overlay_limit.rs` keeps in step.
@@ -119,6 +133,12 @@ Item {
     root.applied = false
   }
 
+  // The engine an error card names, spec section 8: the display name of the
+  // current engine setting, which is the name the Settings dropdown shows.
+  function engineLabel() {
+    return Settings.labelOf(Settings.ENGINE_OPTIONS, root.setting("engine"))
+  }
+
   function checkCommand() {
     var command = [root.binaryPath, "check"]
     var nativeLanguage = root.setting("nativeLanguage")
@@ -149,17 +169,30 @@ Item {
     root.opened = false
   }
 
-  function showNotice(title, body) {
+  function showNotice(title, body, meta) {
     root.phase = "notice"
+    root.errorCard = null
     root.noticeTitle = title
     root.noticeBody = body
+    root.noticeMeta = meta === undefined ? "" : meta
   }
 
-  // `Open in Compose` is on the too-long card already, because that card makes
-  // no sense without it. The window it opens is its own ticket.
+  // `Open in Compose` on the too-long card of spec section 6 and `Open Compose`
+  // on the `empty_selection` card of section 8. The window is its own ticket;
+  // it opens with the Draft this popup kept.
   function showCompose() {
     root.showNotice("Compose is not ready yet",
-      "The Compose window arrives in a later milestone. Check the first part of the selection instead.")
+      "The Compose window arrives in a later milestone. It opens with the draft the popup kept.",
+      "not ready yet")
+  }
+
+  // `Setup` on the `bad_arguments` card. The setup card of spec section 10
+  // names the pinned binary and runs `bin/bootstrap.sh`; the release ticket
+  // builds it, so until then the button says where the binary comes from.
+  function showSetup() {
+    root.showNotice("Setup is not ready yet",
+      "The setup card arrives with the release milestone. See docs/dev.md for how to build the companion binary into bin/grammachy.",
+      "not ready yet")
   }
 
   // ---------------------------------------------------------------- capture
@@ -174,6 +207,8 @@ Item {
     checkProcess.launchPending = false
     checkProcess.restartQueued = false
     checkProcess.running = false
+    doctorProcess.restartQueued = false
+    doctorProcess.running = false
     copyProcess.pasteAfter = false
     // New capture.
     root.runGeneration += 1
@@ -190,6 +225,8 @@ Item {
     root.elapsedMs = 0
     root.applied = false
     root.engineMessage = ""
+    root.errorCard = null
+    root.errorDiagnosis = ""
     // End the last borrow.
     if (root.clipboardBorrowed && !restoreClipboard.running)
       root.restoreBorrowedClipboard()
@@ -253,11 +290,9 @@ Item {
     if (!root.isLive(generation)) return
     root.restoreBorrowedClipboard()
     if (root.isSelection(text)) root.captured(text)
-    else root.showEmptySelection()
-  }
-
-  function showEmptySelection() {
-    root.showNotice("Nothing selected", "Highlight some text, then press SUPER + G.")
+    // Capture found nothing, so the CLI would answer `empty_selection` on an
+    // empty stdin. Showing that card here saves the round trip.
+    else root.showError(Errors.EMPTY_SELECTION, "")
   }
 
   function restoreBorrowedClipboard() {
@@ -279,6 +314,8 @@ Item {
     root.focusIndex = 0
     root.applied = false
     root.engineMessage = ""
+    root.errorCard = null
+    root.errorDiagnosis = ""
     root.phase = "checking"
     checkProcess.generation = root.runGeneration
     checkProcess.stdinText = text
@@ -305,46 +342,90 @@ Item {
     root.showBinaryMissing()
   }
 
+  // The binary never started, so there is no stdout at all. Spec section 8
+  // puts that on the same card as no JSON on stdout.
   function showBinaryMissing() {
-    root.showNotice("Grammachy could not run the check",
-      "The companion tool is missing or out of date. See docs/dev.md for how to put a binary in bin/grammachy.")
+    root.showError(Errors.BAD_ARGUMENTS, "")
   }
 
-  // Spec section 8 gives each error code its own card. `text_too_long` and
-  // `empty_selection` land here; the rest keep the plain notice until the
-  // error cards ticket dresses them.
+  // Spec section 8 gives each error code its own card. `text_too_long` keeps
+  // the card of section 6, which this popup owns; every other code gets its
+  // card from `ui/errors.js`.
   function showError(code, message) {
     root.engineMessage = message
-    if (code === "text_too_long") {
+    var settled = Errors.known(code)
+    if (settled === Errors.TEXT_TOO_LONG) {
+      root.errorCard = null
       root.phase = "toolong"
       return
     }
-    if (code === "empty_selection") {
-      root.showEmptySelection()
+
+    root.cardSerial += 1
+    root.errorDiagnosis = ""
+    root.errorCard = Errors.card(settled, {
+      engineLabel: root.engineLabel(),
+      engineSlug: root.setting("engine"),
+      message: message
+    })
+    root.phase = "error"
+    if (root.errorCard.needsDiagnosis) root.runDoctor()
+  }
+
+  // Spec section 8: the `engine_unavailable` card shows the one-line diagnosis
+  // that `grammachy doctor` gives for the engine the setting names.
+  function runDoctor() {
+    doctorProcess.command = [root.binaryPath, "doctor", "--engine", root.setting("engine"), "--json"]
+    if (doctorProcess.running) {
+      doctorProcess.restartQueued = true
+      doctorProcess.running = false
       return
     }
-    root.showNotice("The check did not finish", message)
+    doctorProcess.running = true
+  }
+
+  function onDoctorOutput(text, serial) {
+    if (serial !== root.cardSerial) return
+    var report = null
+    try {
+      report = JSON.parse(text)
+    } catch (error) {
+      report = null
+    }
+    // A doctor that cannot answer leaves the card as it is. The body already
+    // says the engine is not running, which is the part that matters.
+    if (!Util.isPlainObject(report) || report.contractVersion !== 1) return
+    root.errorDiagnosis = typeof report.diagnosis === "string" ? report.diagnosis : ""
+  }
+
+  // Spec section 8: Retry re-runs the Check with the same Selection and no
+  // re-capture, so a selection that changed in the source window since the
+  // failure cannot reach the engine.
+  function retryCheck() {
+    if (root.selectionText.length === 0) return
+    root.runCheck(root.selectionText)
+  }
+
+  // Where each button of an error card goes, spec section 8.
+  function runErrorAction(action) {
+    if (action === Errors.CLOSE) root.close()
+    else if (action === Errors.RETRY) root.retryCheck()
+    // Settings opens the Settings view of the same card, so the error card is
+    // still behind it when the user comes back.
+    else if (action === Errors.SETTINGS) root.settingsOpen = true
+    else if (action === Errors.SETUP) root.showSetup()
+    else if (action === Errors.COMPOSE) root.showCompose()
   }
 
   function onCheckOutput(text, generation) {
     if (!root.isLive(generation)) return
-    var envelope = null
-    try {
-      envelope = JSON.parse(text)
-    } catch (error) {
-      envelope = null
-    }
 
-    if (!Util.isPlainObject(envelope) || envelope.contractVersion !== 1) {
-      root.showBinaryMissing()
+    var answer = Errors.readCheck(text)
+    if (answer.error) {
+      root.showError(answer.error.code, answer.error.message)
       return
     }
 
-    if (Util.isPlainObject(envelope.error)) {
-      root.showError(String(envelope.error.code || ""), String(envelope.error.message || ""))
-      return
-    }
-
+    var envelope = answer.result
     var verified = Splice.verifiedIssues(root.selectionText, envelope.issues || [])
     for (var i = 0; i < verified.dropped.length; i++) {
       var dropped = verified.dropped[i]
@@ -580,6 +661,32 @@ Item {
     }
   }
 
+  // The one-line engine diagnosis of the `engine_unavailable` card. It runs
+  // after the failed Check, so a slow doctor never delays the card itself.
+  Process {
+    id: doctorProcess
+    property int startedSerial: 0
+    property bool restartQueued: false
+    // Snapshot at start.
+    onStarted: doctorProcess.startedSerial = root.cardSerial
+    // A second card while the first doctor is still out may be about another
+    // engine, so the answer has to come from a run that started after the card.
+    onRunningChanged: {
+      if (doctorProcess.running) return
+      if (!doctorProcess.restartQueued) return
+      doctorProcess.restartQueued = false
+      doctorProcess.running = true
+    }
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root.onDoctorOutput(text, doctorProcess.startedSerial)
+    }
+    stderr: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: if (text.length > 0) console.warn("grammachy doctor:", text)
+    }
+  }
+
   Process {
     id: copyProcess
     property string text: ""
@@ -680,7 +787,10 @@ Item {
         autoReplace: root.autoReplace
         noticeTitle: root.noticeTitle
         noticeBody: root.noticeBody
+        noticeMeta: root.noticeMeta
         engineMessage: root.engineMessage
+        errorCard: root.errorCard
+        diagnosis: root.errorDiagnosis
 
         settingsOpen: root.settingsOpen
         nativeLanguage: root.setting("nativeLanguage")
@@ -698,6 +808,7 @@ Item {
         onFocusRequested: function(index) { root.focusIndex = index }
         onCheckFirstRequested: root.checkFirstUnits()
         onComposeRequested: root.showCompose()
+        onErrorActionRequested: function(action) { root.runErrorAction(action) }
         onCloseRequested: root.close()
       }
     }

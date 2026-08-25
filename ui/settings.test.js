@@ -11,6 +11,7 @@ const {
   entryOf,
   defaultOf,
   valueOf,
+  labelOf,
   normalised,
   mergedEntry
 } = require("./settings.js")
@@ -140,4 +141,18 @@ test("the dropdown rows are the spec section 7 values, in that order", () => {
 test("every default is itself a value the dropdowns can select", () => {
   assert.ok(NATIVE_LANGUAGE_OPTIONS.some((o) => o.value === defaultOf("nativeLanguage")))
   assert.ok(ENGINE_OPTIONS.some((o) => o.value === defaultOf("engine")))
+})
+
+// Spec section 8 names the engine on its error cards, and it has to be the
+// name the Settings dropdown shows, so both read the same list.
+test("a label comes from the option list the dropdown draws", () => {
+  assert.equal(labelOf(ENGINE_OPTIONS, "languagetool"), "LanguageTool")
+  assert.equal(labelOf(ENGINE_OPTIONS, "openai"), "Local LLM")
+  assert.equal(labelOf(ENGINE_OPTIONS, "harper"), "Harper")
+  assert.equal(labelOf(NATIVE_LANGUAGE_OPTIONS, "ms"), "Malay")
+})
+
+test("an unlisted value labels itself rather than nothing", () => {
+  assert.equal(labelOf(ENGINE_OPTIONS, "claude"), "claude")
+  assert.equal(labelOf(null, "claude"), "claude")
 })
