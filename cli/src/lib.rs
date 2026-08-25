@@ -2,5 +2,6 @@
 
 pub mod args;
 pub mod check;
+pub mod chunk;
 pub mod engine;
 pub mod envelope;
