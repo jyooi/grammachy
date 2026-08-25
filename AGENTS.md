@@ -21,7 +21,8 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   `cli/src/engines/languagetool/unit.rs` documents the exact server command read from the pacman package, including the two sharp edges of `/usr/bin/languagetool`: it needs `JAVA_HOME`, and `--http` is what picks the plain HTTP server.
   `GRAMMACHY_LANGUAGETOOL_ADDRESS` and `GRAMMACHY_LANGUAGETOOL_START=never` are the test seams; `cli/tests/cli.rs` sets both.
   Live tests in `cli/tests/languagetool_live.rs` and `cli/tests/interference_catch_rate.rs` skip when `127.0.0.1:8081` is silent, which keeps CI green without the package.
-- Settings resolve in `cli/src/settings.rs`: flags, then the plugin entry in `~/.config/omarchy/shell.json`, then the defaults of spec section 7.
+- Settings resolve in `cli/src/settings.rs`: flags, then the plugin entry in `$HOME/.config/omarchy/shell.json`, then the defaults of spec section 7.
+  The product path is that HOME path only. The CLI does not read `$XDG_CONFIG_HOME`.
   The entry is looked up by plugin id in `bar.layout.{left,center,right}` first and in the top level `plugins` array next, the order `shell.qml` writes them in.
   `GRAMMACHY_SHELL_JSON` is the test seam; no test may read or write the real file.
 - `manifest.json` version must equal the crate version; `cli/tests/manifest.rs` enforces that.

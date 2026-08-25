@@ -87,9 +87,6 @@ pub fn entry_path() -> Option<PathBuf> {
             return Some(path);
         }
     }
-    if let Some(dir) = std::env::var_os("XDG_CONFIG_HOME").filter(|dir| !dir.is_empty()) {
-        return Some(PathBuf::from(dir).join("omarchy/shell.json"));
-    }
     let home = std::env::var_os("HOME").filter(|home| !home.is_empty())?;
     Some(PathBuf::from(home).join(".config/omarchy/shell.json"))
 }

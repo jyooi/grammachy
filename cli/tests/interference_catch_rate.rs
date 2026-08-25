@@ -9,6 +9,7 @@
 
 use std::io::Write;
 use std::net::{SocketAddr, TcpStream};
+use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
@@ -51,7 +52,10 @@ fn server_answers() -> bool {
 
 fn check(text: &str, native: &str) -> Value {
     let mut command = Command::new(env!("CARGO_BIN_EXE_grammachy"));
-    command.arg("check");
+    command.arg("check").env(
+        "GRAMMACHY_SHELL_JSON",
+        Path::new(env!("CARGO_TARGET_TMPDIR")).join("no-such-shell.json"),
+    );
     if native != "none" {
         command.args(["--native", native]);
     }
