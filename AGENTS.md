@@ -18,7 +18,7 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 - Engine adapters plug into the `Engine` trait in `cli/src/engine.rs` and live under `cli/src/engines/`.
   `engine::resolve` answers `None` for a slug with no adapter, which surfaces as `engine_unavailable`.
   Every adapter maps its own engine answer to Issues and then hands the list to `issues::normalise`, which owns the sort, overlap, and no-op guarantees of spec section 5.1.
-- The `harper` adapter runs `harper-core` 2.8 in process and needs no server.
+- The `harper` adapter runs `harper-core` 2.8 in process and needs no server. Debug builds time out at 60 s so CI can load the dictionary. The shipped binary keeps the spec limit of 10 s.
   Harper counts `char`s and the contract counts UTF-16 code units, so `lints.rs` converts through `text::utf16_offsets`.
   The dictionary and rule set are built inside `Harper::check` only, so the default path never pays for them; `cli/tests/harper_lazy.rs` guards that with a counter.
   `harper-core` is edition 2024, which is why the crate `rust-version` is 1.85.
