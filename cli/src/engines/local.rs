@@ -1,0 +1,82 @@
+//! What the two local-server engines share.
+//!
+//! `languagetool` and `openai` both talk HTTP to a server on the loopback
+//! interface and both start that server themselves as a transient user unit
+//! when the port does not answer. Spec section 4 names the units,
+//! `grammachy-languagetool` and `grammachy-llama`; spec section 10 fixes the
+//! mechanism: `systemd-run --user` only, so removing the plugin leaves no unit
+//! file behind. This module holds the parts that do not differ between them.
+
+use std::io::ErrorKind;
+use std::path::PathBuf;
+use std::process::Command;
+
+/// Why the unit did not start.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StartFailure(pub String);
+
+/// The program, arguments, and environment that run one server.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ServerCommand {
+    pub program: String,
+    pub arguments: Vec<String>,
+    pub environment: Vec<(String, String)>,
+}
+
+/// Start one transient user unit, or answer `Ok(())` when it already runs.
+pub fn start_unit(
+    unit: &str,
+    description: &str,
+    command: &ServerCommand,
+) -> Result<(), StartFailure> {
+    let mut systemd_run = Command::new("systemd-run");
+    systemd_run
+        .arg("--user")
+        .arg(format!("--unit={unit}"))
+        .arg(format!("--description={description}"))
+        // Collect a failed unit so the next Check may start it again.
+        .arg("--collect");
+    for (name, value) in &command.environment {
+        systemd_run.arg(format!("--setenv={name}={value}"));
+    }
+    let output = systemd_run
+        .arg("--")
+        .arg(&command.program)
+        .args(&command.arguments)
+        .output()
+        .map_err(|error| StartFailure(format!("systemd-run could not run: {error}")))?;
+
+    if output.status.success() {
+        return Ok(());
+    }
+
+    let message = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    // A unit left from an earlier Check is the outcome this call wanted.
+    if message.contains("already exists") {
+        return Ok(());
+    }
+    Err(StartFailure(format!(
+        "systemd-run could not start {unit}: {message}"
+    )))
+}
+
+/// Where a server keeps the files it only needs while the session lasts.
+pub fn runtime_directory() -> PathBuf {
+    match std::env::var_os("XDG_RUNTIME_DIR") {
+        Some(value) if !value.is_empty() => PathBuf::from(value),
+        _ => std::env::temp_dir(),
+    }
+}
+
+/// Whether an I/O error means nothing is listening yet.
+pub fn is_unreachable(kind: ErrorKind) -> bool {
+    matches!(
+        kind,
+        ErrorKind::ConnectionRefused
+            | ErrorKind::ConnectionReset
+            | ErrorKind::ConnectionAborted
+            | ErrorKind::AddrNotAvailable
+            | ErrorKind::NotConnected
+            | ErrorKind::BrokenPipe
+    )
+}

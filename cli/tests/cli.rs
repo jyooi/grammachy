@@ -23,7 +23,7 @@ fn silent_address() -> String {
     address
 }
 
-/// Point every run at a dead address and forbid the unit start, so the binary
+/// Point every run at a dead address and forbid every unit start, so the binary
 /// tests exercise argument handling only and never touch systemd. The settings
 /// file points at a path that does not exist, so no run reads the developer's
 /// real `~/.config/omarchy/shell.json` (spec section 7).
@@ -31,6 +31,7 @@ fn no_engine(command: &mut Command) -> &mut Command {
     command
         .env("GRAMMACHY_LANGUAGETOOL_ADDRESS", silent_address())
         .env("GRAMMACHY_LANGUAGETOOL_START", "never")
+        .env("GRAMMACHY_LLAMA_START", "never")
         .env(
             "GRAMMACHY_SHELL_JSON",
             scratch_dir().join("no-such-shell.json"),
@@ -199,20 +200,42 @@ fn invalid_utf8_on_stdin_prints_bad_arguments() {
 }
 
 #[test]
-fn an_engine_with_no_adapter_yet_is_a_clean_engine_unavailable() {
-    let result = run(&["check", "--engine", "openai"], "He go home.");
+fn a_silent_model_server_is_a_clean_engine_unavailable() {
+    let settings = settings_file(
+        "openai-silent.json",
+        &format!(r#""openaiBaseUrl": "http://{}""#, silent_address()),
+    );
+
+    let result = run_with_settings(&["check", "--engine", "openai"], "He go home.", &settings);
     let value = envelope(&result);
 
     assert_eq!(result.status, 1);
     assert_eq!(value["contractVersion"], 1);
     assert_eq!(value["error"]["code"], "engine_unavailable");
-    assert!(
-        value["error"]["message"]
-            .as_str()
-            .expect("the message is a string")
-            .contains("openai"),
-        "the message names the engine: {value}"
-    );
+}
+
+#[test]
+fn a_remote_openai_base_url_is_bad_arguments() {
+    for base_url in ["https://api.openai.com/v1", "http://example.com:8080"] {
+        let settings = settings_file(
+            "openai-remote.json",
+            &format!(r#""openaiBaseUrl": "{base_url}""#),
+        );
+
+        let result = run_with_settings(&["check", "--engine", "openai"], "He go home.", &settings);
+        let value = envelope(&result);
+
+        assert_eq!(result.status, 1);
+        assert_eq!(value["contractVersion"], 1);
+        assert_eq!(value["error"]["code"], "bad_arguments", "{base_url}");
+        assert!(
+            value["error"]["message"]
+                .as_str()
+                .expect("the message is a string")
+                .contains("only localhost"),
+            "the message names the rule: {value}"
+        );
+    }
 }
 
 /// The in-process engine of spec section 4 needs no unit and no port, so it
