@@ -4,6 +4,7 @@
 use serde::Deserialize;
 
 use crate::envelope::{Category, Issue};
+use crate::issues::normalise;
 use crate::text::utf16_slice;
 
 /// Only the fields the adapter reads. LanguageTool sends many more.
@@ -154,27 +155,17 @@ fn issue_of(text: &str, item: &Match) -> Option<Issue> {
 
 /// Map a whole response to the Issue list the envelope carries.
 ///
-/// The result keeps every guarantee of spec section 5.1: sorted by `start`,
+/// [`normalise`] keeps every guarantee of spec section 5.1: sorted by `start`,
 /// never overlapping because the earlier Issue wins, and never carrying a `fix`
 /// equal to the `original`.
 pub fn issues_from(text: &str, response: &CheckResponse) -> Vec<Issue> {
-    let mut issues: Vec<Issue> = response
-        .matches
-        .iter()
-        .filter_map(|item| issue_of(text, item))
-        .collect();
-
-    // A shorter span first keeps the tighter of two Issues that start together.
-    issues.sort_by_key(|issue| (issue.start, issue.end));
-
-    let mut kept: Vec<Issue> = Vec::with_capacity(issues.len());
-    for issue in issues {
-        match kept.last() {
-            Some(previous) if issue.start < previous.end => continue,
-            _ => kept.push(issue),
-        }
-    }
-    kept
+    normalise(
+        response
+            .matches
+            .iter()
+            .filter_map(|item| issue_of(text, item))
+            .collect(),
+    )
 }
 
 #[cfg(test)]

@@ -1,8 +1,9 @@
 //! The interference fixture, spec section 13.
 //!
-//! This prints the catch rate of the default engine and never gates. A drop in
-//! the number is a release decision recorded in `docs/benchmarks/`, not a red
-//! test. The case skips when `127.0.0.1:8081` is silent.
+//! This prints the catch rate of each engine and never gates. A drop in a
+//! number is a release decision recorded in `docs/benchmarks/`, not a red test.
+//! The LanguageTool case skips when `127.0.0.1:8081` is silent. The Harper case
+//! always runs, because that engine needs no server.
 //!
 //! Run it with `cargo test --test interference_catch_rate -- --nocapture` to
 //! see the report, because cargo hides the output of a passing test.
@@ -13,6 +14,9 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
+use grammachy::args::{CheckOptions, EngineSlug};
+use grammachy::engine;
+use grammachy::envelope::Issue;
 use serde::Deserialize;
 use serde_json::Value;
 
@@ -86,6 +90,87 @@ fn caught(issues: &[Value], expected: &Span) -> bool {
     })
 }
 
+/// One line per number, the same shape for every engine.
+fn report(engine: &str, tally: &Tally) {
+    let rate = 100.0 * tally.caught as f64 / tally.interference as f64;
+    println!("{engine} on the interference fixture");
+    println!(
+        "  caught          {} of {} ({rate:.0} percent)",
+        tally.caught, tally.interference
+    );
+    println!(
+        "  exact fix       {} of {}",
+        tally.exact_fixes, tally.interference
+    );
+    println!(
+        "  false positives {} of {} correct sentences",
+        tally.false_positives, tally.clean
+    );
+    println!("  missed          {}", tally.misses.join(", "));
+}
+
+#[derive(Debug, Default)]
+struct Tally {
+    interference: usize,
+    caught: usize,
+    exact_fixes: usize,
+    clean: usize,
+    false_positives: usize,
+    misses: Vec<String>,
+}
+
+/// Harper runs in process, so the whole fixture costs one dictionary build
+/// rather than one process per sentence. It ignores the Native language.
+#[test]
+fn the_fixture_prints_the_harper_catch_rate() {
+    let harper = engine::resolve(EngineSlug::Harper).expect("this build has the harper adapter");
+    let options = CheckOptions {
+        engine: EngineSlug::Harper,
+        ..CheckOptions::default()
+    };
+
+    let mut tally = Tally::default();
+    for sentence in &fixture() {
+        let issues: Vec<Issue> = harper
+            .check(&sentence.text, &options)
+            .unwrap_or_else(|failure| panic!("{} answered {failure:?}", sentence.id));
+
+        match &sentence.expected_span {
+            None => {
+                tally.clean += 1;
+                if !issues.is_empty() {
+                    tally.false_positives += 1;
+                }
+            }
+            Some(expected) => {
+                tally.interference += 1;
+                let hit = issues
+                    .iter()
+                    .any(|issue| issue.start < expected.end && expected.start < issue.end);
+                if hit {
+                    tally.caught += 1;
+                    if issues
+                        .iter()
+                        .any(|issue| Some(issue.fix.as_str()) == sentence.expected_fix.as_deref())
+                    {
+                        tally.exact_fixes += 1;
+                    }
+                } else {
+                    tally.misses.push(sentence.id.clone());
+                }
+            }
+        }
+    }
+
+    report("Harper", &tally);
+
+    // The fixture reports, it does not gate (spec section 13).
+    assert!(
+        tally.interference > 0,
+        "the fixture holds interference sentences"
+    );
+}
+
 #[test]
 fn the_fixture_prints_the_catch_rate() {
     if !server_answers() {
@@ -133,12 +218,17 @@ fn the_fixture_prints_the_catch_rate() {
         }
     }
 
-    let rate = 100.0 * caught_count as f64 / interference as f64;
-    println!("LanguageTool on the interference fixture");
-    println!("  caught          {caught_count} of {interference} ({rate:.0} percent)");
-    println!("  exact fix       {exact_fixes} of {interference}");
-    println!("  false positives {false_positives} of {clean} correct sentences");
-    println!("  missed          {}", misses.join(", "));
+    report(
+        "LanguageTool",
+        &Tally {
+            interference,
+            caught: caught_count,
+            exact_fixes,
+            clean,
+            false_positives,
+            misses,
+        },
+    );
 
     // The fixture reports, it does not gate (spec section 13).
     assert!(interference > 0, "the fixture holds interference sentences");

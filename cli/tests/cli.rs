@@ -168,12 +168,13 @@ fn every_valid_flag_value_is_accepted() {
     }
 
     for engine in ["languagetool", "openai", "harper"] {
+        // `harper` runs in process and answers a result, so there is no code.
         let result = run(&["check", "--engine", engine], "Some text.");
-        let code = envelope(&result)["error"]["code"]
-            .as_str()
-            .unwrap()
-            .to_string();
-        assert_ne!(code, "bad_arguments", "--engine {engine} is valid");
+        let value = envelope(&result);
+        assert_ne!(
+            value["error"]["code"], "bad_arguments",
+            "--engine {engine} is valid"
+        );
     }
 
     let result = run(&["check", "--target", "en-US"], "Some text.");
@@ -199,24 +200,37 @@ fn invalid_utf8_on_stdin_prints_bad_arguments() {
 
 #[test]
 fn an_engine_with_no_adapter_yet_is_a_clean_engine_unavailable() {
-    for engine in ["harper", "openai"] {
-        let result = run(&["check", "--engine", engine], "He go home.");
-        let value = envelope(&result);
+    let result = run(&["check", "--engine", "openai"], "He go home.");
+    let value = envelope(&result);
 
-        assert_eq!(result.status, 1);
-        assert_eq!(value["contractVersion"], 1);
-        assert_eq!(
-            value["error"]["code"], "engine_unavailable",
-            "--engine {engine}"
-        );
-        assert!(
-            value["error"]["message"]
-                .as_str()
-                .expect("the message is a string")
-                .contains(engine),
-            "the message names the engine: {value}"
-        );
-    }
+    assert_eq!(result.status, 1);
+    assert_eq!(value["contractVersion"], 1);
+    assert_eq!(value["error"]["code"], "engine_unavailable");
+    assert!(
+        value["error"]["message"]
+            .as_str()
+            .expect("the message is a string")
+            .contains("openai"),
+        "the message names the engine: {value}"
+    );
+}
+
+/// The in-process engine of spec section 4 needs no unit and no port, so it
+/// answers real Issues in the run that forbids both.
+#[test]
+fn the_harper_engine_answers_issues_with_no_unit_running() {
+    let result = run(&["check", "--engine", "harper"], "He go home.");
+    let value = envelope(&result);
+
+    assert_eq!(result.status, 0);
+    assert_eq!(value["contractVersion"], 1);
+    assert_eq!(value["engine"], "harper");
+
+    let issues = value["issues"].as_array().expect("issues is an array");
+    assert!(!issues.is_empty(), "harper found nothing in {value}");
+    assert_eq!(issues[0]["original"], "go");
+    assert_eq!(issues[0]["fix"], "goes");
+    assert_eq!(issues[0]["category"], "grammar");
 }
 
 #[test]
@@ -224,7 +238,8 @@ fn the_stored_engine_applies_when_no_flag_gives_one() {
     let settings = settings_file("stored-engine.json", r#""engine": "harper""#);
     let result = run_with_settings(&["check"], "He go home.", &settings);
 
-    assert_eq!(envelope(&result)["error"]["code"], "engine_unavailable");
+    // The dead address would have made the default engine answer unavailable.
+    assert_eq!(envelope(&result)["engine"], "harper");
 }
 
 #[test]

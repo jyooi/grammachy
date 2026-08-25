@@ -17,10 +17,15 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   `check` uses `Envelope`, `chunk` uses `ChunkEnvelope` in `cli/src/chunk.rs`.
 - Engine adapters plug into the `Engine` trait in `cli/src/engine.rs` and live under `cli/src/engines/`.
   `engine::resolve` answers `None` for a slug with no adapter, which surfaces as `engine_unavailable`.
+  Every adapter maps its own engine answer to Issues and then hands the list to `issues::normalise`, which owns the sort, overlap, and no-op guarantees of spec section 5.1.
+- The `harper` adapter runs `harper-core` 2.8 in process and needs no server.
+  Harper counts `char`s and the contract counts UTF-16 code units, so `lints.rs` converts through `text::utf16_offsets`.
+  The dictionary and rule set are built inside `Harper::check` only, so the default path never pays for them; `cli/tests/harper_lazy.rs` guards that with a counter.
+  `harper-core` is edition 2024, which is why the crate `rust-version` is 1.85.
 - The `languagetool` adapter starts the transient unit itself, so tests must never reach the real one.
   `cli/src/engines/languagetool/unit.rs` documents the exact server command read from the pacman package, including the two sharp edges of `/usr/bin/languagetool`: it needs `JAVA_HOME`, and `--http` is what picks the plain HTTP server.
   `GRAMMACHY_LANGUAGETOOL_ADDRESS` and `GRAMMACHY_LANGUAGETOOL_START=never` are the test seams; `cli/tests/cli.rs` sets both.
-  Live tests in `cli/tests/languagetool_live.rs` and `cli/tests/interference_catch_rate.rs` skip when `127.0.0.1:8081` is silent, which keeps CI green without the package.
+  Live tests in `cli/tests/languagetool_live.rs` and the LanguageTool case of `cli/tests/interference_catch_rate.rs` skip when `127.0.0.1:8081` is silent, which keeps CI green without the package.
 - Settings resolve in `cli/src/settings.rs`: flags, then the plugin entry in `$HOME/.config/omarchy/shell.json`, then the defaults of spec section 7.
   The product path is that HOME path only. The CLI does not read `$XDG_CONFIG_HOME`.
   The entry is looked up by plugin id in `bar.layout.{left,center,right}` first and in the top level `plugins` array next, the order `shell.qml` writes them in.
