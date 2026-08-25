@@ -70,17 +70,33 @@ fn a_suggestion_the_text_does_not_hold_is_dropped() {
 }
 
 #[test]
-fn overlapping_suggestions_keep_the_earlier_one() {
+fn the_recorded_es04_suggestions_anchor_on_whole_tokens() {
     let issues = issues_from(RAIN_TEXT, &response("openai-overlap.json")).expect("the answer maps");
 
-    // "a" first appears inside "raining", so the two suggestions address the
-    // same code units and only the earlier Issue survives.
-    assert_eq!(issues.len(), 1, "{issues:?}");
+    assert_eq!(issues.len(), 2, "{issues:?}");
     assert_eq!(issues[0].start, 3);
     assert_eq!(issues[0].end, 10);
     assert_eq!(issues[0].original, "raining");
     assert_eq!(issues[0].fix, "rain");
+    assert_eq!(issues[1].start, 11);
+    assert_eq!(issues[1].end, 12);
+    assert_eq!(issues[1].original, "a");
+    assert_eq!(issues[1].fix, "the");
     slice_holds(RAIN_TEXT, &issues);
+}
+
+#[test]
+fn accepting_the_article_does_not_rewrite_inside_another_word() {
+    let issues = issues_from(RAIN_TEXT, &response("openai-overlap.json")).expect("the answer maps");
+    let article = issues
+        .iter()
+        .find(|issue| issue.original == "a")
+        .expect("the article is an Issue");
+
+    let corrected = apply_accept(RAIN_TEXT, article);
+
+    assert_eq!(corrected, "Is raining the lot in Madrid today.");
+    assert!(!corrected.contains("rtheining"));
 }
 
 #[test]
@@ -192,6 +208,15 @@ fn an_answer_with_no_message_is_an_engine_error() {
         serde_json::from_str(r#"{"error": {"message": "no model loaded"}}"#).expect("it parses");
     let message = issues_from(BOOK_TEXT, &failed).expect_err("the server failed");
     assert!(message.contains("no model loaded"), "{message}");
+}
+
+/// What the shell does on Accept: replace the UTF-16 span with the fix.
+fn apply_accept(text: &str, issue: &Issue) -> String {
+    let units: Vec<u16> = text.encode_utf16().collect();
+    let mut out = units[..issue.start].to_vec();
+    out.extend(issue.fix.encode_utf16());
+    out.extend(&units[issue.end..]);
+    String::from_utf16(&out).expect("the corrected text is UTF-16")
 }
 
 /// One chat completion carrying `content` as the model's answer.

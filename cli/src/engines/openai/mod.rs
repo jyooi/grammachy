@@ -112,6 +112,8 @@ impl Openai {
     ) -> Result<ChatResponse, EngineFailure> {
         let agent: ureq::Agent = ureq::Agent::config_builder()
             .timeout_global(Some(self.config.timeout))
+            .proxy(None)
+            .max_redirects(0)
             .build()
             .into();
 

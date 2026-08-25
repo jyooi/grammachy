@@ -81,6 +81,35 @@ impl Stub {
         Stub { address, seen }
     }
 
+    /// A 307 whose Location is another server, so a follow would be visible.
+    fn redirecting(location: &str) -> Stub {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("a loopback port is free");
+        let address = listener
+            .local_addr()
+            .expect("the port is known")
+            .to_string();
+        let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let recorder = Arc::clone(&seen);
+        let location = location.to_string();
+
+        thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else { break };
+                let request = read_request(&mut stream);
+                recorder
+                    .lock()
+                    .expect("the log is not poisoned")
+                    .push(request);
+                let _ = write!(
+                    stream,
+                    "HTTP/1.1 307 Temporary Redirect\r\nLocation: {location}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                );
+            }
+        });
+
+        Stub { address, seen }
+    }
+
     fn base_url(&self) -> String {
         format!("http://{}", self.address)
     }
@@ -341,6 +370,28 @@ fn the_request_carries_the_prompt_the_model_and_the_key() {
     assert!(request.contains("some-other-model"), "{request}");
     assert!(request.contains("Mandarin Chinese"), "{request}");
     assert!(request.contains("She bought three book"), "{request}");
+}
+
+#[test]
+fn a_redirect_is_not_followed() {
+    let target = Stub::serving(Answer::Json(ANSWER));
+    let location = format!("{}/v1/chat/completions", target.base_url());
+    let stub = Stub::redirecting(&location);
+    let starts = Starts::default();
+
+    let failure = adapter(Duration::from_secs(2), true, &starts)
+        .check(TEXT, &options(&stub.base_url()))
+        .expect_err("a redirect is not a chat completion");
+
+    assert_eq!(stub.requests().len(), 1, "the local port is contacted once");
+    assert!(
+        target.requests().is_empty(),
+        "the POST must not repeat to Location"
+    );
+    assert!(
+        matches!(failure, EngineFailure::Failed(_)),
+        "expected engine_error, got {failure:?}"
+    );
 }
 
 #[test]

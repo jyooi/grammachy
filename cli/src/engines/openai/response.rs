@@ -8,7 +8,7 @@
 //! the fix equals the original, and unanchored ones. Neither is an Issue.
 
 use serde::Deserialize;
-use serde_json::Value;
+use serde_json::{Map, Value};
 
 use crate::envelope::{sorted_disjoint, Category, Issue};
 use crate::text::{utf16_len, utf16_slice};
@@ -47,6 +47,28 @@ struct Suggestion {
     reason: String,
     #[serde(default)]
     category: String,
+    /// Optional start, offset, or position the model emitted. Placement only.
+    #[serde(flatten)]
+    extra: Map<String, Value>,
+}
+
+impl Suggestion {
+    /// A claimed UTF-16 start, when the model gave one.
+    fn position_hint(&self) -> Option<usize> {
+        for key in ["start", "offset", "position"] {
+            let Some(value) = self.extra.get(key) else {
+                continue;
+            };
+            let parsed = value
+                .as_u64()
+                .map(|number| number as usize)
+                .or_else(|| value.as_str().and_then(|text| text.parse().ok()));
+            if parsed.is_some() {
+                return parsed;
+            }
+        }
+        None
+    }
 }
 
 /// The Issues of one answer, or why the answer is not one.
@@ -76,11 +98,12 @@ pub fn issues_from_content(text: &str, content: &str) -> Vec<Issue> {
     let mut placed: Vec<Issue> = Vec::with_capacity(suggestions.len());
     for suggestion in &suggestions {
         // The same quotation twice means two occurrences, not one twice.
-        let seen = placed
+        let used: Vec<(usize, usize)> = placed
             .iter()
             .filter(|issue| issue.original == suggestion.original)
-            .count();
-        if let Some(issue) = issue_of(text, suggestion, seen) {
+            .map(|issue| (issue.start, issue.end))
+            .collect();
+        if let Some(issue) = issue_of(text, suggestion, &used) {
             placed.push(issue);
         }
     }
@@ -100,9 +123,9 @@ fn parse_array(content: &str) -> Option<Vec<Suggestion>> {
 
 /// One suggestion as an Issue, or nothing when it does not earn one.
 ///
-/// `skip` is how many earlier Issues already quoted the same text, so a
-/// repeated quotation lands on the next occurrence rather than on the first.
-fn issue_of(text: &str, suggestion: &Suggestion, skip: usize) -> Option<Issue> {
+/// `used` is the spans already claimed by earlier Issues that quoted the same
+/// text, so a repeated quotation lands on the next unused occurrence.
+fn issue_of(text: &str, suggestion: &Suggestion, used: &[(usize, usize)]) -> Option<Issue> {
     let fix = suggestion.fix.as_ref()?;
     if suggestion.original.is_empty() {
         return None;
@@ -112,7 +135,7 @@ fn issue_of(text: &str, suggestion: &Suggestion, skip: usize) -> Option<Issue> {
         return None;
     }
 
-    let (start, end) = place(text, &suggestion.original, skip)?;
+    let (start, end) = place(text, &suggestion.original, used, suggestion.position_hint())?;
     // The text is what the shell will slice, so the quotation must be exact.
     if utf16_slice(text, start, end)? != suggestion.original {
         return None;
@@ -135,12 +158,58 @@ fn issue_of(text: &str, suggestion: &Suggestion, skip: usize) -> Option<Issue> {
     })
 }
 
-/// The UTF-16 span of the `skip`-th occurrence of `original`, or nothing when
-/// the model quoted something the text does not hold.
-fn place(text: &str, original: &str, skip: usize) -> Option<(usize, usize)> {
-    let (byte_index, _) = text.match_indices(original).nth(skip)?;
-    let start = utf16_len(&text[..byte_index]);
-    Some((start, start + utf16_len(original)))
+/// The UTF-16 span of one whole-token occurrence of `original`.
+///
+/// A match must not sit inside another word. `used` holds spans already claimed,
+/// so a repeated quotation lands on the next unused occurrence. When the model
+/// gives a position hint, the unused match nearest that hint wins. The function
+/// returns none when no whole-token match exists.
+fn place(
+    text: &str,
+    original: &str,
+    used: &[(usize, usize)],
+    hint: Option<usize>,
+) -> Option<(usize, usize)> {
+    let mut chosen: Option<(usize, usize)> = None;
+    let mut chosen_distance = usize::MAX;
+
+    for (byte_index, _) in text.match_indices(original) {
+        let end_byte = byte_index + original.len();
+        if !is_whole_token(text, byte_index, end_byte) {
+            continue;
+        }
+        let start = utf16_len(&text[..byte_index]);
+        let end = start + utf16_len(original);
+        if used.iter().any(|span| *span == (start, end)) {
+            continue;
+        }
+        match hint {
+            None => return Some((start, end)),
+            Some(hint) => {
+                let distance = start.abs_diff(hint);
+                if chosen.is_none() || distance < chosen_distance {
+                    chosen = Some((start, end));
+                    chosen_distance = distance;
+                }
+            }
+        }
+    }
+    chosen
+}
+
+/// True when this match does not start or end inside another word.
+fn is_whole_token(text: &str, start: usize, end: usize) -> bool {
+    let before = text[..start].chars().next_back();
+    let after = text.get(end..).and_then(|rest| rest.chars().next());
+    let first = text.get(start..end).and_then(|span| span.chars().next());
+    let last = text
+        .get(start..end)
+        .and_then(|span| span.chars().next_back());
+    let glued_left =
+        first.is_some_and(char::is_alphanumeric) && before.is_some_and(char::is_alphanumeric);
+    let glued_right =
+        last.is_some_and(char::is_alphanumeric) && after.is_some_and(char::is_alphanumeric);
+    !glued_left && !glued_right
 }
 
 /// One English sentence with no rule id (spec section 5.1).
@@ -183,9 +252,9 @@ mod tests {
     fn a_repeated_quotation_lands_on_the_next_occurrence() {
         let text = "She read a book and he read a book.";
 
-        assert_eq!(place(text, "book", 0), Some((11, 15)));
-        assert_eq!(place(text, "book", 1), Some((30, 34)));
-        assert_eq!(place(text, "book", 2), None);
+        assert_eq!(place(text, "book", &[], None), Some((11, 15)));
+        assert_eq!(place(text, "book", &[(11, 15)], None), Some((30, 34)));
+        assert_eq!(place(text, "book", &[(11, 15), (30, 34)], None), None);
     }
 
     #[test]
@@ -193,7 +262,21 @@ mod tests {
         let text = "\u{1F600} He go home.";
 
         // The emoji is two UTF-16 code units, so "go" starts at 6, not at 5.
-        assert_eq!(place(text, "go", 0), Some((6, 8)));
+        assert_eq!(place(text, "go", &[], None), Some((6, 8)));
+    }
+
+    #[test]
+    fn an_article_does_not_land_inside_another_word() {
+        assert_eq!(place("Is raining a lot.", "a", &[], None), Some((11, 12)));
+        assert_eq!(place("Is raining today.", "a", &[], None), None);
+    }
+
+    #[test]
+    fn a_position_hint_picks_the_nearer_unused_token() {
+        let text = "She read a book and he read a book.";
+
+        assert_eq!(place(text, "book", &[], Some(30)), Some((30, 34)));
+        assert_eq!(place(text, "book", &[(30, 34)], Some(30)), Some((11, 15)));
     }
 
     #[test]

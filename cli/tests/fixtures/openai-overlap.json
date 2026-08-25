@@ -1,5 +1,5 @@
 {
-  "_note": "The two suggestions HUF-171 recorded for item es-04 in results-qwen3b.json, verbatim, for the sentence 'Is raining a lot in Madrid today.'. They overlap: the first 'a' of the sentence sits inside 'raining'. The category field is added, as in openai-response.json.",
+  "_note": "The two suggestions HUF-171 recorded for item es-04 in results-qwen3b.json, verbatim, for the sentence 'Is raining a lot in Madrid today.'. Whole-token placement puts raining at units 3..10 and the article a at 11..12, so both survive. The category field is added, as in openai-response.json.",
   "id": "chatcmpl-oaicompat",
   "object": "chat.completion",
   "created": 1756108800,
