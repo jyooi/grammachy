@@ -6,18 +6,22 @@ use clap::Parser;
 use grammachy::args::{CheckOptions, Cli, Command};
 use grammachy::envelope::{Envelope, ErrorCode};
 use grammachy::settings::StoredSettings;
-use grammachy::{check, chunk};
+use grammachy::{bench, check, chunk};
 
-/// The one envelope a run prints, already rendered.
+/// What a run prints on stdout, already rendered.
+///
+/// Every subcommand but `bench` renders one JSON envelope here (spec section
+/// 5.1). `bench` renders its Markdown report instead, and still renders the
+/// error envelope when it fails.
 struct Output {
-    json: String,
+    text: String,
     exit_code: i32,
 }
 
 impl From<Envelope> for Output {
     fn from(envelope: Envelope) -> Self {
         Output {
-            json: envelope.to_json(),
+            text: envelope.to_json(),
             exit_code: envelope.exit_code(),
         }
     }
@@ -26,7 +30,7 @@ impl From<Envelope> for Output {
 impl From<chunk::ChunkEnvelope> for Output {
     fn from(envelope: chunk::ChunkEnvelope) -> Self {
         Output {
-            json: envelope.to_json(),
+            text: envelope.to_json(),
             exit_code: envelope.exit_code(),
         }
     }
@@ -40,7 +44,7 @@ fn main() -> ExitCode {
     };
 
     let mut stdout = io::stdout().lock();
-    let _ = writeln!(stdout, "{}", output.json);
+    let _ = writeln!(stdout, "{}", output.text);
     let _ = stdout.flush();
 
     match output.exit_code {
@@ -79,6 +83,16 @@ fn run() -> Option<Output> {
             };
             Some(chunk::run(&text).into())
         }
+        Command::Bench(args) => Some(match bench::run(&args, &StoredSettings::load()) {
+            Ok(report) => Output {
+                text: report,
+                exit_code: 0,
+            },
+            Err(message) => {
+                eprintln!("grammachy: {message}");
+                Envelope::error(ErrorCode::BadArguments, message).into()
+            }
+        }),
     }
 }
 

@@ -22,6 +22,23 @@ pub enum Command {
 
     /// Split the Draft on stdin into Chunks that each fit one Check.
     Chunk,
+
+    /// Run the interference fixture through every engine this machine reaches
+    /// and print the benchmark file on stdout (spec section 13.1).
+    Bench(BenchArgs),
+}
+
+#[derive(Debug, Parser)]
+pub struct BenchArgs {
+    /// The engine the named models run on. v1 accepts openai only.
+    ///
+    /// This does not narrow the Engines table: one run prints the whole file.
+    #[arg(long, value_enum)]
+    pub engine: Option<EngineSlug>,
+
+    /// A model to evaluate, repeatable, one Models row each.
+    #[arg(long = "model", value_name = "NAME")]
+    pub models: Vec<String>,
 }
 
 #[derive(Debug, Parser)]
