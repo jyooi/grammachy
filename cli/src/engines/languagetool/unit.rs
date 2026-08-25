@@ -2,6 +2,27 @@
 //!
 //! Spec section 4 and section 10: transient units only, through `systemd-run
 //! --user`, so removing the plugin leaves no unit file behind.
+//!
+//! The server command is the one the `languagetool` pacman package installs.
+//! Package 6.6-2 ships a single launcher, `/usr/bin/languagetool`, which builds
+//! the classpath from `/usr/share/java/languagetool` and execs
+//! `org.languagetool.server.HTTPServer` when it is given `--http`. So the unit
+//! runs:
+//!
+//! ```text
+//! systemd-run --user --unit=grammachy-languagetool --collect \
+//!   --setenv=JAVA_HOME=<jvm> \
+//!   -- /usr/bin/languagetool --http --port 8081 --config <properties>
+//! ```
+//!
+//! Two sharp edges of that launcher:
+//!
+//! - It runs `"$JAVA_HOME/bin/java"`, and Arch never exports `JAVA_HOME`, so
+//!   the unit has to set it or the launcher fails.
+//! - `--http` is what picks the plain HTTP server. `--config` on its own makes
+//!   the launcher start the HTTPS server instead.
+//!
+//! No `--public` is passed, so the server listens on the loopback address only.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -13,61 +34,58 @@ pub const UNIT_NAME: &str = "grammachy-languagetool";
 /// `maxTextLength` handed to the server, the same cap the CLI applies itself.
 const MAX_TEXT_LENGTH: usize = 5_000;
 
-/// The server launcher the pacman package installs.
-///
-/// The `languagetool` package ships this wrapper, which runs the LanguageTool
-/// HTTP server class from the jars in `/usr/share/languagetool`.
-const PACKAGE_SERVER: &str = "/usr/bin/languagetool-server";
+/// The launcher the pacman package installs.
+const PACKAGE_LAUNCHER: &str = "/usr/bin/languagetool";
 
-/// Where the package puts its jars, used only when the wrapper is missing.
-const PACKAGE_JAR_DIR: &str = "/usr/share/languagetool";
+/// Where `archlinux-java` points at the selected JVM.
+const DEFAULT_JVM: &str = "/usr/lib/jvm/default";
 
 /// Why the unit did not start.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StartFailure(pub String);
 
-/// The program and arguments that run the server.
+/// The program, arguments, and environment that run the server.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ServerCommand {
     pub program: String,
     pub arguments: Vec<String>,
+    pub environment: Vec<(String, String)>,
 }
 
 /// Read the server command from the installed package.
-///
-/// The wrapper is preferred because it is the package's own entry point. The
-/// jar call is the fallback for a package layout that ships no wrapper.
 pub fn server_command(port: u16, config: &Path) -> Result<ServerCommand, StartFailure> {
-    let port = port.to_string();
-    let config = config.to_string_lossy().to_string();
-
-    if Path::new(PACKAGE_SERVER).is_file() {
-        return Ok(ServerCommand {
-            program: PACKAGE_SERVER.to_string(),
-            // No `--public`, so the server binds the loopback address only.
-            arguments: vec!["--port".to_string(), port, "--config".to_string(), config],
-        });
+    if !Path::new(PACKAGE_LAUNCHER).is_file() {
+        return Err(StartFailure(format!(
+            "The languagetool package is not installed: {PACKAGE_LAUNCHER} does not exist."
+        )));
     }
 
-    let jar = Path::new(PACKAGE_JAR_DIR).join("languagetool-server.jar");
-    if jar.is_file() {
-        return Ok(ServerCommand {
-            program: "java".to_string(),
-            arguments: vec![
-                "-cp".to_string(),
-                jar.to_string_lossy().to_string(),
-                "org.languagetool.server.HTTPServer".to_string(),
-                "--port".to_string(),
-                port,
-                "--config".to_string(),
-                config,
-            ],
-        });
-    }
+    Ok(ServerCommand {
+        program: PACKAGE_LAUNCHER.to_string(),
+        arguments: vec![
+            "--http".to_string(),
+            "--port".to_string(),
+            port.to_string(),
+            "--config".to_string(),
+            config.to_string_lossy().to_string(),
+        ],
+        environment: vec![("JAVA_HOME".to_string(), java_home()?)],
+    })
+}
 
+/// The JVM the launcher runs `bin/java` from.
+fn java_home() -> Result<String, StartFailure> {
+    if let Some(value) = std::env::var_os("JAVA_HOME") {
+        let value = value.to_string_lossy().to_string();
+        if !value.is_empty() {
+            return Ok(value);
+        }
+    }
+    if Path::new(DEFAULT_JVM).join("bin/java").is_file() {
+        return Ok(DEFAULT_JVM.to_string());
+    }
     Err(StartFailure(format!(
-        "The languagetool package is not installed. Neither {PACKAGE_SERVER} nor {} exists.",
-        jar.display()
+        "No Java runtime was found. {DEFAULT_JVM}/bin/java does not exist and JAVA_HOME is not set."
     )))
 }
 
@@ -95,19 +113,21 @@ fn runtime_directory() -> PathBuf {
 }
 
 /// Start the transient unit, or answer `Ok(())` when it already runs.
-///
-/// The exact command is
-/// `systemd-run --user --unit grammachy-languagetool --collect -- <server> --port <port> --config <file>`.
 pub fn start(port: u16) -> Result<(), StartFailure> {
     let config = write_config()?;
     let command = server_command(port, &config)?;
 
-    let output = Command::new("systemd-run")
+    let mut systemd_run = Command::new("systemd-run");
+    systemd_run
         .arg("--user")
         .arg(format!("--unit={UNIT_NAME}"))
         .arg("--description=Grammachy LanguageTool server")
         // Collect a failed unit so the next Check may start it again.
-        .arg("--collect")
+        .arg("--collect");
+    for (name, value) in &command.environment {
+        systemd_run.arg(format!("--setenv={name}={value}"));
+    }
+    let output = systemd_run
         .arg("--")
         .arg(&command.program)
         .args(&command.arguments)
@@ -141,19 +161,39 @@ mod tests {
     }
 
     #[test]
-    fn the_server_command_carries_the_port_and_the_config() {
+    fn the_server_command_is_the_package_launcher() {
         let config = Path::new("/run/user/1000/grammachy/languagetool.properties");
         let Ok(command) = server_command(8081, config) else {
-            // The package is not installed on this machine, which is its own
-            // reported failure and is covered by the adapter tests.
+            // The package is not installed here, which is its own reported
+            // failure and is covered by the adapter tests.
             return;
         };
 
-        assert!(command.arguments.contains(&"8081".to_string()));
-        assert!(command
-            .arguments
-            .contains(&config.to_string_lossy().to_string()));
+        assert_eq!(command.program, PACKAGE_LAUNCHER);
+        assert_eq!(
+            command.arguments,
+            [
+                "--http",
+                "--port",
+                "8081",
+                "--config",
+                "/run/user/1000/grammachy/languagetool.properties"
+            ]
+        );
+        // The launcher needs this, because Arch never exports it.
+        assert_eq!(command.environment[0].0, "JAVA_HOME");
         // No external access: the server never gets `--public`.
         assert!(!command.arguments.contains(&"--public".to_string()));
+    }
+
+    #[test]
+    fn a_missing_package_names_the_launcher_it_looked_for() {
+        if Path::new(PACKAGE_LAUNCHER).is_file() {
+            return;
+        }
+        let failure = server_command(8081, Path::new("/tmp/x.properties"))
+            .expect_err("the package is not installed");
+
+        assert!(failure.0.contains(PACKAGE_LAUNCHER));
     }
 }

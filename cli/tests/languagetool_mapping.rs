@@ -1,7 +1,10 @@
 //! Match to Issue mapping, spec section 5.1.
 //!
-//! Every case runs against a stored LanguageTool `/v2/check` answer, so the
-//! rules are checked without a server.
+//! `languagetool-response.json` is a verbatim recording of LanguageTool 6.6
+//! answering `/v2/check` for [`ORDERING_TEXT`]. `languagetool-ordering.json`
+//! holds the same three matches out of order plus a few added ones, marked
+//! `_added`, for the ordering rules that sentence did not trigger. Both run
+//! without a server.
 
 use grammachy::engines::languagetool::response::{issues_from, CheckResponse};
 use grammachy::envelope::{Category, Issue};
@@ -17,6 +20,37 @@ fn response(name: &str) -> CheckResponse {
 
 fn ordering_issues() -> Vec<Issue> {
     issues_from(ORDERING_TEXT, &response("languagetool-ordering.json"))
+}
+
+/// The three Issues of the recording, in the order the envelope carries them.
+#[test]
+fn the_recorded_answer_maps_to_its_three_issues() {
+    let issues = issues_from(ORDERING_TEXT, &response("languagetool-response.json"));
+
+    assert_eq!(issues.len(), 3);
+
+    assert_eq!(issues[0].start, 17);
+    assert_eq!(issues[0].end, 21);
+    assert_eq!(issues[0].original, "book");
+    assert_eq!(issues[0].fix, "books");
+    assert_eq!(issues[0].category, Category::Grammar);
+    assert_eq!(issues[0].rule_id.as_deref(), Some("CD_NN"));
+    assert_eq!(
+        issues[0].reason,
+        "Possible agreement error. The noun \u{2018}book\u{2019} seems to be countable."
+    );
+
+    // Forty suggestions, and only the first one is the fix.
+    assert_eq!(issues[1].original, "teh");
+    assert_eq!(issues[1].fix, "the");
+    assert_eq!(issues[1].category, Category::Spelling);
+    assert_eq!(issues[1].rule_id.as_deref(), Some("MORFOLOGIK_RULE_EN_US"));
+
+    assert_eq!(issues[2].original, "go");
+    assert_eq!(issues[2].fix, "goes");
+    assert_eq!(issues[2].rule_id.as_deref(), Some("HE_VERB_AGR"));
+
+    slice_holds(ORDERING_TEXT, &issues);
 }
 
 #[test]
@@ -76,7 +110,7 @@ fn the_first_suggestion_is_the_fix_and_the_slice_is_the_original() {
     assert_eq!(issues[0].category, Category::Grammar);
     assert_eq!(issues[0].rule_id.as_deref(), Some("CD_NN"));
 
-    // The typo offers "the" and "ten"; the first suggestion wins.
+    // The typo offers forty suggestions; the first one wins.
     assert_eq!(issues[1].original, "teh");
     assert_eq!(issues[1].fix, "the");
     assert_eq!(issues[1].category, Category::Spelling);

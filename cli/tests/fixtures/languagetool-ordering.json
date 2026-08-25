@@ -1,95 +1,313 @@
 {
-  "_note": "Hand-built /v2/check matches for the ordering rules of spec section 5.1. Shaped like a real LanguageTool answer but arranged to cover out-of-order matches, overlaps, a no-op fix, a match with no suggestion, and a style match. The recorded live answer is languagetool-response.json.",
+  "_note": "The three matches of languagetool-response.json, put out of order, plus added matches for the ordering rules of spec section 5.1 that this sentence did not trigger. Every added match carries an _added field.",
   "_text": "She bought three book from teh store, and he go home.",
-  "software": { "name": "LanguageTool", "version": "6.6" },
-  "language": { "name": "English (US)", "code": "en-US" },
   "matches": [
     {
-      "message": "Possible agreement error. The noun 'go' seems to be a verb here.",
+      "message": "The pronoun ‘he’ is usually used with a third-person or a past tense verb.",
+      "shortMessage": "Agreement error",
+      "replacements": [
+        {
+          "value": "goes"
+        },
+        {
+          "value": "went"
+        }
+      ],
       "offset": 45,
       "length": 2,
-      "replacements": [{ "value": "goes" }, { "value": "went" }],
+      "context": {
+        "text": "...ought three book from teh store, and he go home.",
+        "offset": 43,
+        "length": 2
+      },
+      "sentence": "She bought three book from teh store, and he go home.",
+      "type": {
+        "typeName": "Other"
+      },
       "rule": {
-        "id": "PERS_PRONOUN_AGREEMENT",
+        "id": "HE_VERB_AGR",
+        "subId": "1",
+        "sourceFile": "grammar.xml",
+        "description": "Agreement error: Non-third person/past tense verb with 'he/she/it' or a pronoun",
         "issueType": "grammar",
-        "category": { "id": "GRAMMAR", "name": "Grammar" }
-      }
+        "urls": [
+          {
+            "value": "https://languagetool.org/insights/post/grammar-subject-verb-agreement/#1-singular-subjects-must-go-with-singular-verbs-and-plural-subjects-with-plural-verbs"
+          }
+        ],
+        "category": {
+          "id": "GRAMMAR",
+          "name": "Grammar"
+        }
+      },
+      "ignoreForIncompleteSentence": true,
+      "contextForSureMatch": -1
     },
     {
       "message": "Possible spelling mistake found.",
+      "shortMessage": "Spelling mistake",
+      "replacements": [
+        {
+          "value": "the"
+        },
+        {
+          "value": "ten"
+        },
+        {
+          "value": "tea"
+        },
+        {
+          "value": "tech"
+        },
+        {
+          "value": "Ted"
+        },
+        {
+          "value": "TeX"
+        },
+        {
+          "value": "tee"
+        },
+        {
+          "value": "eh"
+        },
+        {
+          "value": "tel"
+        },
+        {
+          "value": "TEF"
+        },
+        {
+          "value": "BEH"
+        },
+        {
+          "value": "GEH"
+        },
+        {
+          "value": "NEH"
+        },
+        {
+          "value": "Neh"
+        },
+        {
+          "value": "TAH"
+        },
+        {
+          "value": "TBH"
+        },
+        {
+          "value": "TCH"
+        },
+        {
+          "value": "TEB"
+        },
+        {
+          "value": "TEC"
+        },
+        {
+          "value": "TED"
+        },
+        {
+          "value": "TEE"
+        },
+        {
+          "value": "TEI"
+        },
+        {
+          "value": "TEL"
+        },
+        {
+          "value": "TEM"
+        },
+        {
+          "value": "TEP"
+        },
+        {
+          "value": "TEQ"
+        },
+        {
+          "value": "TER"
+        },
+        {
+          "value": "TES"
+        },
+        {
+          "value": "TEU"
+        },
+        {
+          "value": "TEV"
+        },
+        {
+          "value": "TH"
+        },
+        {
+          "value": "TLH"
+        },
+        {
+          "value": "TSH"
+        },
+        {
+          "value": "TVH"
+        },
+        {
+          "value": "Te"
+        },
+        {
+          "value": "Tet"
+        },
+        {
+          "value": "Tex"
+        },
+        {
+          "value": "Th"
+        },
+        {
+          "value": "heh"
+        },
+        {
+          "value": "meh"
+        }
+      ],
       "offset": 27,
       "length": 3,
-      "replacements": [{ "value": "the" }, { "value": "ten" }],
+      "context": {
+        "text": "She bought three book from teh store, and he go home.",
+        "offset": 27,
+        "length": 3
+      },
+      "sentence": "She bought three book from teh store, and he go home.",
+      "type": {
+        "typeName": "UnknownWord"
+      },
       "rule": {
         "id": "MORFOLOGIK_RULE_EN_US",
+        "description": "Possible spelling mistake",
         "issueType": "misspelling",
-        "category": { "id": "TYPOS", "name": "Possible Typo" }
-      }
+        "category": {
+          "id": "TYPOS",
+          "name": "Possible Typo"
+        }
+      },
+      "ignoreForIncompleteSentence": false,
+      "contextForSureMatch": 0
     },
     {
-      "message": "Possible agreement error. The noun 'book' seems to be countable.",
+      "message": "Possible agreement error. The noun ‘book’ seems to be countable.",
+      "shortMessage": "Grammatical problem",
+      "replacements": [
+        {
+          "value": "books"
+        }
+      ],
       "offset": 17,
       "length": 4,
-      "replacements": [{ "value": "books" }],
+      "context": {
+        "text": "She bought three book from teh store, and he go home.",
+        "offset": 17,
+        "length": 4
+      },
+      "sentence": "She bought three book from teh store, and he go home.",
+      "type": {
+        "typeName": "Other"
+      },
       "rule": {
         "id": "CD_NN",
+        "subId": "1",
+        "sourceFile": "grammar.xml",
+        "description": "Possible agreement error: numeral + singular countable noun",
         "issueType": "grammar",
-        "category": { "id": "GRAMMAR", "name": "Grammar" }
-      }
+        "category": {
+          "id": "GRAMMAR",
+          "name": "Grammar"
+        }
+      },
+      "ignoreForIncompleteSentence": true,
+      "contextForSureMatch": -1
     },
     {
-      "message": "This phrase starts at the same place as the agreement match and reaches further, so it loses to the earlier Issue.",
+      "_added": "Not from the recording. Covers a rule LanguageTool did not happen to produce for this sentence.",
+      "message": "This match starts where the agreement match starts and reaches further, so it loses to the earlier Issue.",
+      "replacements": [
+        {
+          "value": "books from"
+        }
+      ],
       "offset": 17,
       "length": 9,
-      "replacements": [{ "value": "books from" }],
       "rule": {
         "id": "OVERLAPPING_SAME_START",
         "issueType": "grammar",
-        "category": { "id": "GRAMMAR", "name": "Grammar" }
+        "category": {
+          "id": "GRAMMAR"
+        }
       }
     },
     {
-      "message": "This match starts inside the typo span, so it loses to the earlier Issue.",
+      "_added": "Not from the recording. Covers a rule LanguageTool did not happen to produce for this sentence.",
+      "message": "This match starts inside the spelling span, so it loses to the earlier Issue.",
+      "replacements": [
+        {
+          "value": "h store"
+        }
+      ],
       "offset": 29,
       "length": 7,
-      "replacements": [{ "value": "h store" }],
       "rule": {
         "id": "OVERLAPPING_LATER_START",
         "issueType": "grammar",
-        "category": { "id": "GRAMMAR", "name": "Grammar" }
+        "category": {
+          "id": "GRAMMAR"
+        }
       }
     },
     {
-      "message": "The suggestion is the text that is already there.",
+      "_added": "Not from the recording. Covers a rule LanguageTool did not happen to produce for this sentence.",
+      "message": "The only suggestion is the text that is already there.",
+      "replacements": [
+        {
+          "value": "bought"
+        }
+      ],
       "offset": 4,
       "length": 6,
-      "replacements": [{ "value": "bought" }],
       "rule": {
         "id": "NO_OP_FIX",
         "issueType": "grammar",
-        "category": { "id": "GRAMMAR", "name": "Grammar" }
+        "category": {
+          "id": "GRAMMAR"
+        }
       }
     },
     {
+      "_added": "Not from the recording. Covers a rule LanguageTool did not happen to produce for this sentence.",
       "message": "This rule found something but suggests nothing.",
+      "replacements": [],
       "offset": 11,
       "length": 5,
-      "replacements": [],
       "rule": {
         "id": "NO_SUGGESTION",
         "issueType": "grammar",
-        "category": { "id": "GRAMMAR", "name": "Grammar" }
+        "category": {
+          "id": "GRAMMAR"
+        }
       }
     },
     {
-      "message": "Consider a shorter sentence.",
+      "_added": "Not from the recording. Covers a rule LanguageTool did not happen to produce for this sentence.",
+      "message": "Consider a shorter phrase.",
+      "replacements": [
+        {
+          "value": "The woman"
+        }
+      ],
       "offset": 0,
       "length": 3,
-      "replacements": [{ "value": "The woman" }],
       "rule": {
         "id": "TOO_WORDY",
         "issueType": "style",
-        "category": { "id": "STYLE", "name": "Style" }
+        "category": {
+          "id": "STYLE"
+        }
       }
     }
   ]
