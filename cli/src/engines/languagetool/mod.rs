@@ -9,12 +9,12 @@
 pub mod response;
 pub mod unit;
 
-use std::io::ErrorKind;
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
 use crate::args::{CheckOptions, NativeLanguage};
 use crate::engine::{Engine, EngineFailure};
+use crate::engines::local::is_unreachable;
 use crate::envelope::Issue;
 
 use response::CheckResponse;
@@ -165,19 +165,6 @@ impl LanguageTool {
             }
         }
     }
-}
-
-/// Whether an I/O error means nothing is listening yet.
-fn is_unreachable(kind: ErrorKind) -> bool {
-    matches!(
-        kind,
-        ErrorKind::ConnectionRefused
-            | ErrorKind::ConnectionReset
-            | ErrorKind::ConnectionAborted
-            | ErrorKind::AddrNotAvailable
-            | ErrorKind::NotConnected
-            | ErrorKind::BrokenPipe
-    )
 }
 
 impl Engine for LanguageTool {

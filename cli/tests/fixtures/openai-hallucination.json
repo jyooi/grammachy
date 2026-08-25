@@ -1,0 +1,22 @@
+{
+  "_note": "The same sentence with two added suggestions that quote text the sentence does not hold: 'buyed three books' and 'teh'. HUF-171 saw unanchored suggestions from every model it ran, so the adapter must drop them rather than guess a span.",
+  "id": "chatcmpl-oaicompat",
+  "object": "chat.completion",
+  "created": 1756108800,
+  "model": "gemma-4-e4b-it",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "[{\"original\": \"book\", \"fix\": \"books\", \"reason\": \"plural\", \"category\": \"grammar\"}, {\"original\": \"buyed three books\", \"fix\": \"bought three books\", \"reason\": \"past tense\", \"category\": \"grammar\"}, {\"original\": \"teh\", \"fix\": \"the\", \"reason\": \"misspelling\", \"category\": \"spelling\"}]"
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 214,
+    "completion_tokens": 68,
+    "total_tokens": 282
+  }
+}

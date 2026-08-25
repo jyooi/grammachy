@@ -7,6 +7,7 @@
 use crate::args::{CheckOptions, EngineSlug};
 use crate::engines::harper::Harper;
 use crate::engines::languagetool::{self, LanguageTool};
+use crate::engines::openai::{self, Openai};
 use crate::envelope::Issue;
 
 /// Why one Check did not produce Issues. Each variant maps to one error code.
@@ -15,6 +16,9 @@ pub enum EngineFailure {
     Unavailable(String),
     Timeout(String),
     Failed(String),
+    /// The Check cannot run as configured, so nothing was sent. The `openai`
+    /// base URL host rule of spec section 4 is the one case in v1.
+    BadArguments(String),
 }
 
 pub trait Engine {
@@ -36,6 +40,6 @@ pub fn resolve(slug: EngineSlug) -> Option<Box<dyn Engine>> {
             languagetool::Config::from_env(),
         ))),
         EngineSlug::Harper => Some(Box::new(Harper::default())),
-        EngineSlug::Openai => None,
+        EngineSlug::Openai => Some(Box::new(Openai::new(openai::Config::from_env()))),
     }
 }

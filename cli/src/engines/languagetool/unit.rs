@@ -26,7 +26,9 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+
+pub use crate::engines::local::StartFailure;
+use crate::engines::local::{self, ServerCommand};
 
 /// The transient unit name from spec section 4.
 pub const UNIT_NAME: &str = "grammachy-languagetool";
@@ -39,18 +41,6 @@ const PACKAGE_LAUNCHER: &str = "/usr/bin/languagetool";
 
 /// Where `archlinux-java` points at the selected JVM.
 const DEFAULT_JVM: &str = "/usr/lib/jvm/default";
-
-/// Why the unit did not start.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct StartFailure(pub String);
-
-/// The program, arguments, and environment that run the server.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ServerCommand {
-    pub program: String,
-    pub arguments: Vec<String>,
-    pub environment: Vec<(String, String)>,
-}
 
 /// Read the server command from the installed package.
 pub fn server_command(port: u16, config: &Path) -> Result<ServerCommand, StartFailure> {
@@ -94,7 +84,7 @@ fn java_home() -> Result<String, StartFailure> {
 /// `maxTextLength` is set here because the HTTP server reads it from a
 /// properties file, not from a flag (spec section 4).
 pub fn write_config() -> Result<PathBuf, StartFailure> {
-    let directory = runtime_directory().join("grammachy");
+    let directory = local::runtime_directory().join("grammachy");
     fs::create_dir_all(&directory).map_err(|error| {
         StartFailure(format!("{} is not writable: {error}", directory.display()))
     })?;
@@ -105,47 +95,12 @@ pub fn write_config() -> Result<PathBuf, StartFailure> {
     Ok(path)
 }
 
-fn runtime_directory() -> PathBuf {
-    match std::env::var_os("XDG_RUNTIME_DIR") {
-        Some(value) if !value.is_empty() => PathBuf::from(value),
-        _ => std::env::temp_dir(),
-    }
-}
-
 /// Start the transient unit, or answer `Ok(())` when it already runs.
 pub fn start(port: u16) -> Result<(), StartFailure> {
     let config = write_config()?;
     let command = server_command(port, &config)?;
 
-    let mut systemd_run = Command::new("systemd-run");
-    systemd_run
-        .arg("--user")
-        .arg(format!("--unit={UNIT_NAME}"))
-        .arg("--description=Grammachy LanguageTool server")
-        // Collect a failed unit so the next Check may start it again.
-        .arg("--collect");
-    for (name, value) in &command.environment {
-        systemd_run.arg(format!("--setenv={name}={value}"));
-    }
-    let output = systemd_run
-        .arg("--")
-        .arg(&command.program)
-        .args(&command.arguments)
-        .output()
-        .map_err(|error| StartFailure(format!("systemd-run could not run: {error}")))?;
-
-    if output.status.success() {
-        return Ok(());
-    }
-
-    let message = String::from_utf8_lossy(&output.stderr).trim().to_string();
-    // A unit left from an earlier Check is the outcome this call wanted.
-    if message.contains("already exists") {
-        return Ok(());
-    }
-    Err(StartFailure(format!(
-        "systemd-run could not start {UNIT_NAME}: {message}"
-    )))
+    local::start_unit(UNIT_NAME, "Grammachy LanguageTool server", &command)
 }
 
 #[cfg(test)]

@@ -27,6 +27,25 @@ pub enum Category {
     Spelling,
 }
 
+/// Put an Issue list into the order the contract promises.
+///
+/// Spec section 5.1: sorted by `start` and never overlapping, where the earlier
+/// Issue wins. Every engine adapter owes the shell this, so it lives beside the
+/// contract rather than inside one adapter.
+pub fn sorted_disjoint(mut issues: Vec<Issue>) -> Vec<Issue> {
+    // A shorter span first keeps the tighter of two Issues that start together.
+    issues.sort_by_key(|issue| (issue.start, issue.end));
+
+    let mut kept: Vec<Issue> = Vec::with_capacity(issues.len());
+    for issue in issues {
+        match kept.last() {
+            Some(previous) if issue.start < previous.end => continue,
+            _ => kept.push(issue),
+        }
+    }
+    kept
+}
+
 /// The codes the shell knows, spec section 5.1.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]

@@ -57,5 +57,8 @@ pub fn run(text: &str, options: &CheckOptions) -> Envelope {
         }
         Err(EngineFailure::Timeout(message)) => Envelope::error(ErrorCode::EngineTimeout, message),
         Err(EngineFailure::Failed(message)) => Envelope::error(ErrorCode::EngineError, message),
+        Err(EngineFailure::BadArguments(message)) => {
+            Envelope::error(ErrorCode::BadArguments, message)
+        }
     }
 }
