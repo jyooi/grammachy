@@ -29,3 +29,44 @@ jobs:
 
       - name: Test
         run: cargo test
+
+  plugin:
+    name: Plugin
+    runs-on: ubuntu-latest
+    env:
+      # The shell modules the QML imports and the manifest validator both come
+      # from the Omarchy release the plugin is built against.
+      OMARCHY_REF: v4.0.0
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install the QML linter
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends qtdeclarative5-dev-tools
+
+      - name: Fetch the Omarchy shell
+        run: git clone --depth 1 --branch "$OMARCHY_REF" https://github.com/basecamp/omarchy "$RUNNER_TEMP/omarchy"
+
+      - name: Lint the QML
+        run: |
+          # This qmllint reports a syntax error through its exit status alone,
+          # so the loop names the file it is on. For the diagnosis itself, run
+          # the Qt 6 qmllint over the same file, as docs/dev.md describes.
+          status=0
+          for file in $(find . -name '*.qml' | sort); do
+            echo "qmllint $file"
+            /usr/lib/qt5/bin/qmllint -I "$RUNNER_TEMP/omarchy/shell" "$file" || status=1
+          done
+          exit $status
+
+      - name: Validate the manifest
+        run: |
+          "$RUNNER_TEMP/omarchy/bin/omarchy-plugin-validate" .
+
+      - name: Test the corrected-text splice
+        run: node --test ui/splice.test.js ui/tokens.test.js

@@ -1,8 +1,21 @@
 {
+  "schemaVersion": 1,
   "id": "io.github.jyooi.grammachy",
   "name": "Grammachy",
   "version": "0.1.0",
+  "author": "jyooi",
   "description": "Grammar and spelling checks for any selected text",
   "kinds": ["bar-widget", "overlay"],
-  "keepLoaded": true
+  "keepLoaded": true,
+  "entryPoints": {
+    "barWidget": "BarWidget.qml",
+    "overlay": "Overlay.qml"
+  },
+  "barWidget": {
+    "displayName": "Grammachy",
+    "description": "Checks the grammar and spelling of the selected text",
+    "category": "Text",
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
 }
