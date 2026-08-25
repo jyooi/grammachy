@@ -1,6 +1,7 @@
 import QtQuick
 import qs.Commons
 import "splice.js" as Splice
+import "tokens.js" as Tokens
 
 // The whole Selection with every Issue drawn as a mark, spec section 6.
 //
@@ -34,7 +35,7 @@ Flickable {
   // The drawn text is the Corrected text: an accepted mark shows its Fix.
   readonly property string displayText: Splice.correctedText(sourceText, issues, decisions)
   readonly property var spans: Splice.displaySpans(issues, decisions)
-  readonly property var lines: root.buildLines(displayText, spans)
+  readonly property var lines: Tokens.buildLines(displayText, spans)
   readonly property int lineHeight: Math.round(fontSize * 1.8)
   readonly property int markThickness: Math.max(1, Style.space(2))
 
@@ -46,51 +47,6 @@ Flickable {
   function categoryAt(index) {
     var issue = issues ? issues[index] : null
     return issue ? String(issue.category) : "grammar"
-  }
-
-  // One entry per line of the drawn text. A blank line is the paragraph break
-  // the Selection already carries, so nothing normalises the text.
-  function buildLines(text, spans) {
-    var pieces = String(text).split("\n")
-    var out = []
-    var offset = 0
-    for (var i = 0; i < pieces.length; i++) {
-      out.push(root.buildLine(pieces[i], offset, spans))
-      offset += pieces[i].length + 1
-    }
-    return out
-  }
-
-  function buildLine(piece, offset, spans) {
-    var end = offset + piece.length
-    var runs = []
-    var cursor = offset
-    for (var i = 0; i < spans.length; i++) {
-      var span = spans[i]
-      if (span.end <= cursor || span.start >= end) continue
-      var from = Math.max(span.start, cursor)
-      var to = Math.min(span.end, end)
-      if (from > cursor) runs.push({ text: piece.slice(cursor - offset, from - offset), issue: -1 })
-      runs.push({ text: piece.slice(from - offset, to - offset), issue: i })
-      cursor = to
-    }
-    if (cursor < end) runs.push({ text: piece.slice(cursor - offset, end - offset), issue: -1 })
-    return { blank: piece.length === 0, tokens: root.tokenize(runs) }
-  }
-
-  // A word plus the blanks that follow it is one Flow cell, so the Flow wraps
-  // where a reader expects and the underline stops at the word.
-  function tokenize(runs) {
-    var tokens = []
-    for (var r = 0; r < runs.length; r++) {
-      var chunks = runs[r].text.match(/\S+[ \t]*|[ \t]+/g)
-      if (!chunks) continue
-      for (var c = 0; c < chunks.length; c++) {
-        var word = chunks[c].replace(/[ \t]+$/, "")
-        tokens.push({ word: word, blanks: chunks[c].slice(word.length), issue: runs[r].issue })
-      }
-    }
-    return tokens
   }
 
   function lineOfFocus() {

@@ -24,7 +24,8 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 - `manifest.json` version must equal the crate version; `cli/tests/manifest.rs` enforces that.
 - The Omarchy plugin is the repo root: `manifest.json`, `BarWidget.qml`, `Overlay.qml`, and `ui/`.
   `Overlay.qml` owns capture, the CLI run, and the review state; `ui/QuickCard.qml` and `ui/MarkedText.qml` only draw.
-  `ui/splice.js` is loaded by QML and by node, so it may use neither's API; `ui/splice.test.js` runs it under `node --test`.
+  `ui/splice.js` and `ui/tokens.js` are loaded by QML and by node, so they may use neither's API.
+  `ui/splice.test.js` and `ui/tokens.test.js` run them under `node --test`.
   `docs/dev.md` is the only route onto a live desktop, including the manual smoke items.
 - The plugin CI job clones `basecamp/omarchy` at the tag in `OMARCHY_REF`, because both the `qs.*` QML modules and `omarchy-plugin-validate` come from that tree.
   Raise the tag when the plugin starts to need a newer shell.
