@@ -49,6 +49,8 @@ impl Weights {
 ///
 /// A model name in Settings carries the quantisation, as in
 /// `qwen2.5-7b-instruct-q4_k_m`, so the match is on the prefix and ignores case.
+/// A prefix matches only when the name ends there or the next character is a
+/// hyphen. A longer family name does not take the terms of a shorter family.
 const KNOWN: &[(&str, Weights)] = &[
     // Alibaba released Qwen2.5 under Apache-2.0 except the 3B and the 72B.
     (

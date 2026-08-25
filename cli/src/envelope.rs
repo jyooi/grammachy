@@ -81,7 +81,7 @@ pub struct CheckError {
     pub error: ErrorBody,
 }
 
-/// Exactly one of these is printed on stdout by every run.
+/// The check result or error envelope printed on stdout (spec section 5.1).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(untagged)]
 pub enum Envelope {

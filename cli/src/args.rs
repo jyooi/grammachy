@@ -1,4 +1,4 @@
-//! Command line surface, spec sections 5.1, 5.2, and 10.
+//! Command line surface, spec sections 5.1, 5.2, 10, and 13.1.
 
 use clap::{Parser, Subcommand, ValueEnum};
 

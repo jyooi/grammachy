@@ -10,10 +10,10 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 - The Rust CLI lives in `cli/` and is its own cargo package.
   Run `cargo test`, `cargo clippy --all-targets -- -D warnings`, and `cargo fmt --check` from `cli/`.
   CI runs the same three commands.
-- The CLI prints exactly one JSON envelope on stdout and uses stderr for logs only.
+- `check` and `chunk` print exactly one JSON envelope on stdout and use stderr for logs only.
   Exit 0 carries a result, exit 1 carries an error envelope.
   Spans are UTF-16 code units, because the shell indexes the text in JavaScript.
-- Each subcommand owns its result envelope and shares the error envelope in `cli/src/envelope.rs`.
+- `check` and `chunk` each own a result envelope and share the error envelope in `cli/src/envelope.rs`.
   `check` uses `Envelope`, `chunk` uses `ChunkEnvelope` in `cli/src/chunk.rs`.
 - Engine adapters plug into the `Engine` trait in `cli/src/engine.rs` and live under `cli/src/engines/`.
   `engine::resolve` answers `None` for a slug with no adapter, which surfaces as `engine_unavailable`.
