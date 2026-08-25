@@ -23,12 +23,21 @@ use crate::args::CheckOptions;
 use crate::engine::{Engine, EngineFailure};
 use crate::envelope::Issue;
 
+/// The Check timeout of spec section 4, in the seconds a user waits.
+///
+/// The `engine_timeout` card of spec section 8 names this number, so it is
+/// named here rather than hidden inside the debug branch below.
+pub const SHIPPED_TIMEOUT_SECS: u64 = 10;
+
 /// The Check timeout of spec section 4.
 ///
 /// An unoptimised build can spend the whole budget on the curated dictionary,
 /// so debug uses a longer budget. The shipped binary keeps the 10 s limit.
-pub const DEFAULT_TIMEOUT: Duration =
-    Duration::from_secs(if cfg!(debug_assertions) { 60 } else { 10 });
+pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(if cfg!(debug_assertions) {
+    60
+} else {
+    SHIPPED_TIMEOUT_SECS
+});
 
 /// How many times the curated dictionary and rule set were built.
 ///

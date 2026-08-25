@@ -96,6 +96,18 @@ function valueOf(entry, name, fallback) {
   return isKnown(name, entry[name]) ? entry[name] : missing
 }
 
+// The display name of one option value, from the same list the dropdown draws.
+// The error cards of spec section 8 name the engine, and they have to name it
+// the way the Settings view does, so the labels live in one place only.
+// An unlisted value answers with itself, which beats an empty title.
+function labelOf(options, value) {
+  if (!Array.isArray(options)) return String(value)
+  for (var i = 0; i < options.length; i++) {
+    if (isPlainObject(options[i]) && options[i].value === value) return String(options[i].label)
+  }
+  return String(value)
+}
+
 // What to store for a value the user just chose. A text field the user emptied
 // falls back to the default rather than writing a value the CLI would ignore.
 function normalised(name, value) {
@@ -124,6 +136,7 @@ if (typeof module !== "undefined" && module.exports) {
     defaultOf: defaultOf,
     isKnown: isKnown,
     valueOf: valueOf,
+    labelOf: labelOf,
     normalised: normalised,
     mergedEntry: mergedEntry
   }
