@@ -1,10 +1,19 @@
-// Node tests for the Corrected text splice. Spec sections 5.3 and 13.
+// Node tests for the Corrected text splice and the Chunk span math.
+// Spec sections 5.2, 5.3, 9, and 13.
 // Run with `node --test ui/`.
 
 const test = require("node:test")
 const assert = require("node:assert/strict")
 
-const { correctedText, displaySpans, verifiedIssues, firstUnits } = require("./splice.js")
+const {
+  correctedText,
+  displaySpans,
+  verifiedIssues,
+  firstUnits,
+  chunkText,
+  shiftIssues,
+  mergeIssues
+} = require("./splice.js")
 
 // One Selection reused across the tests. The spans are UTF-16 code units into
 // exactly this string.
@@ -112,4 +121,102 @@ test("firstUnits never splits a surrogate pair", () => {
 test("firstUnits treats a missing text as empty", () => {
   assert.equal(firstUnits(undefined, 10), "")
   assert.equal(firstUnits(null, 10), "")
+})
+
+// ------------------------------------------------ the chunked Check, spec 9
+//
+// A Chunk is checked on its own text, so every span the CLI answers is an
+// offset into that Chunk. The merged review indexes into the whole Draft, so
+// the Chunk's own start is what makes the two agree.
+
+// A Draft with an Issue right after a Chunk boundary, which is the one place
+// a missing shift still looks plausible.
+const DRAFT = "She go home.\n\nThey was late. I has two book.\n\nHe walk fast."
+const CHUNKS = [
+  { start: 0, end: 14 },
+  { start: 14, end: 45 },
+  { start: 45, end: DRAFT.length }
+]
+
+test("the chunks tile the whole Draft with no gap and no overlap", () => {
+  let joined = ""
+  for (const chunk of CHUNKS) joined += chunkText(DRAFT, chunk)
+  assert.equal(joined, DRAFT)
+})
+
+test("a Chunk's Issues move by the Chunk start and nothing else changes", () => {
+  const found = [
+    { start: 5, end: 8, original: "was", fix: "were", reason: "Plural subject.", category: "grammar", ruleId: "X" }
+  ]
+  const moved = shiftIssues(found, CHUNKS[1].start)
+  assert.deepEqual(moved, [
+    { start: 19, end: 22, original: "was", fix: "were", reason: "Plural subject.", category: "grammar", ruleId: "X" }
+  ])
+  // The envelope the caller parsed stays what the CLI said.
+  assert.equal(found[0].start, 5)
+})
+
+test("a shifted span points at the same text in the whole Draft", () => {
+  const chunk = CHUNKS[1]
+  const body = chunkText(DRAFT, chunk)
+  const found = [
+    { start: body.indexOf("was"), end: body.indexOf("was") + 3, original: "was", fix: "were" },
+    { start: body.indexOf("has"), end: body.indexOf("has") + 3, original: "has", fix: "have" }
+  ]
+  for (const issue of shiftIssues(found, chunk.start)) {
+    assert.equal(DRAFT.slice(issue.start, issue.end), issue.original)
+  }
+})
+
+// The acceptance criterion of this ticket: an Issue at the very first unit of
+// the second Chunk, which a missing shift would put at the top of the Draft.
+test("an Issue on a Chunk boundary lands on the boundary, not on the Draft start", () => {
+  const chunk = CHUNKS[1]
+  assert.equal(chunkText(DRAFT, chunk).slice(0, 4), "They")
+  const moved = shiftIssues([{ start: 0, end: 4, original: "They", fix: "They" }], chunk.start)
+  assert.equal(moved[0].start, 14)
+  assert.equal(DRAFT.slice(moved[0].start, moved[0].end), "They")
+  assert.notEqual(DRAFT.slice(0, 4), "They")
+})
+
+test("an unshifted Issue from a later Chunk is dropped by the verify", () => {
+  const chunk = CHUNKS[1]
+  const found = [{ start: 5, end: 8, original: "was", fix: "were" }]
+  assert.equal(verifiedIssues(DRAFT, found).issues.length, 0)
+  assert.equal(verifiedIssues(DRAFT, shiftIssues(found, chunk.start)).issues.length, 1)
+})
+
+test("merging keeps every Issue in Chunk order, which is span order", () => {
+  const merged = mergeIssues(
+    mergeIssues([], shiftIssues([{ start: 4, end: 6, original: "go", fix: "goes" }], CHUNKS[0].start)),
+    shiftIssues([{ start: 5, end: 8, original: "was", fix: "were" }], CHUNKS[1].start))
+
+  assert.deepEqual(merged.map(issue => issue.start), [4, 19])
+  for (let i = 1; i < merged.length; i++) assert.ok(merged[i].start >= merged[i - 1].end)
+})
+
+test("merging leaves the list it was handed alone", () => {
+  const first = [{ start: 0, end: 1, original: "a", fix: "b" }]
+  mergeIssues(first, [{ start: 5, end: 6, original: "c", fix: "d" }])
+  assert.equal(first.length, 1)
+})
+
+test("the merged list splices the whole Draft correctly", () => {
+  const merged = mergeIssues(
+    shiftIssues([{ start: 4, end: 6, original: "go", fix: "goes" }], CHUNKS[0].start),
+    shiftIssues([{ start: 5, end: 8, original: "was", fix: "were" }], CHUNKS[1].start))
+
+  assert.equal(correctedText(DRAFT, merged, [true, true]),
+    "She goes home.\n\nThey were late. I has two book.\n\nHe walk fast.")
+})
+
+test("an empty Chunk answer and a missing one both merge to nothing", () => {
+  assert.deepEqual(shiftIssues(undefined, 10), [])
+  assert.deepEqual(shiftIssues([], 10), [])
+  assert.deepEqual(mergeIssues(undefined, undefined), [])
+})
+
+test("chunkText with no chunk is the whole text", () => {
+  assert.equal(chunkText(DRAFT, null), DRAFT)
+  assert.equal(chunkText(undefined, CHUNKS[0]), "")
 })

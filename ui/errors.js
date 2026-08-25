@@ -9,6 +9,10 @@
 // turns a code into the title, the body, and the buttons of section 8. Keeping
 // both halves here is what lets a node test run a stub binary and read the
 // card back, which no test of the QML could do.
+//
+// A chunked Check reads two envelopes rather than one, so `readChunks` reads
+// the stdout of spec section 5.2 the same way, and `chunkCard` is the inline
+// failure of one Chunk from spec section 9.
 
 var CONTRACT_VERSION = 1
 
@@ -35,13 +39,18 @@ var RETRY = "retry"
 var SETTINGS = "settings"
 var SETUP = "setup"
 var COMPOSE = "compose"
+// The two recovery buttons of a failed Chunk, spec section 9.
+var RETRY_REMAINING = "retryRemaining"
+var REVIEW_PARTIAL = "reviewPartial"
 
 var BUTTON_LABELS = {
   close: "Close",
   retry: "Retry",
   settings: "Settings",
   setup: "Setup",
-  compose: "Open Compose"
+  compose: "Open Compose",
+  retryRemaining: "Retry remaining",
+  reviewPartial: "Review what we have"
 }
 
 // The Check timeout of each engine, in seconds. The `engine_timeout` body
@@ -185,6 +194,62 @@ function card(code, options) {
   return model
 }
 
+// What one run of `grammachy chunk` left on stdout, spec section 5.2.
+//
+// The answer carries either `chunks`, the tiling of the Draft the chunked Check
+// walks, or `error`, read the same way `readCheck` reads one. A list that is
+// not an array is the same statement as no JSON at all: the companion tool is
+// out of step with this contract.
+function readChunks(stdout) {
+  var envelope = null
+  try {
+    envelope = JSON.parse(stdout)
+  } catch (error) {
+    envelope = null
+  }
+
+  if (!isPlainObject(envelope) || envelope.contractVersion !== CONTRACT_VERSION)
+    return { chunks: null, error: { code: BAD_ARGUMENTS, message: "" } }
+
+  if (isPlainObject(envelope.error)) {
+    return {
+      chunks: null,
+      error: {
+        code: String(envelope.error.code || ""),
+        message: typeof envelope.error.message === "string" ? envelope.error.message : ""
+      }
+    }
+  }
+
+  if (!Array.isArray(envelope.chunks))
+    return { chunks: null, error: { code: BAD_ARGUMENTS, message: "" } }
+
+  return { chunks: envelope.chunks, error: null }
+}
+
+// The card a chunked Check shows when one Chunk fails, spec section 9.
+//
+// The title, the body, and the engine message are the section 8 card of the
+// same code, because what went wrong is the same thing. Only the buttons
+// differ, and only when Chunks have already finished: their Issues are still
+// worth reviewing, so the card offers that beside resuming at the Chunk that
+// failed. With nothing behind it there is nothing to review, so the card falls
+// back to the offers of section 8 around the same resume.
+//
+// `text_too_long` cannot come from a Chunk, which the CLI cut to fit, so it
+// reads here as the engine failing rather than as the too-long card.
+function chunkCard(code, options) {
+  var context = isPlainObject(options) ? options : ({})
+  var settled = known(code)
+  var model = card(settled === TEXT_TOO_LONG ? ENGINE_ERROR : settled, context)
+
+  model.buttons = context.hasPartial === true
+    ? [RETRY_REMAINING, REVIEW_PARTIAL]
+    : [CLOSE, RETRY_REMAINING, SETTINGS]
+  model.primary = RETRY_REMAINING
+  return model
+}
+
 function buttonLabel(action) {
   var label = BUTTON_LABELS[String(action)]
   return typeof label === "string" ? label : ""
@@ -205,12 +270,16 @@ if (typeof module !== "undefined" && module.exports) {
     SETTINGS: SETTINGS,
     SETUP: SETUP,
     COMPOSE: COMPOSE,
+    RETRY_REMAINING: RETRY_REMAINING,
+    REVIEW_PARTIAL: REVIEW_PARTIAL,
     BUTTON_LABELS: BUTTON_LABELS,
     TIMEOUT_SECONDS: TIMEOUT_SECONDS,
     timeoutSeconds: timeoutSeconds,
     known: known,
     readCheck: readCheck,
+    readChunks: readChunks,
     card: card,
+    chunkCard: chunkCard,
     buttonLabel: buttonLabel
   }
 }

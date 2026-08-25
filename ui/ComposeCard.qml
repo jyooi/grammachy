@@ -12,15 +12,23 @@ import "format.js" as Format
 // the new Draft. Apply is `Copy corrected text` only, because auto-replace has
 // no Selection to paste over here.
 //
+// A Draft of any size under the cap is checked in Chunks, so between the two
+// modes sit the progress of that run with its Cancel, and the inline failure of
+// one Chunk with its two recovery buttons. The confirm that stands in front of
+// a replaced Draft (spec section 2) is the one other card this file draws.
+//
 // The card renders state and reports intent. The Draft itself, the Check, the
 // key map, the clipboard, and the settings storage all live in Overlay.qml.
 BorderSurface {
   id: root
 
-  // "editing", "checking", "result", or "notice".
+  // "editing", "confirm", "checking", "result", "error", or "notice".
   property string phase: "editing"
   // The Draft. Edit mode reads and writes it; review mode leaves it alone.
   property string draftText: ""
+  // The Draft a trigger wants in place of the one above, spec section 2. The
+  // confirm card is what stands between the two.
+  property string pendingDraft: ""
   // The exact text the Check ran on. Every Issue span indexes into it.
   property string sourceText: ""
   property var issues: []
@@ -36,10 +44,23 @@ BorderSurface {
   // What the CLI said, shown in monospace under the notice body, spec 8.
   property string engineMessage: ""
 
-  // The two limits of spec section 5.2, which decide whether the Check may run
-  // at all. `cli/tests/overlay_limit.rs` keeps the copies in Overlay.qml equal
-  // to the CLI's own.
-  property int checkLimitUnits: 5000
+  // The inline failure of one Chunk, spec section 9: a card model from
+  // `ui/errors.js` and the one-line `grammachy doctor` answer beside it.
+  property var errorCard: null
+  property string diagnosis: ""
+
+  // The chunked run of spec section 9. `chunkNumber` is the Chunk being
+  // checked, counted from one, and `chunkElapsedMs` is the wall clock of this
+  // attempt rather than engine time, because that is the wait on screen.
+  property int chunkNumber: 1
+  property int chunkCount: 0
+  property int chunkElapsedMs: 0
+  // The engine the progress line names before any Chunk has answered.
+  property string runningEngine: ""
+
+  // The Draft cap of spec section 5.2, which decides whether the Check may run
+  // at all. `cli/tests/overlay_limit.rs` keeps the copy in Overlay.qml equal to
+  // the CLI's own. Anything under it is checkable, however many Chunks it takes.
   property int draftCapUnits: 50000
 
   // The Settings view, spec section 7, reached through the same gear as the
@@ -62,7 +83,13 @@ BorderSurface {
   signal draftEdited(string text)
   signal clearRequested()
   signal checkRequested()
+  signal cancelRequested()
   signal backToEditRequested()
+  signal replaceDraftRequested()
+  signal keepDraftRequested()
+  // One button of the inline failure of spec section 9. The action is a button
+  // id from `ui/errors.js`; Overlay.qml owns where each one goes.
+  signal errorActionRequested(string action)
   signal accepted(int index)
   signal skipped(int index)
   signal acceptAllRequested()
@@ -81,7 +108,10 @@ BorderSurface {
   // The Settings view takes the body over; every other row hangs off this.
   readonly property bool showsCard: !root.settingsOpen
   readonly property bool editing: root.showsCard && root.phase === "editing"
+  readonly property bool confirming: root.showsCard && root.phase === "confirm"
+  readonly property bool checking: root.showsCard && root.phase === "checking"
   readonly property bool reviewing: root.showsCard && root.phase === "result"
+  readonly property bool hasError: root.showsCard && root.phase === "error" && Boolean(root.errorCard)
   readonly property bool hasIssues: root.reviewing && root.issueCount > 0
   readonly property bool isEmptyResult: root.reviewing && root.issueCount === 0
   readonly property var focusedIssue: root.hasIssues && root.focusIndex >= 0 && root.focusIndex < root.issueCount
@@ -90,7 +120,21 @@ BorderSurface {
   readonly property int draftUnits: root.draftText.length
   // Why the Check will not run, or "" when it will. One rule, in format.js,
   // so that a node test owns the wording of the cap of spec section 9.
-  readonly property string refusal: Format.draftRefusal(root.draftUnits, root.checkLimitUnits, root.draftCapUnits)
+  readonly property string refusal: Format.draftRefusal(root.draftUnits, root.draftCapUnits)
+
+  readonly property int chunksDone: Math.max(0, root.chunkNumber - 1)
+
+  // What the reader has to know before they trust the counts: a run that was
+  // cancelled, or that stopped on a failure, checked only the head of the Draft.
+  // The failure names what is in hand too, so `Review what we have` says what
+  // the reader would be reviewing.
+  function partialNote() {
+    if (!root.reviewing && !root.hasError) return ""
+    if (root.chunkCount === 0 || root.chunksDone >= root.chunkCount) return ""
+    var note = "Checked " + root.chunksDone + " of " + root.chunkCount + " chunks"
+    if (!root.hasError) return note
+    return note + ", " + root.issueCount + (root.issueCount === 1 ? " issue so far" : " issues so far")
+  }
 
   function countOf(value) {
     var total = 0
@@ -100,9 +144,19 @@ BorderSurface {
 
   function metaLine() {
     if (root.phase === "editing") return "draft, " + Format.units(root.draftUnits)
-    if (root.phase === "checking") return "checking the draft"
+    if (root.phase === "confirm") return "replace the draft?"
+    // The progress line of spec section 9, once the Chunk list says how many
+    // Chunks there are. Before that the run is still deciding.
+    if (root.phase === "checking") {
+      if (root.chunkCount === 0) return "splitting the draft into chunks"
+      return Format.chunkProgress(root.chunkNumber, root.chunkCount,
+        root.runningEngine, root.chunkElapsedMs)
+    }
+    if (root.phase === "error") return root.errorCard ? String(root.errorCard.meta) : "check did not finish"
     if (root.phase === "notice") return "check did not finish"
-    var run = root.engine + ", " + root.elapsedMs + " ms"
+    // A chunked run is counted the way the progress line above it was, because
+    // a Draft of many Chunks takes seconds rather than a moment.
+    var run = root.engine + ", " + Format.elapsed(root.elapsedMs)
     if (root.issueCount === 0) return "no issues, " + run
     return root.issueCount + (root.issueCount === 1 ? " issue, " : " issues, ")
       + root.acceptedCount + " accepted, " + run
@@ -146,11 +200,20 @@ BorderSurface {
       Layout.fillWidth: true
 
       metaText: root.metaLine()
+      // What the run kept after a Cancel or a failure, so the counts above the
+      // Issues never read as the whole Draft when they are not.
+      noteText: root.partialNote()
       // Spec section 9: auto-replace never applies in Compose, so the toggle
       // that promises it stays on the popup.
       showsAutoReplace: false
       settingsOpen: root.settingsOpen
+      // Spec section 9: the progress line carries a Cancel that stops the run
+      // after the Chunk in flight.
+      actions: root.checking
+        ? [{ id: "cancel", text: "Cancel", tooltip: "Stop after this chunk", primary: false }]
+        : []
       onSettingsToggled: root.settingsToggled()
+      onActionRequested: root.cancelRequested()
     }
 
     SettingsView {
@@ -212,13 +275,107 @@ BorderSurface {
         onMarkActivated: function(index) { root.focusRequested(index) }
       }
 
-      Text {
+      // --------------------------------------------------- chunked progress
+      //
+      // Spec section 9. The bar is the Chunks behind the run against the whole
+      // Draft, so a 20,000 unit Draft shows something moving rather than one
+      // sentence that never changes.
+
+      ColumnLayout {
         anchors.centerIn: parent
-        visible: root.showsCard && root.phase === "checking"
-        text: "Checking the draft..."
-        color: Color.muted
-        font.family: Style.font.family
-        font.pixelSize: Style.font.body
+        width: parent.width
+        visible: root.checking
+        spacing: Style.spacing.md
+
+        Text {
+          Layout.alignment: Qt.AlignHCenter
+          text: root.chunkCount === 0
+            ? "Splitting the draft into chunks..."
+            : "Checking chunk " + root.chunkNumber + " of " + root.chunkCount + "..."
+          color: Color.popups.text
+          font.family: Style.font.family
+          font.pixelSize: Style.font.body
+        }
+
+        Rectangle {
+          Layout.fillWidth: true
+          Layout.maximumWidth: Style.space(360)
+          Layout.alignment: Qt.AlignHCenter
+          implicitHeight: Style.space(6)
+          radius: height / 2
+          color: Style.normalBorderColor
+
+          Rectangle {
+            anchors.left: parent.left
+            anchors.verticalCenter: parent.verticalCenter
+            width: root.chunkCount === 0 ? 0 : Math.round(parent.width * root.chunksDone / root.chunkCount)
+            height: parent.height
+            radius: parent.radius
+            color: Color.accent
+
+            Behavior on width {
+              NumberAnimation { duration: 160; easing.type: Easing.OutCubic }
+            }
+          }
+        }
+
+        Text {
+          Layout.alignment: Qt.AlignHCenter
+          visible: root.issueCount > 0
+          text: root.issueCount + (root.issueCount === 1 ? " issue so far" : " issues so far")
+          color: Color.muted
+          font.family: Style.font.family
+          font.pixelSize: Style.font.bodySmall
+        }
+      }
+
+      // ------------------------------------------------ the replace confirm
+      //
+      // Spec section 2: a trigger that carries a text replaces a non-empty
+      // Draft only after this. The Draft is memory only, so nothing else holds
+      // a copy of what the reader would lose.
+
+      ColumnLayout {
+        anchors.top: parent.top
+        width: parent.width
+        visible: root.confirming
+        spacing: Style.spacing.md
+
+        Text {
+          Layout.fillWidth: true
+          text: "Replace the draft?"
+          color: Color.popups.text
+          wrapMode: Text.Wrap
+          font.family: Style.font.family
+          font.pixelSize: Style.font.title
+          font.bold: true
+        }
+
+        Text {
+          Layout.fillWidth: true
+          text: "Compose already holds a draft of " + Format.units(root.draftUnits)
+            + ". The new text is " + Format.units(root.pendingDraft.length)
+            + ". The draft is kept in memory only, so replacing it loses it."
+          color: Color.popups.text
+          wrapMode: Text.Wrap
+          font.family: Style.font.family
+          font.pixelSize: Style.font.body
+        }
+      }
+
+      // -------------------------------------------- the inline chunk failure
+      //
+      // Spec section 9: the error of the Chunk that failed, over the Issues the
+      // finished Chunks already found.
+
+      ErrorCard {
+        anchors.top: parent.top
+        width: parent.width
+        visible: root.hasError
+
+        card: root.errorCard
+        diagnosis: root.diagnosis
+        onActionRequested: function(action) { root.errorActionRequested(action) }
       }
 
       // ------------------------------------------------------- empty state
@@ -248,7 +405,8 @@ BorderSurface {
 
         Text {
           Layout.alignment: Qt.AlignHCenter
-          text: root.sourceText.length + " characters checked, " + root.engine + ", " + root.elapsedMs + " ms"
+          text: root.sourceText.length + " characters checked, " + root.engine
+            + ", " + Format.elapsed(root.elapsedMs)
           color: Color.muted
           font.family: Style.font.family
           font.pixelSize: Style.font.bodySmall
@@ -295,12 +453,13 @@ BorderSurface {
     }
 
     // The size of the Draft, and why the Check will not take it. Spec section
-    // 9 asks for the count and the cap, so the refusal carries both.
+    // 9 asks for the count and the cap, so the refusal carries both. An empty
+    // Draft is not yet a mistake, so only the cap reads as one.
     Text {
       Layout.fillWidth: true
       visible: root.editing && root.refusal.length > 0
       text: root.refusal
-      color: root.draftUnits > root.checkLimitUnits ? Color.urgent : Color.muted
+      color: root.draftUnits > root.draftCapUnits ? Color.urgent : Color.muted
       wrapMode: Text.Wrap
       font.family: Style.font.family
       font.pixelSize: Style.font.bodySmall
@@ -336,12 +495,32 @@ BorderSurface {
       Item { Layout.fillWidth: true }
 
       Button {
-        visible: root.showsCard && (root.phase === "checking" || root.isEmptyResult || root.phase === "notice")
+        visible: root.showsCard && (root.checking || root.isEmptyResult || root.phase === "notice")
         text: "Close"
         bordered: true
         foreground: Color.popups.text
         fontFamily: Style.font.family
         onClicked: root.closeRequested()
+      }
+
+      // Spec section 2: the confirm keeps the Draft unless the reader says
+      // otherwise, so keeping it is the safe side and leads.
+      Button {
+        visible: root.confirming
+        text: "Keep the draft"
+        bordered: true
+        foreground: Color.accent
+        fontFamily: Style.font.family
+        onClicked: root.keepDraftRequested()
+      }
+
+      Button {
+        visible: root.confirming
+        text: "Replace it"
+        bordered: true
+        foreground: Color.urgent
+        fontFamily: Style.font.family
+        onClicked: root.replaceDraftRequested()
       }
 
       // Spec section 9: the Draft is memory only, so this is the one way to
@@ -357,8 +536,10 @@ BorderSurface {
         onClicked: root.clearRequested()
       }
 
+      // The inline failure and the confirm carry their own buttons, and a run
+      // still walking has no Draft to go back to yet.
       Button {
-        visible: root.showsCard && !root.editing && root.phase !== "checking"
+        visible: root.reviewing || (root.showsCard && root.phase === "notice")
         text: "Back to edit"
         tooltipText: "Esc"
         bordered: true

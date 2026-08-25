@@ -3,8 +3,8 @@
 This page is for a developer or a reviewer who wants the plugin on a real desktop.
 The automated checks in spec section 13 run in CI.
 They cannot cover capture, because capture needs a compositor, a focused window, and a real selection.
-Smoke items 1, 2, 3, 4, 6, 7, 8, and 9 of spec section 13 are therefore run by hand, and this page is how.
-The Compose walkthrough later on this page is here for the same reason: spec section 13 lists no smoke item for it.
+Every smoke item of spec section 13 but item 10 is therefore run by hand, and this page is how.
+The Compose walkthrough later on this page is here for the same reason: spec section 13 lists no smoke item for the card itself, only for the chunked Draft of item 5.
 
 ## What you need
 
@@ -168,10 +168,100 @@ Check the two bounds that this selection is here to prove:
 - The text region scrolls. Drag inside it, or press Down until the focus passes the bottom of the region.
   The focused mark scrolls into view; the card does not grow.
 
-`Open in Compose` opens the Compose card on the kept Draft.
-Handing the Selection over as the new Draft belongs to the chunked-checking ticket, so the Draft you left there is what the card shows.
+Now finish the item on the handover, which is the half spec section 2 puts on this card.
 
-## 9. Smoke item 6: the engine_unavailable card, then Retry
+Press `Open in Compose`.
+
+Expected: the Compose card opens with the whole 6,000 unit selection as the Draft, not the first 5,000.
+The hero reads `draft, 6,000 units`.
+Nothing under the text area refuses the Check, because a Draft over one Check is checked in Chunks.
+
+Press `Check`.
+
+Expected: the hero counts the Chunks, then review mode with the marked text.
+Spot-check one Issue in the second half of the text: click its mark and read the inspector.
+The original in the inspector is the text under the mark, which is what proves the span of a later Chunk moved by that Chunk's start.
+
+Run it once more with a Draft already in Compose, to see the confirm of spec section 2:
+
+1. Open Compose, type `keep me`, and press Esc.
+2. Select the 6,000 unit text again and press `Open in Compose` from the too-long card.
+
+Expected: the confirm card rather than the new Draft.
+It reads `Replace the draft?`, names both sizes, and offers `Keep the draft` and `Replace it`.
+`Keep the draft` leaves `keep me` in the text area; `Replace it` puts the selection there.
+Clear the Draft and repeat: with an empty Draft the selection lands straight away and no confirm appears.
+
+The Compose button in the popup header carries the selection the same way, even a short one.
+
+## 9. Smoke item 5: a 20,000 unit Draft, with progress, Cancel, and a failure
+
+This is the item chunked checking exists for: a Draft that takes several Chunks, spec section 9.
+
+1. Put a long Draft in the clipboard and paste it into Compose:
+
+   ```bash
+   python3 -c "print(('I has two book and she go home every day. ' * 500)[:20000], end='')" | wl-copy
+   ```
+
+   Open Compose with SUPER + SHIFT + G, clear whatever is there, and paste with Ctrl + V.
+
+Expected: the hero reads `draft, 20,000 units` and `Check` is on.
+
+2. Press `Check`.
+
+Expected: the hero meta line reads `Checking 1 of n, languagetool, <elapsed>`, with a `Cancel` button beside it.
+The number climbs, the elapsed time counts up, and the bar under `Checking chunk k of n...` fills as each Chunk lands.
+`n` is what `grammachy chunk` answered; check it by hand with the same Draft:
+
+```bash
+python3 -c "print(('I has two book and she go home every day. ' * 500)[:20000], end='')" | bin/grammachy chunk | jq '.chunks | length'
+```
+
+3. Let it finish.
+
+Expected: review mode with every Chunk's Issues in one list, sorted, with no gap at a Chunk boundary.
+The hero has no `Checked k of n chunks` note, because every Chunk finished.
+Walk to the last Issue with the End of the key map (Down until it wraps) and confirm the inspector's original matches the mark under it.
+
+4. Press `Back to edit`, then `Check` again, and press `Cancel` part way through.
+
+Expected: the run stops after the Chunk it was on rather than at once, then review mode opens.
+The hero note reads `Checked k of n chunks`, and the marked text carries only the Issues of those k Chunks.
+Nothing after the last checked Chunk is marked.
+
+5. The failure path. Stop the LanguageTool unit while a run is walking:
+
+   ```bash
+   # In a second terminal, while the progress line is climbing.
+   systemctl --user stop grammachy-languagetool
+   ```
+
+   The transient unit dies with the session, so nothing here is permanent.
+   Stop it with `systemctl --user`, never from a test: only this manual run may touch the unit the live shell uses.
+
+Expected: the run stops on the Chunk that failed and shows the failure inline over what it has.
+The card reads `LanguageTool is not running` with the `grammachy doctor` line and the CLI message under it.
+The hero note reads `Checked k of n chunks, m issues so far`.
+The two buttons are `Retry remaining` and `Review what we have`.
+
+Press `Review what we have`.
+
+Expected: review mode on the Issues of the finished Chunks, with the same `Checked k of n chunks` note.
+`Back to edit` returns the Corrected text of those Chunks only, and the rest of the Draft is untouched.
+
+Now run the Check again, stop the unit again, and this time let it start back up:
+
+```bash
+systemctl --user start grammachy-languagetool
+```
+
+Press `Retry remaining`.
+
+Expected: the run resumes at the Chunk that failed.
+The progress line picks up at that number rather than at `1`, no Chunk before it is checked twice, and the finished run has the whole Draft's Issues.
+
+## 10. Smoke item 6: the engine_unavailable card, then Retry
 
 This item proves the error cards of spec section 8: the card names the engine, the `grammachy doctor` line names the missing piece, and Retry re-runs the Check on the same Selection.
 
@@ -224,7 +314,7 @@ Two more cards belong to the same session:
   `Setup` shows the setup notice until the setup card lands.
   Put the binary back and reload.
 
-## 10. Smoke item 7: switch to Harper, Check, switch back
+## 11. Smoke item 7: switch to Harper, Check, switch back
 
 This item proves the Settings view of spec section 7: the gear, the storage, and that a change applies to the next Check.
 
@@ -254,7 +344,7 @@ Three more Settings checks belong to the same session:
   Open Settings, change nothing, and close the popup: `"engine": "claude"` is still in the file, because nothing is rewritten until the user changes it.
   Pick `Harper` and the file finally reads `"engine": "harper"`.
 
-## 11. Smoke item 8: auto-replace in a terminal and a browser field
+## 12. Smoke item 8: auto-replace in a terminal and a browser field
 
 Auto-replace copies the Corrected text, closes the popup, and pastes over the still-highlighted Selection.
 It only works while the source window still holds that highlight.
@@ -277,7 +367,7 @@ Expected: the same replacement in the field.
 If nothing pastes, the source window lost the highlight before the paste landed.
 That is the documented limit of spec section 6, and the hint under the toggle says so.
 
-## 12. Smoke item 9: settings persist across a shell restart
+## 13. Smoke item 9: settings persist across a shell restart
 
 1. Open Settings and set `Native language` to `Malay`, `Engine` to `Harper`, and `Auto-replace` on.
 2. Restart the shell:
@@ -292,19 +382,22 @@ Expected: `Malay`, `Harper`, and `Auto-replace` on, all as they were left.
 The plugin keeps no state of its own: the values come back because `~/.config/omarchy/shell.json` holds them, and the shell reads that file at start.
 `targetEnglish` and `openaiApiKey` have no control, so check by hand that an edit of those two keys in the file also survives a round trip through the Settings view.
 
-## 13. The Compose card
+## 14. The Compose card
 
 Compose is spec section 9.
 It captures nothing: it holds a Draft, checks it only when you ask, and reviews the answer with the same hero, inspector, footer, and keys as the popup.
-No smoke item of spec section 13 covers it, so this walkthrough is the manual check.
+Smoke item 5 above covers the chunked Draft; this walkthrough is the manual check of everything else on the card.
 
-Open it in either of two ways:
+Every trigger of spec section 2 opens it.
+The four to try are:
 
 ```bash
 omarchy-shell shell summon io.github.jyooi.grammachy '{"mode":"compose"}'
+omarchy-shell shell summon io.github.jyooi.grammachy '{"mode":"compose","text":"I has two book."}'
 ```
 
-or press SUPER + SHIFT + G once `grammachy setup` has written the bindings.
+SUPER + SHIFT + G once `grammachy setup` has written the bindings, and the `Grammachy compose` row of the Omarchy menu.
+The first two commands and both of those open the kept Draft; only the payload with a `text` brings its own, and only after the confirm when a Draft is already there.
 
 ### The Draft and the Check
 
@@ -317,7 +410,8 @@ There is no auto-replace toggle, because auto-replace never applies here.
 
 2. Press `Check`, or Ctrl + Enter.
 
-Expected: the card switches to review mode.
+Expected: the hero shows `Checking 1 of 1` for a moment, then the card switches to review mode.
+A Draft this short is one Chunk, so the progress goes by too fast to read; smoke item 5 is where it is worth watching.
 The marked text, the inspector strip, the counts, and `Accept all open` all behave as they do in the popup, and the whole key map of smoke item 1 works on them.
 The Apply button reads `Copy corrected text` and never `Replace selection`, whatever the auto-replace setting says.
 
@@ -347,9 +441,9 @@ Expected: the same Draft, with the caret in the text area.
 Expected: an empty Draft.
 The Draft lives in memory for one shell run only, spec section 9.
 
-### The cap and the two refusals
+### The cap
 
-Compose refuses a Check it cannot run, and says why under the text area.
+The cap of spec section 9 is the one size Compose refuses.
 
 1. Paste a Draft of 50,001 units:
 
@@ -364,19 +458,37 @@ Trim the Draft and `Check` turns back on.
 
 2. Paste a Draft of about 6,000 units, over what one Check takes.
 
-Expected: `The draft is 6,000 units, over the 5,000 one check takes. Checking in chunks arrives in a later milestone.`
-That second refusal is the seam chunked checking replaces; the cap refusal above it stays.
+Expected: no refusal at all, and `Check` is on.
+Anything under the cap is checked in Chunks, which is smoke item 5.
+
+### The replace confirm
+
+Spec section 2: a trigger that carries a text replaces a non-empty Draft only after a confirm.
+
+1. Open Compose, clear the Draft, and close it.
+2. Run the payload command above with a `text`.
+
+Expected: the text lands as the Draft straight away, with no confirm, because there was nothing to lose.
+
+3. Run the same command a second time, with that Draft still in place.
+
+Expected: the confirm card.
+It reads `Replace the draft?`, names the size of each, and offers `Keep the draft` and `Replace it`.
+Esc closes the card and keeps the Draft, the same as `Keep the draft`.
 
 ### Esc, the backdrop, and the gear
 
 | Where | Esc | A click outside the card |
 |---|---|---|
 | Edit mode | Closes and keeps the Draft | Closes and keeps the Draft |
+| The replace confirm | Closes and keeps the Draft | Closes and keeps the Draft |
+| A chunked run | Closes and stops after the Chunk in flight | The same |
+| An inline Chunk failure | Closes and keeps the Draft | Closes |
 | Review mode | Back to edit, with the Corrected text | Closes |
 
 The gear flips Compose to the same Settings view as the popup, and `Back` returns to whichever mode was on screen.
 
-## 14. Running the automated checks
+## 15. Running the automated checks
 
 The same three plugin checks CI runs, against the shell installed on this machine:
 
@@ -404,7 +516,7 @@ cargo clippy --all-targets -- -D warnings
 cargo test
 ```
 
-## 15. Removing it
+## 16. Removing it
 
 Remove the hotkeys and the menu entry first (spec section 10):
 

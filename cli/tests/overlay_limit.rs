@@ -56,10 +56,11 @@ fn the_overlay_draft_cap_equals_the_cli_draft_limit() {
     );
 }
 
+/// Compose refuses only a Draft over the cap: anything under it is checked in
+/// Chunks (spec section 9), so the Check limit is not a bound it draws.
 #[test]
-fn the_compose_card_default_limits_equal_the_cli_limits() {
+fn the_compose_card_default_cap_equals_the_cli_draft_limit() {
     let source = read("ui/ComposeCard.qml");
-    assert_eq!(int_property(&source, "checkLimitUnits"), MAX_UTF16_UNITS);
     assert_eq!(
         int_property(&source, "draftCapUnits"),
         MAX_DRAFT_UTF16_UNITS

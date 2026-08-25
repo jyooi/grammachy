@@ -14,8 +14,15 @@ import "ui/format.js" as Format
 // section 2. Quick mode captures the Selection (section 3), runs one Check
 // through the companion CLI (section 5.1), and shows the marked text with the
 // key map, the Apply path, and the too-long card of section 6. Compose mode
-// (section 9) captures nothing: it holds a Draft, checks it on demand, and
-// reviews the answer over the same hero, inspector, footer, and keys.
+// (section 9) captures nothing: it holds a Draft, checks it in Chunks on
+// demand, and reviews the answer over the same hero, inspector, footer, and
+// keys.
+//
+// A Draft of any size under the cap is one `grammachy chunk` followed by one
+// `grammachy check` per Chunk in sequence, each Chunk's spans moved by its own
+// start before they merge into one list. Cancel stops the run after the Chunk
+// in flight and a failed Chunk keeps what the finished ones found, so what the
+// engine already answered is never thrown away.
 //
 // Both surfaces share one Check, one review state, and one key map, so what
 // differs between them is `surface` and the card that draws it.
@@ -45,7 +52,7 @@ Item {
   property string surface: "quick"
 
   // Quick: "capturing", "checking", "result", "error", "notice", or "toolong".
-  // Compose: "editing", "checking", "result", or "notice".
+  // Compose: "editing", "confirm", "checking", "result", "error", or "notice".
   property string phase: "capturing"
   // The whole capture, spec section 3. Every Check runs on this or on its head.
   property string capturedText: ""
@@ -85,6 +92,32 @@ Item {
   // The Draft of spec section 9. It lives here for as long as the shell runs
   // and goes nowhere else: no file, no clipboard, no setting.
   property string draftText: ""
+
+  // The Draft a trigger of spec section 2 wants in place of a non-empty one.
+  // It waits here while the confirm card is on screen, because the Draft is the
+  // one thing the plugin keeps and nothing else holds a copy of it.
+  property string pendingDraft: ""
+
+  // The chunked Check of spec section 9. `chunks` is the tiling `grammachy
+  // chunk` answered, `chunkIndex` is the Chunk a Check is running on or the one
+  // a failure stopped at, and `chunkRun` says the Check in flight belongs to
+  // this loop rather than to the quick popup.
+  property var chunks: []
+  property int chunkIndex: 0
+  property bool chunkRun: false
+  property bool chunkCancelled: false
+  // Engine time from every Chunk that finished, which is what the result line
+  // names, the same number the popup's does.
+  property int chunkElapsedMs: 0
+  // The wall clock of this attempt, which is what the progress line names,
+  // because that is the wait the reader is watching.
+  property double chunkStartedAt: 0
+  property int chunkTickMs: 0
+
+  // The engine the progress line names before any Chunk has answered: the
+  // setting, until an envelope says which engine actually ran.
+  readonly property string runningEngine: root.engine.length > 0
+    ? root.engine : String(root.setting("engine"))
 
   // The clipboard the Ctrl + C fallback borrowed, put back once the Selection
   // is in hand. Spec section 3.
@@ -177,13 +210,19 @@ Item {
 
     root.opened = true
     if (String(payload.mode || "quick") === "compose") {
-      root.showCompose()
+      // Spec section 2: a payload with no `text` opens Compose on the kept
+      // Draft, which is what the menu entry and SUPER + SHIFT + G send.
+      if (typeof payload.text === "string") root.composeWith(payload.text)
+      else root.showCompose()
       return
     }
     root.startQuick()
   }
 
   function close() {
+    // A chunked run launches one Check after another, so a card that is gone
+    // must not leave one walking the rest of the Draft.
+    root.cancelChunkRun()
     root.opened = false
   }
 
@@ -201,6 +240,7 @@ Item {
   function resetRun() {
     settleTimer.stop()
     pasteTimer.stop()
+    chunkTicker.stop()
     primaryPaste.running = false
     savedClipboard.running = false
     copyKeystroke.running = false
@@ -208,6 +248,9 @@ Item {
     checkProcess.launchPending = false
     checkProcess.restartQueued = false
     checkProcess.running = false
+    chunkProcess.launchPending = false
+    chunkProcess.restartQueued = false
+    chunkProcess.running = false
     doctorProcess.restartQueued = false
     doctorProcess.running = false
     copyProcess.pasteAfter = false
@@ -225,6 +268,8 @@ Item {
     root.engineMessage = ""
     root.errorCard = null
     root.errorDiagnosis = ""
+    root.pendingDraft = ""
+    root.clearChunkRun()
     // End the last borrow.
     if (root.clipboardBorrowed && !restoreClipboard.running)
       root.restoreBorrowedClipboard()
@@ -233,12 +278,47 @@ Item {
   }
 
   // Spec sections 2 and 9: Compose opens on the kept Draft and captures
-  // nothing. The `{"mode": "compose", "text": "..."}` payload, which replaces
-  // a non-empty Draft after a confirm, arrives with the remaining triggers in
-  // their own ticket; this function is the seam they land on.
+  // nothing. This is where SUPER + SHIFT + G and the `grammachy.compose` menu
+  // entry land, and where `composeWith` lands once the Draft is settled.
   function showCompose() {
     root.resetRun()
     root.surface = "compose"
+    root.phase = "editing"
+    Qt.callLater(root.restoreFocus)
+  }
+
+  // Compose on a text that came from somewhere else, spec section 2: the
+  // `Open in Compose` button of the too-long card, the Compose button in the
+  // popup header, or a `{"mode": "compose", "text": "..."}` payload.
+  //
+  // A non-empty Draft is replaced only after a confirm, because it is the one
+  // thing the plugin keeps and no file holds a second copy of it. An empty one
+  // has nothing to lose, so it takes the new text straight away.
+  function composeWith(text) {
+    var wanted = typeof text === "string" ? text : ""
+    if (wanted.length === 0 || root.draftText.length === 0) {
+      root.showCompose()
+      if (wanted.length > 0) root.draftText = wanted
+      return
+    }
+
+    root.resetRun()
+    root.surface = "compose"
+    root.pendingDraft = wanted
+    root.phase = "confirm"
+  }
+
+  function replaceDraft() {
+    if (root.phase !== "confirm") return
+    root.draftText = root.pendingDraft
+    root.pendingDraft = ""
+    root.phase = "editing"
+    Qt.callLater(root.restoreFocus)
+  }
+
+  function keepDraft() {
+    if (root.phase !== "confirm") return
+    root.pendingDraft = ""
     root.phase = "editing"
     Qt.callLater(root.restoreFocus)
   }
@@ -334,7 +414,24 @@ Item {
 
   // ------------------------------------------------------------------ check
 
+  // One `grammachy check` on this text. What the answer means belongs to the
+  // caller: the quick popup checks the whole Selection, and the chunked run of
+  // spec section 9 checks one Chunk of the Draft.
+  function launchCheck(text) {
+    checkProcess.generation = root.runGeneration
+    checkProcess.stdinText = text
+    checkProcess.command = root.checkCommand()
+    // Writing to stdin closes it, so every run arms the channel again.
+    checkProcess.stdinEnabled = true
+    checkProcess.restartQueued = checkProcess.running
+    checkProcess.launchPending = true
+    checkProcess.running = true
+  }
+
+  // One Check on one text, whose Issues are the whole answer. This is the quick
+  // popup's path; Compose walks `runChunk` instead.
   function runCheck(text) {
+    root.clearChunkRun()
     root.selectionText = text
     root.issues = []
     root.decisions = []
@@ -344,14 +441,7 @@ Item {
     root.errorCard = null
     root.errorDiagnosis = ""
     root.phase = "checking"
-    checkProcess.generation = root.runGeneration
-    checkProcess.stdinText = text
-    checkProcess.command = root.checkCommand()
-    // Writing to stdin closes it, so every run arms the channel again.
-    checkProcess.stdinEnabled = true
-    checkProcess.restartQueued = checkProcess.running
-    checkProcess.launchPending = true
-    checkProcess.running = true
+    root.launchCheck(text)
   }
 
   // The `Check the first N only` button of the too-long card, spec section 8.
@@ -375,19 +465,191 @@ Item {
   }
 
   // Why Compose will not check this Draft, or "" when it will. The Check
-  // button reads the same rule, so the two can never disagree.
+  // button reads the same rule, so the two can never disagree. Anything under
+  // the cap is checkable, however many Chunks it takes.
   function draftRefusal() {
-    return Format.draftRefusal(root.draftText.length, root.checkLimitUnits, root.draftCapUnits)
+    return Format.draftRefusal(root.draftText.length, root.draftCapUnits)
   }
 
-  // One Check on the whole Draft, which is what fits while a Draft is one
-  // Chunk. Chunked checking replaces this body and nothing around it.
+  // The chunked Check of spec section 9: one `grammachy chunk`, then one
+  // `grammachy check` per Chunk in sequence.
   function startComposeCheck() {
     if (root.surface !== "compose" || root.phase !== "editing") return
     if (root.draftRefusal().length > 0) return
     // A second Check must not be answered by the first one's output.
     root.runGeneration += 1
-    root.runCheck(root.draftText)
+    root.selectionText = root.draftText
+    root.issues = []
+    root.decisions = []
+    root.focusIndex = 0
+    root.applied = false
+    root.engineMessage = ""
+    root.errorCard = null
+    root.errorDiagnosis = ""
+    root.chunks = []
+    root.chunkIndex = 0
+    root.chunkElapsedMs = 0
+    root.beginChunkAttempt()
+    root.runChunkList()
+  }
+
+  // What every attempt at the remaining Chunks starts from, whether it is the
+  // first one or a `Retry remaining` after a failure.
+  function beginChunkAttempt() {
+    root.chunkRun = true
+    root.chunkCancelled = false
+    root.chunkStartedAt = Date.now()
+    root.chunkTickMs = 0
+    root.phase = "checking"
+    chunkTicker.start()
+  }
+
+  // No run is in flight and nothing of one is left behind.
+  function clearChunkRun() {
+    chunkTicker.stop()
+    root.chunkRun = false
+    root.chunkCancelled = false
+    root.chunks = []
+    root.chunkIndex = 0
+    root.chunkElapsedMs = 0
+    root.chunkTickMs = 0
+  }
+
+  function runChunkList() {
+    chunkProcess.generation = root.runGeneration
+    chunkProcess.stdinText = root.draftText
+    chunkProcess.command = [root.binaryPath, "chunk"]
+    // Writing to stdin closes it, so every run arms the channel again.
+    chunkProcess.stdinEnabled = true
+    chunkProcess.restartQueued = chunkProcess.running
+    chunkProcess.launchPending = true
+    chunkProcess.running = true
+  }
+
+  function onChunkListOutput(text, generation) {
+    if (!root.isLive(generation)) return
+    if (root.chunkCancelled) {
+      root.finishChunkRun()
+      return
+    }
+
+    var answer = Errors.readChunks(text)
+    if (answer.error) {
+      root.showChunkError(answer.error.code, answer.error.message)
+      return
+    }
+    // A Draft the refusal let through always tiles into at least one Chunk, so
+    // an empty list says the companion tool is out of step with section 5.2.
+    if (answer.chunks.length === 0) {
+      root.showChunkError(Errors.BAD_ARGUMENTS, "")
+      return
+    }
+
+    root.chunks = answer.chunks
+    root.chunkIndex = 0
+    root.runChunk()
+  }
+
+  function runChunk() {
+    if (root.chunkIndex >= root.chunks.length) {
+      root.finishChunkRun()
+      return
+    }
+    root.launchCheck(Splice.chunkText(root.draftText, root.chunks[root.chunkIndex]))
+  }
+
+  // One Chunk's answer merged into the run, spec section 9. Every span moves by
+  // the Chunk's own start before it is verified against the whole Draft, so a
+  // mark near a Chunk boundary sits on the text the engine found it in.
+  function absorbChunk(envelope) {
+    var chunk = root.chunks[root.chunkIndex]
+    var shifted = Splice.shiftIssues(envelope.issues || [], chunk.start)
+    var verified = Splice.verifiedIssues(root.selectionText, shifted)
+    root.warnDropped(verified.dropped)
+
+    root.issues = Splice.mergeIssues(root.issues, verified.issues)
+    // Nothing is decided while the run is still walking, so one null per Issue
+    // is the whole of what the review starts from.
+    root.decisions = root.issues.map(function() { return null })
+    root.engine = String(envelope.engine || root.engine)
+    root.chunkElapsedMs += Number(envelope.elapsedMs || 0)
+    root.chunkIndex += 1
+
+    // Spec section 9: Cancel stops the run after the Chunk in flight, so what
+    // the engine already answered is kept.
+    if (root.chunkCancelled || root.chunkIndex >= root.chunks.length) {
+      root.finishChunkRun()
+      return
+    }
+    root.runChunk()
+  }
+
+  function finishChunkRun() {
+    chunkTicker.stop()
+    root.chunkRun = false
+    // A Cancel that landed before any Chunk answered leaves nothing to review,
+    // so the Draft comes back rather than an empty result that would read as
+    // "no issues found".
+    if (root.chunkCancelled && root.chunkIndex === 0) {
+      root.backToEdit()
+      return
+    }
+    root.focusIndex = 0
+    root.elapsedMs = root.chunkElapsedMs
+    root.phase = "result"
+  }
+
+  // Spec section 9: Cancel stops after the Chunk in flight rather than killing
+  // it, because a Chunk the engine has already worked on is Issues in hand.
+  function cancelChunkRun() {
+    if (!root.chunkRun) return
+    root.chunkCancelled = true
+  }
+
+  // A failed Chunk keeps the Issues from the finished ones and shows the engine
+  // message inline, spec section 9. `chunkIndex` still names the Chunk that
+  // failed, so `Retry remaining` resumes there rather than at the top.
+  function showChunkError(code, message) {
+    chunkTicker.stop()
+    root.chunkRun = false
+    root.engineMessage = message
+    root.cardSerial += 1
+    root.errorDiagnosis = ""
+    root.errorCard = Errors.chunkCard(code, {
+      engineLabel: root.engineLabel(),
+      engineSlug: root.setting("engine"),
+      message: message,
+      hasPartial: root.issues.length > 0
+    })
+    root.phase = "error"
+    if (root.errorCard.needsDiagnosis) root.runDoctor()
+  }
+
+  // `Retry remaining`, spec section 9. A Chunk list that never arrived starts
+  // the run over; a Chunk that failed resumes at itself, so every Chunk before
+  // it keeps the Issues it already found. The wall clock starts again, because
+  // the reader may have taken minutes to fix what the message named.
+  function retryRemaining() {
+    if (root.surface !== "compose" || root.phase !== "error") return
+    root.runGeneration += 1
+    root.errorCard = null
+    root.errorDiagnosis = ""
+    root.engineMessage = ""
+    root.beginChunkAttempt()
+    if (root.chunks.length === 0) root.runChunkList()
+    else root.runChunk()
+  }
+
+  // `Review what we have`, spec section 9: the Issues of the finished Chunks,
+  // reviewed as if the run had ended there.
+  function reviewPartial() {
+    if (root.surface !== "compose" || root.phase !== "error") return
+    root.errorCard = null
+    root.errorDiagnosis = ""
+    root.engineMessage = ""
+    root.focusIndex = 0
+    root.elapsedMs = root.chunkElapsedMs
+    root.phase = "result"
   }
 
   function backToEdit() {
@@ -397,6 +659,7 @@ Item {
     if (root.phase === "result") root.draftText = root.correctedText()
     // A Check still in flight answers into a card that has moved on.
     root.runGeneration += 1
+    root.clearChunkRun()
     root.phase = "editing"
     root.selectionText = ""
     root.issues = []
@@ -404,6 +667,8 @@ Item {
     root.focusIndex = 0
     root.applied = false
     root.engineMessage = ""
+    root.errorCard = null
+    root.errorDiagnosis = ""
     Qt.callLater(root.restoreFocus)
   }
 
@@ -413,6 +678,15 @@ Item {
     if (!checkProcess.launchPending) return
     if (root.phase !== "checking") return
     checkProcess.launchPending = false
+    root.showBinaryMissing()
+  }
+
+  function finishChunkListLaunch() {
+    if (chunkProcess.running) return
+    if (chunkProcess.restartQueued) return
+    if (!chunkProcess.launchPending) return
+    if (root.phase !== "checking") return
+    chunkProcess.launchPending = false
     root.showBinaryMissing()
   }
 
@@ -426,13 +700,16 @@ Item {
   // the card of section 6, which this popup owns; every other code gets its
   // card from `ui/errors.js`.
   function showError(code, message) {
-    root.engineMessage = message
-    // Both cards of section 8 are about a Selection, so Compose keeps the
-    // plain notice: it has no Selection to size and none to ask for.
+    // Every Check Compose runs is one Chunk of a run that may already have
+    // Issues behind it, and neither card of section 8 that asks about a
+    // Selection has one to ask about there. Spec section 9 gives that failure
+    // its own inline card, so Compose goes there instead.
     if (root.surface === "compose") {
-      root.showNotice("The check did not finish", "The engine reported an error.")
+      root.showChunkError(code, message)
       return
     }
+
+    root.engineMessage = message
     var settled = Errors.known(code)
     if (settled === Errors.TEXT_TOO_LONG) {
       root.errorCard = null
@@ -494,6 +771,18 @@ Item {
     else if (action === Errors.SETTINGS) root.settingsOpen = true
     else if (action === Errors.SETUP) root.showSetup()
     else if (action === Errors.COMPOSE) root.showCompose()
+    // The two recovery buttons of a failed Chunk, spec section 9.
+    else if (action === Errors.RETRY_REMAINING) root.retryRemaining()
+    else if (action === Errors.REVIEW_PARTIAL) root.reviewPartial()
+  }
+
+  // Spec section 5.1: an Issue whose slice does not match its original would
+  // splice the wrong characters, so it is dropped with a warning on stderr.
+  function warnDropped(dropped) {
+    for (var i = 0; i < dropped.length; i++) {
+      console.warn("grammachy: dropped an issue whose span does not match its original:",
+        JSON.stringify({ start: dropped[i].start, end: dropped[i].end, original: dropped[i].original }))
+    }
   }
 
   function onCheckOutput(text, generation) {
@@ -505,13 +794,14 @@ Item {
       return
     }
 
+    if (root.chunkRun) {
+      root.absorbChunk(answer.result)
+      return
+    }
+
     var envelope = answer.result
     var verified = Splice.verifiedIssues(root.selectionText, envelope.issues || [])
-    for (var i = 0; i < verified.dropped.length; i++) {
-      var dropped = verified.dropped[i]
-      console.warn("grammachy: dropped an issue whose span does not match its original:",
-        JSON.stringify({ start: dropped.start, end: dropped.end, original: dropped.original }))
-    }
+    root.warnDropped(verified.dropped)
 
     root.issues = verified.issues
     root.decisions = verified.issues.map(function() { return null })
@@ -614,10 +904,11 @@ Item {
     if (root.settingsOpen) return Keymap.MODE_IDLE
     if (root.surface === "compose") {
       if (root.phase === "editing") return Keymap.MODE_COMPOSE_EDIT
-      // A Check in flight has no Issues to decide and no Draft to go back to
-      // yet, so Esc leaves the way it does everywhere else. The Draft stays.
-      if (root.phase === "checking") return Keymap.MODE_IDLE
-      return Keymap.MODE_COMPOSE_REVIEW
+      if (root.phase === "result" || root.phase === "notice") return Keymap.MODE_COMPOSE_REVIEW
+      // A Check in flight, a Draft replacement waiting on a confirm, and the
+      // inline failure of a Chunk each carry their own buttons and no Issues to
+      // decide, so Esc leaves the way it does everywhere else. The Draft stays.
+      return Keymap.MODE_IDLE
     }
     if (root.phase === "result" && root.issues.length > 0) return Keymap.MODE_REVIEW
     return Keymap.MODE_IDLE
@@ -756,6 +1047,55 @@ Item {
       waitForEnd: true
       onStreamFinished: if (text.length > 0) console.warn("grammachy check:", text)
     }
+  }
+
+  // The Chunk list of spec section 5.2, which opens every chunked Check. It
+  // reads the whole Draft on stdin and answers the tiling the run then walks.
+  Process {
+    id: chunkProcess
+    // Chunk list launch.
+    property int generation: 0
+    property int startedGeneration: 0
+    property string stdinText: ""
+    property bool launchPending: false
+    property bool restartQueued: false
+    // Start hook.
+    onStarted: {
+      chunkProcess.launchPending = false
+      chunkProcess.restartQueued = false
+      chunkProcess.startedGeneration = root.runGeneration
+      write(chunkProcess.stdinText)
+      // Close stdin.
+      chunkProcess.stdinEnabled = false
+    }
+
+    onRunningChanged: {
+      if (chunkProcess.running) return
+      if (chunkProcess.restartQueued) {
+        chunkProcess.restartQueued = false
+        return
+      }
+      if (!chunkProcess.launchPending) return
+      if (root.phase !== "checking") return
+      Qt.callLater(root.finishChunkListLaunch)
+    }
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root.onChunkListOutput(text, chunkProcess.startedGeneration)
+    }
+    stderr: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: if (text.length > 0) console.warn("grammachy chunk:", text)
+    }
+  }
+
+  // The progress line of spec section 9 names the time the reader is waiting,
+  // which only a clock can tell while a Chunk is still out.
+  Timer {
+    id: chunkTicker
+    interval: 200
+    repeat: true
+    onTriggered: root.chunkTickMs = Date.now() - root.chunkStartedAt
   }
 
   // The one-line engine diagnosis of the `engine_unavailable` card. It runs
@@ -920,7 +1260,9 @@ Item {
         onAutoReplaceToggled: root.toggleAutoReplace()
         onFocusRequested: function(index) { root.focusIndex = index }
         onCheckFirstRequested: root.checkFirstUnits()
-        onComposeRequested: root.showCompose()
+        // Spec section 2: both the too-long card's `Open in Compose` and the
+        // Compose button in the hero carry the Selection over as the Draft.
+        onComposeRequested: root.composeWith(root.capturedText)
         onErrorActionRequested: function(action) { root.runErrorAction(action) }
         onCloseRequested: root.close()
       }
@@ -942,6 +1284,7 @@ Item {
 
         phase: root.phase
         draftText: root.draftText
+        pendingDraft: root.pendingDraft
         sourceText: root.selectionText
         issues: root.issues
         decisions: root.decisions
@@ -952,8 +1295,15 @@ Item {
         noticeTitle: root.noticeTitle
         noticeBody: root.noticeBody
         engineMessage: root.engineMessage
-        checkLimitUnits: root.checkLimitUnits
+        errorCard: root.errorCard
+        diagnosis: root.errorDiagnosis
         draftCapUnits: root.draftCapUnits
+
+        // The chunked run of spec section 9, counted from one for the reader.
+        chunkNumber: root.chunkIndex + 1
+        chunkCount: root.chunks.length
+        chunkElapsedMs: root.chunkTickMs
+        runningEngine: root.runningEngine
 
         settingsOpen: root.settingsOpen
         nativeLanguage: root.setting("nativeLanguage")
@@ -967,7 +1317,11 @@ Item {
         onDraftEdited: function(text) { root.editDraft(text) }
         onClearRequested: root.clearDraft()
         onCheckRequested: root.startComposeCheck()
+        onCancelRequested: root.cancelChunkRun()
         onBackToEditRequested: root.backToEdit()
+        onReplaceDraftRequested: root.replaceDraft()
+        onKeepDraftRequested: root.keepDraft()
+        onErrorActionRequested: function(action) { root.runErrorAction(action) }
         onAccepted: function(index) { root.decide(index, true) }
         onSkipped: function(index) { root.decide(index, false) }
         onAcceptAllRequested: root.acceptAllOpen()

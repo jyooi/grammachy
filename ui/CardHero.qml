@@ -4,12 +4,14 @@ import qs.Commons
 import qs.Ui
 
 // The hero both surfaces wear, spec sections 6 and 9: the mark, the name, one
-// meta line, and the gear that flips the card to Settings.
+// meta line, whatever actions the caller hangs on the trailing edge, and the
+// gear that flips the card to Settings.
 //
 // The caller words its own meta line, because what it says is the caller's
-// state. The auto-replace toggle is the popup's alone: spec section 9 says
-// auto-replace never applies in Compose, so a toggle there would promise
-// something the Apply button does not do.
+// state, and names its own actions for the same reason. The auto-replace
+// toggle is the popup's alone: spec section 9 says auto-replace never applies
+// in Compose, so a toggle there would promise something the Apply button does
+// not do.
 ColumnLayout {
   id: root
 
@@ -24,8 +26,15 @@ ColumnLayout {
   property bool autoReplace: false
   property bool settingsOpen: false
 
+  // The actions on the trailing edge, before the gear. Each entry is
+  // `{ id, text, tooltip, primary }`. The popup puts its Compose button here
+  // (spec section 6) and Compose puts the Cancel of a chunked Check here (spec
+  // section 9), so the hero carries either without knowing what it does.
+  property var actions: []
+
   signal autoReplaceToggled()
   signal settingsToggled()
+  signal actionRequested(string id)
 
   spacing: Style.spacing.lg
 
@@ -91,6 +100,22 @@ ColumnLayout {
         checked: root.autoReplace
         foreground: Color.popups.text
         onToggled: root.autoReplaceToggled()
+      }
+    }
+
+    Repeater {
+      model: root.actions
+
+      Button {
+        required property var modelData
+
+        Layout.alignment: Qt.AlignVCenter
+        text: String(modelData.text)
+        tooltipText: modelData.tooltip ? String(modelData.tooltip) : ""
+        bordered: true
+        foreground: modelData.primary === true ? Color.accent : Color.popups.text
+        fontFamily: Style.font.family
+        onClicked: root.actionRequested(String(modelData.id))
       }
     }
 
