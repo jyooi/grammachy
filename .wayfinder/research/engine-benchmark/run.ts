@@ -1,5 +1,7 @@
 // Grammachy engine benchmark runner (HUF-171).
-// Usage: bun run.ts [engine ...]   engines: languagetool harper qwen3b qwen7b claude
+// Usage: bun run.ts [engine ...]   engines: languagetool harper qwen3b qwen7b claude openrouter
+// HUF-183: `openrouter` runs every model in OPENROUTER_MODELS (comma separated) or the default list below.
+// Results go to ../api-model-benchmark/results-<model>.json.
 // All binaries live under ~/.cache/grammachy-bench (see REPORT.md for setup).
 
 import { spawn } from "bun";
@@ -319,6 +321,90 @@ async function runClaude(): Promise<EngineResult | null> {
   return { engine: "claude", version: model, offline: false, license: "Commercial API, pay per token", cold_start_ms: cold, rss_kb: 0, items: res, summary: summarize(res) };
 }
 
+// ---------- OpenRouter (OpenAI chat completions API) ----------
+type UsageResult = EngineResult & { usage: { prompt_tokens: number; completion_tokens: number; reasoning_tokens: number; cost_usd: number } };
+
+const OPENROUTER_DEFAULT_MODELS = [
+  "google/gemini-3.7-flash",
+  "deepseek/deepseek-v4-flash-0731",
+  "anthropic/claude-haiku-4.5",
+  "openai/gpt-5.4-nano",
+  "qwen/qwen3.7-flash",
+  "mistralai/mistral-small-2603",
+  "google/gemini-3.1-flash-lite",
+];
+
+async function runOpenRouterModel(key: string, model: string): Promise<UsageResult> {
+  const usage = { prompt_tokens: 0, completion_tokens: 0, reasoning_tokens: 0, cost_usd: 0 };
+  const call = async (item: Item, disableReasoning: boolean) => {
+    const body: any = {
+      model,
+      temperature: 0,
+      max_tokens: 600,
+      messages: [{ role: "user", content: llmPrompt(item) }],
+      response_format: { type: "json_object" },
+    };
+    // Reasoning tokens are billed as output tokens. The Check is a one shot classification, so turn reasoning off.
+    if (disableReasoning) body.reasoning = { enabled: false };
+    const r = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${key}`, "HTTP-Referer": "https://github.com/grammachy", "X-Title": "grammachy-bench" },
+      body: JSON.stringify(body),
+    });
+    const j: any = await r.json();
+    return { ok: r.ok, status: r.status, j };
+  };
+  let reasoningOff = true;
+  const chat = async (item: Item) => {
+    let res = await call(item, reasoningOff);
+    if (!res.ok && reasoningOff && res.status === 400) {
+      // Some models reject the reasoning field. Fall back once and keep the fallback for the rest of the run.
+      reasoningOff = false;
+      res = await call(item, false);
+    }
+    if (!res.ok) throw new Error(JSON.stringify(res.j).slice(0, 300));
+    const u = res.j.usage ?? {};
+    usage.prompt_tokens += u.prompt_tokens ?? 0;
+    usage.completion_tokens += u.completion_tokens ?? 0;
+    usage.reasoning_tokens += u.completion_tokens_details?.reasoning_tokens ?? 0;
+    usage.cost_usd += u.cost ?? 0;
+    return parseLlmIssues(item.text, res.j.choices[0].message.content ?? "");
+  };
+  noiseIssues = 0;
+  const t0 = performance.now();
+  await chat(items[0]);
+  const cold = Math.round(performance.now() - t0);
+  const warm = { ...usage };
+  const res = await runItems(chat);
+  // Report usage for the scored items only, not the warm up call.
+  usage.prompt_tokens -= warm.prompt_tokens;
+  usage.completion_tokens -= warm.completion_tokens;
+  usage.reasoning_tokens -= warm.reasoning_tokens;
+  usage.cost_usd -= warm.cost_usd;
+  return { engine: `openrouter:${model}`, version: `${model} via openrouter.ai, reasoning ${reasoningOff ? "off" : "provider default"}`, offline: false, license: "Commercial API, pay per token", cold_start_ms: cold, rss_kb: 0, items: res, summary: summarize(res), usage };
+}
+
+async function runOpenRouter(): Promise<EngineResult | null> {
+  const key = process.env.OPENROUTER_API_KEY;
+  if (!key) {
+    console.error("openrouter: OPENROUTER_API_KEY unset, skipped");
+    return null;
+  }
+  const models = (process.env.OPENROUTER_MODELS ?? OPENROUTER_DEFAULT_MODELS.join(",")).split(",").map((s) => s.trim()).filter(Boolean);
+  const outDir = `${HERE}/../api-model-benchmark`;
+  for (const model of models) {
+    console.error(`== openrouter ${model}`);
+    try {
+      const r = await runOpenRouterModel(key, model);
+      await Bun.write(`${outDir}/results-${model.replace(/[\/:]/g, "_")}.json`, JSON.stringify(r, null, 2) + "\n");
+      console.log(model, JSON.stringify(r.summary), JSON.stringify(r.usage));
+    } catch (e) {
+      console.error(model, "failed:", e);
+    }
+  }
+  return null;
+}
+
 // ---------- main ----------
 const wanted = process.argv.slice(2);
 const all: Record<string, () => Promise<EngineResult | null>> = {
@@ -327,6 +413,7 @@ const all: Record<string, () => Promise<EngineResult | null>> = {
   qwen3b: () => runLlama("qwen2.5-3b", `${BENCH}/qwen2.5-3b-instruct-q4_k_m.gguf`, "Qwen2.5-3B-Instruct Q4_K_M via llama.cpp b10615, 12 threads"),
   qwen7b: () => runLlama("qwen2.5-7b", `${BENCH}/qwen2.5-7b-instruct-q4_k_m-00001-of-00002.gguf`, "Qwen2.5-7B-Instruct Q4_K_M via llama.cpp b10615, 12 threads"),
   claude: runClaude,
+  openrouter: runOpenRouter,
 };
 const names = wanted.length ? wanted : Object.keys(all);
 for (const name of names) {
