@@ -5,19 +5,21 @@ import Quickshell.Wayland
 import qs.Commons
 import "ui"
 import "ui/settings.js" as Settings
+import "ui/keymap.js" as Keymap
 import "ui/splice.js" as Splice
 
 // The overlay entry point. `open(payload)` routes a summon to a surface, spec
 // section 2. Quick mode captures the Selection (section 3), runs one Check
-// through the companion CLI (section 5.1), and shows the marked text.
+// through the companion CLI (section 5.1), and shows the marked text with the
+// key map, the Apply path, and the too-long card of section 6.
 //
 // The gear flips the same card to the Settings view of spec section 7. This
 // file is the only thing that touches storage: it reads the plugin's entry in
 // shell.json reactively and writes one key at a time through
 // `shell.updateEntryInline`.
 //
-// Compose mode, the error cards, and the popup keys are their own tickets;
-// this file shows a plain notice card where they will land.
+// Compose mode and the remaining error cards are their own tickets; this file
+// shows a plain notice card where they will land.
 Item {
   id: root
 
@@ -28,18 +30,29 @@ Item {
   // The shell reads `opened` to answer isPluginOpen, and calls close().
   property bool opened: false
 
-  // "capturing", "checking", "result", or "notice".
+  // "capturing", "checking", "result", "notice", or "toolong".
   property string phase: "capturing"
+  // The whole capture, spec section 3. Every Check runs on this or on its head.
+  property string capturedText: ""
+  // The exact text the last Check ran on. Every Issue span indexes into it.
   property string selectionText: ""
+  // The last Check took the head of the capture, not all of it.
+  property bool truncated: false
   property var issues: []
   property var decisions: []
   property int focusIndex: 0
   property string engine: ""
   property int elapsedMs: 0
-  property bool copied: false
+  // Apply has run on the Corrected text as it stands.
+  property bool applied: false
   property string noticeTitle: ""
   property string noticeBody: ""
   property bool settingsOpen: false
+  property string engineMessage: ""
+
+  // One Check takes this many UTF-16 code units. This is `MAX_UTF16_UNITS` of
+  // `cli/src/check.rs`, which `cli/tests/overlay_limit.rs` keeps in step.
+  readonly property int checkLimitUnits: 5000
 
   // The clipboard the Ctrl + C fallback borrowed, put back once the Selection
   // is in hand. Spec section 3.
@@ -86,6 +99,24 @@ Item {
       return
     }
     root.shell.updateEntryInline(root.pluginId, Settings.mergedEntry(root.entry, name, value))
+    // A Settings write is the stored value. Drop a hero override so the two
+    // controls do not disagree after the file catches up.
+    if (name === "autoReplace") root.autoReplaceOverride = null
+  }
+
+  // The hero toggle of spec section 6 shows `autoReplace` and flips it for the
+  // rest of the session. Writing it back to shell.json belongs to the Settings
+  // view, so the override sits beside the stored value rather than over it.
+  readonly property bool storedAutoReplace: root.setting("autoReplace") === true
+  property var autoReplaceOverride: null
+  readonly property bool autoReplace: root.autoReplaceOverride === null
+    ? root.storedAutoReplace : root.autoReplaceOverride === true
+
+  function toggleAutoReplace() {
+    root.autoReplaceOverride = !root.autoReplace
+    // The Apply button just changed what it does, so a done state from the
+    // other mode would read as a promise the button never made.
+    root.applied = false
   }
 
   function checkCommand() {
@@ -108,7 +139,7 @@ Item {
 
     root.opened = true
     if (String(payload.mode || "quick") === "compose") {
-      root.showNotice("Compose is not ready yet", "The Compose window arrives in a later milestone. Use the popup on a shorter selection.")
+      root.showCompose()
       return
     }
     root.startQuick()
@@ -124,10 +155,18 @@ Item {
     root.noticeBody = body
   }
 
+  // `Open in Compose` is on the too-long card already, because that card makes
+  // no sense without it. The window it opens is its own ticket.
+  function showCompose() {
+    root.showNotice("Compose is not ready yet",
+      "The Compose window arrives in a later milestone. Check the first part of the selection instead.")
+  }
+
   // ---------------------------------------------------------------- capture
 
   function startQuick() {
     settleTimer.stop()
+    pasteTimer.stop()
     primaryPaste.running = false
     savedClipboard.running = false
     copyKeystroke.running = false
@@ -135,18 +174,22 @@ Item {
     checkProcess.launchPending = false
     checkProcess.restartQueued = false
     checkProcess.running = false
+    copyProcess.pasteAfter = false
     // New capture.
     root.runGeneration += 1
     // Reset state. The check view is what a summon shows, spec section 7.
     root.settingsOpen = false
     root.phase = "capturing"
+    root.capturedText = ""
     root.selectionText = ""
+    root.truncated = false
     root.issues = []
     root.decisions = []
     root.focusIndex = 0
     root.engine = ""
     root.elapsedMs = 0
-    root.copied = false
+    root.applied = false
+    root.engineMessage = ""
     // End the last borrow.
     if (root.clipboardBorrowed && !restoreClipboard.running)
       root.restoreBorrowedClipboard()
@@ -173,9 +216,15 @@ Item {
     return typeof text === "string" && text.replace(/^\s+|\s+$/g, "").length > 0
   }
 
+  function captured(text) {
+    root.capturedText = text
+    root.truncated = false
+    root.runCheck(text)
+  }
+
   function onPrimaryCaptured(text, generation) {
     if (!root.isLive(generation)) return
-    if (root.isSelection(text)) root.runCheck(text)
+    if (root.isSelection(text)) root.captured(text)
     else {
       savedClipboard.generation = generation
       savedClipboard.running = true
@@ -203,8 +252,12 @@ Item {
   function onFallbackCaptured(text, generation) {
     if (!root.isLive(generation)) return
     root.restoreBorrowedClipboard()
-    if (root.isSelection(text)) root.runCheck(text)
-    else root.showNotice("Nothing selected", "Highlight some text, then press SUPER + G.")
+    if (root.isSelection(text)) root.captured(text)
+    else root.showEmptySelection()
+  }
+
+  function showEmptySelection() {
+    root.showNotice("Nothing selected", "Highlight some text, then press SUPER + G.")
   }
 
   function restoreBorrowedClipboard() {
@@ -221,6 +274,11 @@ Item {
 
   function runCheck(text) {
     root.selectionText = text
+    root.issues = []
+    root.decisions = []
+    root.focusIndex = 0
+    root.applied = false
+    root.engineMessage = ""
     root.phase = "checking"
     checkProcess.generation = root.runGeneration
     checkProcess.stdinText = text
@@ -232,14 +290,40 @@ Item {
     checkProcess.running = true
   }
 
+  // The `Check the first N only` button of the too-long card, spec section 8.
+  function checkFirstUnits() {
+    root.truncated = true
+    root.runCheck(Splice.firstUnits(root.capturedText, root.checkLimitUnits))
+  }
+
   function finishCheckLaunch() {
     if (checkProcess.running) return
     if (checkProcess.restartQueued) return
     if (!checkProcess.launchPending) return
     if (root.phase !== "checking") return
     checkProcess.launchPending = false
+    root.showBinaryMissing()
+  }
+
+  function showBinaryMissing() {
     root.showNotice("Grammachy could not run the check",
       "The companion tool is missing or out of date. See docs/dev.md for how to put a binary in bin/grammachy.")
+  }
+
+  // Spec section 8 gives each error code its own card. `text_too_long` and
+  // `empty_selection` land here; the rest keep the plain notice until the
+  // error cards ticket dresses them.
+  function showError(code, message) {
+    root.engineMessage = message
+    if (code === "text_too_long") {
+      root.phase = "toolong"
+      return
+    }
+    if (code === "empty_selection") {
+      root.showEmptySelection()
+      return
+    }
+    root.showNotice("The check did not finish", message)
   }
 
   function onCheckOutput(text, generation) {
@@ -252,13 +336,12 @@ Item {
     }
 
     if (!Util.isPlainObject(envelope) || envelope.contractVersion !== 1) {
-      root.showNotice("Grammachy could not run the check",
-        "The companion tool is missing or out of date. See docs/dev.md for how to put a binary in bin/grammachy.")
+      root.showBinaryMissing()
       return
     }
 
     if (Util.isPlainObject(envelope.error)) {
-      root.showNotice("The check did not finish", String(envelope.error.message || envelope.error.code || ""))
+      root.showError(String(envelope.error.code || ""), String(envelope.error.message || ""))
       return
     }
 
@@ -285,8 +368,8 @@ Item {
     next[index] = value
     root.decisions = next
     root.focusIndex = root.nextOpen(index)
-    // The Corrected text just changed, so the last copy is stale.
-    root.copied = false
+    // The Corrected text just changed, so the last Apply is stale.
+    root.applied = false
   }
 
   function nextOpen(from) {
@@ -295,16 +378,89 @@ Item {
     return Math.min(from, Math.max(0, root.decisions.length - 1))
   }
 
+  // Up and Down walk every Issue, decided or not, and wrap at both ends.
+  function moveFocus(step) {
+    var count = root.issues.length
+    if (count === 0) return
+    root.focusIndex = ((root.focusIndex + step) % count + count) % count
+  }
+
   function acceptAllOpen() {
     root.decisions = root.decisions.map(function(value) { return value === null ? true : value })
-    root.copied = false
+    root.applied = false
+  }
+
+  // ------------------------------------------------------------------ apply
+  //
+  // Spec section 6. `autoReplace` off copies the Corrected text and stops.
+  // `autoReplace` on copies it, closes the popup so the focus goes back to the
+  // source window, and only then pastes over the Selection that is still
+  // highlighted there. The Corrected text stays in the clipboard either way.
+
+  function correctedText() {
+    return Splice.correctedText(root.selectionText, root.issues, root.decisions)
+  }
+
+  function canApply() {
+    if (root.phase !== "result" || root.issues.length === 0) return false
+    if (root.applied) return false
+    for (var i = 0; i < root.decisions.length; i++) if (root.decisions[i] === true) return true
+    return false
   }
 
   function copyCorrected() {
-    copyProcess.text = Splice.correctedText(root.selectionText, root.issues, root.decisions)
+    if (!root.canApply()) return
+    root.runCopy(false)
+  }
+
+  function applyCorrected() {
+    if (!root.canApply()) return
+    root.runCopy(root.autoReplace)
+  }
+
+  function runCopy(pasteAfter) {
+    copyProcess.pasteAfter = pasteAfter
+    copyProcess.text = root.correctedText()
     copyProcess.stdinEnabled = true
     copyProcess.running = true
-    root.copied = true
+    root.applied = true
+  }
+
+  // ------------------------------------------------------------------- keys
+  //
+  // The Qt codes the key map compares against. `ui/keymap.js` holds the map
+  // itself, because a node test can run that and cannot run this.
+  readonly property var keyCodes: ({
+    escape: Qt.Key_Escape,
+    returnKey: Qt.Key_Return,
+    enter: Qt.Key_Enter,
+    space: Qt.Key_Space,
+    up: Qt.Key_Up,
+    down: Qt.Key_Down,
+    a: Qt.Key_A,
+    c: Qt.Key_C,
+    control: Qt.ControlModifier,
+    shift: Qt.ShiftModifier,
+    alt: Qt.AltModifier,
+    meta: Qt.MetaModifier
+  })
+
+  function handleKey(event) {
+    // Settings owns its own fields, so review keys stay off while it is open.
+    var reviewing = !root.settingsOpen && root.phase === "result" && root.issues.length > 0
+    var action = Keymap.action(event, root.keyCodes, reviewing)
+    if (action === Keymap.NONE) return
+
+    if (action === Keymap.CLOSE) root.close()
+    else if (action === Keymap.ACCEPT) root.decide(root.focusIndex, true)
+    else if (action === Keymap.SKIP) root.decide(root.focusIndex, false)
+    else if (action === Keymap.FOCUS_PREVIOUS) root.moveFocus(-1)
+    else if (action === Keymap.FOCUS_NEXT) root.moveFocus(1)
+    else if (action === Keymap.ACCEPT_ALL) root.acceptAllOpen()
+    else if (action === Keymap.COPY) root.copyCorrected()
+    else if (action === Keymap.APPLY) root.applyCorrected()
+
+    event.accepted = true
   }
 
   // --------------------------------------------------------------- processes
@@ -427,11 +583,35 @@ Item {
   Process {
     id: copyProcess
     property string text: ""
+    // Replace the Selection once the clipboard holds the Corrected text.
+    property bool pasteAfter: false
     command: ["wl-copy"]
     onStarted: {
       write(copyProcess.text)
       copyProcess.stdinEnabled = false
     }
+    onExited: {
+      if (!copyProcess.pasteAfter) return
+      copyProcess.pasteAfter = false
+      // wl-copy has claimed the selection by now, so the paste will find it.
+      root.close()
+      pasteTimer.restart()
+    }
+  }
+
+  // The compositor needs a moment to give the keyboard back to the source
+  // window after the layer-shell surface goes away. The same 150 ms the
+  // Ctrl + C capture waits, for the same reason.
+  Timer {
+    id: pasteTimer
+    interval: 150
+    repeat: false
+    onTriggered: pasteKeystroke.running = true
+  }
+
+  Process {
+    id: pasteKeystroke
+    command: ["wtype", "-M", "ctrl", "v", "-m", "ctrl"]
   }
 
   // ----------------------------------------------------------------- window
@@ -462,7 +642,7 @@ Item {
       focus: true
 
       // A layer-shell surface takes exclusive keyboard focus, so the item that
-      // handles Esc has to hold the focus inside it.
+      // handles the key map has to hold the focus inside it.
       Connections {
         target: panel
         function onVisibleChanged() {
@@ -470,12 +650,7 @@ Item {
         }
       }
 
-      // The full key map is its own ticket. Esc is here because a summoned
-      // overlay that cannot be dismissed from the keyboard is a trap.
-      Keys.onEscapePressed: function(event) {
-        root.close()
-        event.accepted = true
-      }
+      Keys.onPressed: function(event) { root.handleKey(event) }
 
       QuickCard {
         id: card
@@ -489,27 +664,27 @@ Item {
           : root.gap + (root.barPosition === "top" ? root.barSize : 0)
 
         cardWidth: Math.min(Style.space(680), parent.width - root.gap * 2)
-        // The text region is what gives, so the card never grows past the
-        // screen. The 220 is the room the hero, the inspector, and the footer
-        // take around it.
-        maxTextHeight: Math.max(Style.space(120),
-          Math.min(Style.space(360), parent.height - root.barSize - root.gap * 2 - Style.space(220)))
+        maxCardHeight: parent.height - root.barSize - root.gap * 2
 
         phase: root.phase
         sourceText: root.selectionText
+        fullText: root.capturedText
+        truncated: root.truncated
+        limitUnits: root.checkLimitUnits
         issues: root.issues
         decisions: root.decisions
         focusIndex: root.focusIndex
         engine: root.engine
         elapsedMs: root.elapsedMs
-        copied: root.copied
+        applied: root.applied
+        autoReplace: root.autoReplace
         noticeTitle: root.noticeTitle
         noticeBody: root.noticeBody
+        engineMessage: root.engineMessage
 
         settingsOpen: root.settingsOpen
         nativeLanguage: root.setting("nativeLanguage")
         engineSetting: root.setting("engine")
-        autoReplace: root.setting("autoReplace")
         openaiBaseUrl: root.setting("openaiBaseUrl")
         openaiModel: root.setting("openaiModel")
 
@@ -518,8 +693,11 @@ Item {
         onAccepted: function(index) { root.decide(index, true) }
         onSkipped: function(index) { root.decide(index, false) }
         onAcceptAllRequested: root.acceptAllOpen()
-        onCopyRequested: root.copyCorrected()
+        onApplyRequested: root.applyCorrected()
+        onAutoReplaceToggled: root.toggleAutoReplace()
         onFocusRequested: function(index) { root.focusIndex = index }
+        onCheckFirstRequested: root.checkFirstUnits()
+        onComposeRequested: root.showCompose()
         onCloseRequested: root.close()
       }
     }

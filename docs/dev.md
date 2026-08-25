@@ -3,7 +3,7 @@
 This page is for a developer or a reviewer who wants the plugin on a real desktop.
 The automated checks in spec section 13 run in CI.
 They cannot cover capture, because capture needs a compositor, a focused window, and a real selection.
-Smoke items 1, 2, 7, and 9 of spec section 13 are therefore run by hand, and this page is how.
+Smoke items 1, 2, 3, 4, 7, 8, and 9 of spec section 13 are therefore run by hand, and this page is how.
 
 ## What you need
 
@@ -21,7 +21,7 @@ The shell loads third-party plugins from `~/.config/omarchy/plugins/<plugin-id>/
 A plain clone is the recommended way, because the shell watches that directory and reloads plugin code when a file changes.
 
 ```bash
-git clone --branch main <repo-url> ~/.config/omarchy/plugins/io.github.jyooi.grammachy
+git clone --branch fm/grammachy-huf-193 <repo-url> ~/.config/omarchy/plugins/io.github.jyooi.grammachy
 ```
 
 To work from an existing checkout instead, link it:
@@ -87,6 +87,20 @@ Both advance the focus to the next open Issue.
 `Copy corrected text` turns on only after one Accept, and reads `Copied` once it runs.
 Paste into the terminal to confirm the clipboard holds the corrected sentence.
 
+Run the whole key map of spec section 6 on the same card:
+
+| Key | What it does |
+|---|---|
+| Enter | Accept the focused Issue, then move to the next open one |
+| Space | Skip the focused Issue, then move to the next open one |
+| Up, Down | Move the focus over every Issue, wrapping at both ends |
+| A | Accept every open Issue |
+| Ctrl + C | Copy the Corrected text |
+| Ctrl + Enter | Apply: copy, or replace when auto-replace is on |
+| Esc | Close the popup |
+
+Ctrl + C and Ctrl + Enter stay off until one Fix is accepted, the same as the Apply button.
+
 ## 6. Smoke item 2: an Electron text field
 
 Electron applications do not fill the primary selection, so this item exercises the Ctrl + C fallback in spec section 3.
@@ -100,7 +114,51 @@ The plugin saves the clipboard, sends Ctrl + C to the field, reads the result, a
 Check the restore: copy some other text first, then run the item, then paste somewhere.
 The paste must give the text you copied first, not the sentence, until you press `Copy corrected text`.
 
-## 7. Smoke item 7: switch to Harper, Check, switch back
+## 7. Smoke item 3: nothing selected
+
+1. Click somewhere with no text selected, for example the desktop background.
+2. Clear the primary selection and the clipboard: `wl-copy --clear; wl-copy --primary --clear`.
+3. Click the `G` button on the bar.
+
+Expected: the popup opens with the `empty_selection` card.
+It reads `Nothing selected` over `Highlight some text, then press SUPER + G.`, with a Close button.
+Esc closes it, and so does a click outside the card.
+
+The capture tries the primary selection, then the Ctrl + C fallback, so this item takes about 150 ms longer than the others.
+
+## 8. Smoke item 4: a 6,000 unit selection
+
+One check takes 5,000 UTF-16 code units, so a longer selection earns the too-long card.
+
+1. Make a file of about 6,000 characters and open it in a terminal pager or an editor:
+
+   ```bash
+   python3 -c "print(('The quick brown fox jumps over the lazy dog and keeps running. ' * 100)[:6000])" > /tmp/grammachy-6000.txt
+   wc -m /tmp/grammachy-6000.txt
+   cat /tmp/grammachy-6000.txt
+   ```
+
+2. Select the whole text with the mouse.
+3. Click the `G` button on the bar.
+
+Expected: the too-long card.
+A size bar shows the 5,000 unit limit against the 6,000 units selected, with `5,000 units per check` under the filled part and `6,000 units selected` under the end.
+The CLI message shows below the body in monospace.
+The buttons read Close, `Check the first 5,000 only`, and `Open in Compose`.
+
+Press `Check the first 5,000 only`.
+The card runs a new Check on the first 5,000 units and shows the marked text.
+The hero adds `First 5,000 of 6,000 units checked` under the meta line.
+
+Check the two bounds that this selection is here to prove:
+
+- The card fits on the screen. Its bottom edge stays above the screen edge, and the whole footer is visible.
+- The text region scrolls. Drag inside it, or press Down until the focus passes the bottom of the region.
+  The focused mark scrolls into view; the card does not grow.
+
+`Open in Compose` shows the Compose notice until the Compose window lands.
+
+## 9. Smoke item 7: switch to Harper, Check, switch back
 
 This item proves the Settings view of spec section 7: the gear, the storage, and that a change applies to the next Check.
 
@@ -130,7 +188,30 @@ Three more Settings checks belong to the same session:
   Open Settings, change nothing, and close the popup: `"engine": "claude"` is still in the file, because nothing is rewritten until the user changes it.
   Pick `Harper` and the file finally reads `"engine": "harper"`.
 
-## 8. Smoke item 9: settings persist across a shell restart
+## 10. Smoke item 8: auto-replace in a terminal and a browser field
+
+Auto-replace copies the Corrected text, closes the popup, and pastes over the still-highlighted Selection.
+It only works while the source window still holds that highlight.
+
+1. Turn the toggle on: click `Auto-replace` in the popup hero.
+   The Apply button then reads `Replace selection` instead of `Copy corrected text`.
+2. In a terminal, type a sentence with a mistake at a shell prompt, for example `echo I has two book.`, and select the text with the mouse.
+   Do not press Enter.
+3. Click the `G` button, accept one Fix, then press `Replace selection` or Ctrl + Enter.
+
+Expected: the popup closes, and the terminal line becomes the corrected sentence.
+The button state reads `Replaced`.
+The Corrected text stays in the clipboard, so a further Ctrl + Shift + V pastes it again.
+
+4. Repeat in a browser text field, for example the search box of any page.
+   Type the sentence, select it with the mouse, then run the same steps.
+
+Expected: the same replacement in the field.
+
+If nothing pastes, the source window lost the highlight before the paste landed.
+That is the documented limit of spec section 6, and the hint under the toggle says so.
+
+## 11. Smoke item 9: settings persist across a shell restart
 
 1. Open Settings and set `Native language` to `Malay`, `Engine` to `Harper`, and `Auto-replace` on.
 2. Restart the shell:
@@ -145,14 +226,14 @@ Expected: `Malay`, `Harper`, and `Auto-replace` on, all as they were left.
 The plugin keeps no state of its own: the values come back because `~/.config/omarchy/shell.json` holds them, and the shell reads that file at start.
 `targetEnglish` and `openaiApiKey` have no control, so check by hand that an edit of those two keys in the file also survives a round trip through the Settings view.
 
-## 9. Running the automated checks
+## 12. Running the automated checks
 
 The same three checks CI runs, against the shell installed on this machine:
 
 ```bash
 for file in $(find . -name '*.qml' | sort); do qmllint -I /usr/share/omarchy/shell "$file" || echo "FAILED $file"; done
 omarchy-plugin-validate .
-node --test ui/splice.test.js ui/tokens.test.js ui/settings.test.js
+node --test ui/splice.test.js ui/tokens.test.js ui/settings.test.js ui/keymap.test.js
 ```
 
 The `qmllint` on `PATH` reports a syntax error through its exit status alone and prints nothing.
@@ -173,7 +254,7 @@ cargo clippy --all-targets -- -D warnings
 cargo test
 ```
 
-## 10. Removing it
+## 13. Removing it
 
 ```bash
 omarchy plugin disable io.github.jyooi.grammachy
