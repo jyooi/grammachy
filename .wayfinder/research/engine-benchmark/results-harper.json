@@ -1,0 +1,447 @@
+{
+  "engine": "harper",
+  "version": "harper-cli 2.8.0 (core 0.1.0 reported)",
+  "offline": true,
+  "license": "Apache-2.0",
+  "cold_start_ms": 437,
+  "rss_kb": 144056,
+  "items": [
+    {
+      "id": "zh-01",
+      "latency_ms": 410,
+      "issues": [],
+      "found": false,
+      "found_precise": false,
+      "fix_match": false,
+      "false_positive": null
+    },
+    {
+      "id": "zh-02",
+      "latency_ms": 407,
+      "issues": [],
+      "found": false,
+      "found_precise": false,
+      "fix_match": false,
+      "false_positive": null
+    },
+    {
+      "id": "zh-03",
+      "latency_ms": 422,
+      "issues": [],
+      "found": false,
+      "found_precise": false,
+      "fix_match": false,
+      "false_positive": null
+    },
+    {
+      "id": "zh-04",
+      "latency_ms": 418,
+      "issues": [],
+      "found": false,
+      "found_precise": false,
+      "fix_match": false,
+      "false_positive": null
+    },
+    {
+      "id": "zh-05",
+      "latency_ms": 407,
+      "issues": [],
+      "found": false,
+      "found_precise": false,
+      "fix_match": false,
+      "false_positive": null
+    },
+    {
+      "id": "zh-06",
+      "latency_ms": 409,
+      "issues": [],
+      "found": false,
+      "found_precise": false,
+      "fix_match": false,
+      "false_positive": null
+    },
+    {
+      "id": "zh-07",
+      "latency_ms": 395,
+      "issues": [],
+      "found": false,
+      "found_precise": false,
+      "fix_match": false,
+      "false_positive": null
+    },
+    {
+      "id": "zh-08",
+      "latency_ms": 415,
+      "issues": [],
+      "found": false,
+      "found_precise": false,
+      "fix_match": false,
+      "false_positive": null
+    },
+    {
+      "id": "ms-01",
+      "latency_ms": 398,
+      "issues": [],
+      "found": false,
+      "found_precise": false,
+      "fix_match": false,
+      "false_positive": null
+    },
+    {
+      "id": "ms-02",
+      "latency_ms": 409,
+      "issues": [],
+      "found": false,
+      "found_precise": false,
+      "fix_match": false,
+      "false_positive": null
+    },
+    {
+      "id": "ms-03",
+      "latency_ms": 423,
+      "issues": [
+        {
+          "start": 30,
+          "end": 45,
+          "original": "since ten years",
+          "fix": "for ten years",
+          "reason": "SinceDuration: For a duration, use 'for' instead of 'since'. Or for a point in time, add 'ago' at the end."
+        },
+        {
+          "start": 17,
+          "end": 22,
+          "original": "Kuala",
+          "fix": "Koala",
+          "reason": "SpellCheck: Did you mean to spell `Kuala` this way?"
+        },
+        {
+          "start": 23,
+          "end": 29,
+          "original": "Lumpur",
+          "fix": "Lump's",
+          "reason": "SpellCheck: Did you mean to spell `Lumpur` this way?"
+        }
+      ],
+      "found": true,
+      "found_precise": true,
+      "fix_match": true,
+      "false_positive": null
+    },
+    {
+      "id": "ms-04",
+      "latency_ms": 421,
+      "issues": [
+        {
+          "start": 3,
+          "end": 18,
+          "original": "discussed about",
+          "fix": "discussed",
+          "reason": "Discuss: `About` is redundant"
+        }
+      ],
+      "found": true,
+      "found_precise": true,
+      "fix_match": true,
+      "false_positive": null
+    },
+    {
+      "id": "ms-05",
+      "latency_ms": 395,
+      "issues": [
+        {
+          "start": 6,
+          "end": 17,
+          "original": "more taller",
+          "fix": "taller",
+          "reason": "AdjectiveDoubleDegree: Using `more` and the comparative form of the adjective together is redundant."
+        }
+      ],
+      "found": true,
+      "found_precise": true,
+      "fix_match": true,
+      "false_positive": null
+    },
+    {
+      "id": "ms-06",
+      "latency_ms": 443,
+      "issues": [
+        {
+          "start": 19,
+          "end": 31,
+          "original": "informations",
+          "fix": "in formations",
+          "reason": "SplitWords: `informations` should probably be written as `in formations`."
+        }
+      ],
+      "found": true,
+      "found_precise": true,
+      "fix_match": false,
+      "false_positive": null
+    },
+    {
+      "id": "ms-07",
+      "latency_ms": 408,
+      "issues": [],
+      "found": false,
+      "found_precise": false,
+      "fix_match": false,
+      "false_positive": null
+    },
+    {
+      "id": "ms-08",
+      "latency_ms": 428,
+      "issues": [],
+      "found": false,
+      "found_precise": false,
+      "fix_match": false,
+      "false_positive": null
+    },
+    {
+      "id": "fr-01",
+      "latency_ms": 404,
+      "issues": [],
+      "found": false,
+      "found_precise": false,
+      "fix_match": false,
+      "false_positive": null
+    },
+    {
+      "id": "fr-02",
+      "latency_ms": 402,
+      "issues": [],
+      "found": false,
+      "found_precise": false,
+      "fix_match": false,
+      "false_positive": null
+    },
+    {
+      "id": "fr-03",
+      "latency_ms": 421,
+      "issues": [],
+      "found": false,
+      "found_precise": false,
+      "fix_match": false,
+      "false_positive": null
+    },
+    {
+      "id": "fr-04",
+      "latency_ms": 420,
+      "issues": [
+        {
+          "start": 10,
+          "end": 25,
+          "original": "since two hours",
+          "fix": "for two hours",
+          "reason": "SinceDuration: For a duration, use 'for' instead of 'since'. Or for a point in time, add 'ago' at the end."
+        }
+      ],
+      "found": true,
+      "found_precise": false,
+      "fix_match": false,
+      "false_positive": null
+    },
+    {
+      "id": "fr-05",
+      "latency_ms": 421,
+      "issues": [],
+      "found": false,
+      "found_precise": false,
+      "fix_match": false,
+      "false_positive": null
+    },
+    {
+      "id": "fr-06",
+      "latency_ms": 428,
+      "issues": [],
+      "found": false,
+      "found_precise": false,
+      "fix_match": false,
+      "false_positive": null
+    },
+    {
+      "id": "fr-07",
+      "latency_ms": 418,
+      "issues": [
+        {
+          "start": 11,
+          "end": 25,
+          "original": "an information",
+          "fix": "information",
+          "reason": "MassNouns: `information` is a mass noun."
+        }
+      ],
+      "found": true,
+      "found_precise": true,
+      "fix_match": false,
+      "false_positive": null
+    },
+    {
+      "id": "es-01",
+      "latency_ms": 409,
+      "issues": [],
+      "found": false,
+      "found_precise": false,
+      "fix_match": false,
+      "false_positive": null
+    },
+    {
+      "id": "es-02",
+      "latency_ms": 410,
+      "issues": [],
+      "found": false,
+      "found_precise": false,
+      "fix_match": false,
+      "false_positive": null
+    },
+    {
+      "id": "es-03",
+      "latency_ms": 415,
+      "issues": [],
+      "found": false,
+      "found_precise": false,
+      "fix_match": false,
+      "false_positive": null
+    },
+    {
+      "id": "es-04",
+      "latency_ms": 395,
+      "issues": [],
+      "found": false,
+      "found_precise": false,
+      "fix_match": false,
+      "false_positive": null
+    },
+    {
+      "id": "es-05",
+      "latency_ms": 409,
+      "issues": [],
+      "found": false,
+      "found_precise": false,
+      "fix_match": false,
+      "false_positive": null
+    },
+    {
+      "id": "es-06",
+      "latency_ms": 390,
+      "issues": [],
+      "found": false,
+      "found_precise": false,
+      "fix_match": false,
+      "false_positive": null
+    },
+    {
+      "id": "es-07",
+      "latency_ms": 401,
+      "issues": [],
+      "found": false,
+      "found_precise": false,
+      "fix_match": false,
+      "false_positive": null
+    },
+    {
+      "id": "ok-01",
+      "latency_ms": 399,
+      "issues": [],
+      "found": null,
+      "found_precise": null,
+      "fix_match": null,
+      "false_positive": false
+    },
+    {
+      "id": "ok-02",
+      "latency_ms": 418,
+      "issues": [],
+      "found": null,
+      "found_precise": null,
+      "fix_match": null,
+      "false_positive": false
+    },
+    {
+      "id": "ok-03",
+      "latency_ms": 406,
+      "issues": [],
+      "found": null,
+      "found_precise": null,
+      "fix_match": null,
+      "false_positive": false
+    },
+    {
+      "id": "ok-04",
+      "latency_ms": 428,
+      "issues": [],
+      "found": null,
+      "found_precise": null,
+      "fix_match": null,
+      "false_positive": false
+    },
+    {
+      "id": "ok-05",
+      "latency_ms": 399,
+      "issues": [],
+      "found": null,
+      "found_precise": null,
+      "fix_match": null,
+      "false_positive": false
+    },
+    {
+      "id": "ok-06",
+      "latency_ms": 398,
+      "issues": [],
+      "found": null,
+      "found_precise": null,
+      "fix_match": null,
+      "false_positive": false
+    },
+    {
+      "id": "ok-07",
+      "latency_ms": 424,
+      "issues": [],
+      "found": null,
+      "found_precise": null,
+      "fix_match": null,
+      "false_positive": false
+    },
+    {
+      "id": "ok-08",
+      "latency_ms": 442,
+      "issues": [],
+      "found": null,
+      "found_precise": null,
+      "fix_match": null,
+      "false_positive": false
+    },
+    {
+      "id": "ok-09",
+      "latency_ms": 399,
+      "issues": [],
+      "found": null,
+      "found_precise": null,
+      "fix_match": null,
+      "false_positive": false
+    },
+    {
+      "id": "ok-10",
+      "latency_ms": 415,
+      "issues": [],
+      "found": null,
+      "found_precise": null,
+      "fix_match": null,
+      "false_positive": false
+    }
+  ],
+  "summary": {
+    "error_items": 30,
+    "caught": 6,
+    "caught_precise": 5,
+    "fix_exact": 3,
+    "correct_items": 10,
+    "false_positives": 0,
+    "errors": 0,
+    "latency_p50_ms": 410,
+    "latency_p90_ms": 428,
+    "catch_zh": 0,
+    "catch_ms": 4,
+    "catch_fr": 2,
+    "catch_es": 0
+  }
+}
