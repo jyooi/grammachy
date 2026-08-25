@@ -3,7 +3,9 @@
 This file is the project's committed home for project-intrinsic agent knowledge: build, test, release, architecture, and sharp-edge notes that should travel with the code.
 
 - `docs/spec/v1.md` is the authority on every contract.
-  Section 5.1 fixes the `grammachy check` JSON envelope, section 10 the packaging, section 11 the repository layout, section 13 the test plan.
+  Section 5.1 fixes the `grammachy check` JSON envelope.
+  Section 5.2 fixes the `grammachy chunk` JSON envelope.
+  Section 10 is the packaging, section 11 the repository layout, section 13 the test plan.
   `CONTEXT.md` holds the domain glossary; `docs/adr/` records the settled decisions.
 - The Rust CLI lives in `cli/` and is its own cargo package.
   Run `cargo test`, `cargo clippy --all-targets -- -D warnings`, and `cargo fmt --check` from `cli/`.
