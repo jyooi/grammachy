@@ -132,6 +132,7 @@ Item {
     copyKeystroke.running = false
     fallbackPaste.running = false
     checkProcess.launchPending = false
+    checkProcess.restartQueued = false
     checkProcess.running = false
     // New capture.
     root.runGeneration += 1
@@ -224,8 +225,19 @@ Item {
     checkProcess.command = root.checkCommand()
     // Writing to stdin closes it, so every run arms the channel again.
     checkProcess.stdinEnabled = true
+    checkProcess.restartQueued = checkProcess.running
     checkProcess.launchPending = true
     checkProcess.running = true
+  }
+
+  function finishCheckLaunch() {
+    if (checkProcess.running) return
+    if (checkProcess.restartQueued) return
+    if (!checkProcess.launchPending) return
+    if (root.phase !== "checking") return
+    checkProcess.launchPending = false
+    root.showNotice("Grammachy could not run the check",
+      "The companion tool is missing or out of date. See docs/dev.md for how to put a binary in bin/grammachy.")
   }
 
   function onCheckOutput(text, generation) {
@@ -379,9 +391,11 @@ Item {
     property int startedGeneration: 0
     property string stdinText: ""
     property bool launchPending: false
+    property bool restartQueued: false
     // Start hook.
     onStarted: {
       checkProcess.launchPending = false
+      checkProcess.restartQueued = false
       checkProcess.startedGeneration = root.runGeneration
       write(checkProcess.stdinText)
       // Close stdin.
@@ -390,11 +404,13 @@ Item {
 
     onRunningChanged: {
       if (checkProcess.running) return
+      if (checkProcess.restartQueued) {
+        checkProcess.restartQueued = false
+        return
+      }
       if (!checkProcess.launchPending) return
-      checkProcess.launchPending = false
       if (root.phase !== "checking") return
-      root.showNotice("Grammachy could not run the check",
-        "The companion tool is missing or out of date. See docs/dev.md for how to put a binary in bin/grammachy.")
+      Qt.callLater(root.finishCheckLaunch)
     }
     stdout: StdioCollector {
       waitForEnd: true
