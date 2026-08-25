@@ -27,6 +27,12 @@ ColumnLayout {
   // How long a text field waits after the last keystroke before it persists.
   readonly property int commitDelayMs: 500
 
+  // `textEdited` is the only signal that means the user typed. A focus and
+  // blur with no keystroke must not write, or an unknown stored value would
+  // become the default in shell.json.
+  property bool baseUrlDirty: false
+  property bool modelDirty: false
+
   // Keep on screen exactly what the user is typing, but never store a value
   // the CLI would ignore: an emptied field stores the default.
   function commit(name, field, timer) {
@@ -43,13 +49,23 @@ ColumnLayout {
   Timer {
     id: baseUrlTimer
     interval: root.commitDelayMs
-    onTriggered: root.commit("openaiBaseUrl", baseUrlField, baseUrlTimer)
+    onTriggered: {
+      if (!root.baseUrlDirty)
+        return
+      root.baseUrlDirty = false
+      root.commit("openaiBaseUrl", baseUrlField, baseUrlTimer)
+    }
   }
 
   Timer {
     id: modelTimer
     interval: root.commitDelayMs
-    onTriggered: root.commit("openaiModel", modelField, modelTimer)
+    onTriggered: {
+      if (!root.modelDirty)
+        return
+      root.modelDirty = false
+      root.commit("openaiModel", modelField, modelTimer)
+    }
   }
 
   // Dropdown writes its own `value` when the user picks a row, which drops the
@@ -145,8 +161,18 @@ ColumnLayout {
         text: root.openaiBaseUrl
         placeholderText: Settings.defaultOf("openaiBaseUrl")
         foreground: Color.popups.text
-        onTextEdited: baseUrlTimer.restart()
-        onEditingFinished: root.commitAndSettle("openaiBaseUrl", baseUrlField, baseUrlTimer)
+        onTextEdited: {
+          root.baseUrlDirty = true
+          baseUrlTimer.restart()
+        }
+        onEditingFinished: {
+          if (root.baseUrlDirty) {
+            root.baseUrlDirty = false
+            root.commitAndSettle("openaiBaseUrl", baseUrlField, baseUrlTimer)
+          } else {
+            baseUrlField.text = Settings.normalised("openaiBaseUrl", baseUrlField.text)
+          }
+        }
       }
 
       TextField {
@@ -156,8 +182,18 @@ ColumnLayout {
         text: root.openaiModel
         placeholderText: Settings.defaultOf("openaiModel")
         foreground: Color.popups.text
-        onTextEdited: modelTimer.restart()
-        onEditingFinished: root.commitAndSettle("openaiModel", modelField, modelTimer)
+        onTextEdited: {
+          root.modelDirty = true
+          modelTimer.restart()
+        }
+        onEditingFinished: {
+          if (root.modelDirty) {
+            root.modelDirty = false
+            root.commitAndSettle("openaiModel", modelField, modelTimer)
+          } else {
+            modelField.text = Settings.normalised("openaiModel", modelField.text)
+          }
+        }
       }
     }
 
