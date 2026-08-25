@@ -128,12 +128,17 @@ const UNKNOWN: Weights = Weights {
     terms: Terms::Unknown,
 };
 
+fn matches_prefix(name: &str, prefix: &str) -> bool {
+    name.starts_with(prefix)
+        && (name.len() == prefix.len() || name.as_bytes().get(prefix.len()) == Some(&b'-'))
+}
+
 /// The weights license of one model name.
 pub fn of(model: &str) -> Weights {
     let wanted = model.trim().to_ascii_lowercase();
     KNOWN
         .iter()
-        .find(|(prefix, _)| wanted.starts_with(prefix))
+        .find(|(prefix, _)| matches_prefix(&wanted, prefix))
         .map(|(_, weights)| *weights)
         .unwrap_or(UNKNOWN)
 }
@@ -190,6 +195,15 @@ mod tests {
     #[test]
     fn an_unknown_model_is_not_recommended_either() {
         let weights = of("some-model-nobody-checked");
+
+        assert_eq!(weights.license, "unknown");
+        assert_eq!(weights.terms, Terms::Unknown);
+        assert_eq!(weights.recommendation(), "no, the license was not checked");
+    }
+
+    #[test]
+    fn a_longer_family_name_does_not_inherit_a_shorter_prefix() {
+        let weights = of("gemma2-9b");
 
         assert_eq!(weights.license, "unknown");
         assert_eq!(weights.terms, Terms::Unknown);
