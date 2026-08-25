@@ -55,7 +55,8 @@ Size on disk is the GGUF file; resident memory adds the KV cache, which at `-c 2
 | Qwen 3.x small instruct | `Qwen/Qwen3.5-4B` (2026-02-27) | `unsloth/Qwen3.5-4B-GGUF` | `Qwen3.5-4B-Q4_K_M.gguf` | 2,740,937,888 B (2.74 GB) | `00fe7986ff5f6b463e62455821146049db6f9313603938a70800d1fb69ef11a4` | 262,144 | Apache-2.0 | yes, matched by the `qwen3` prefix | `qwen35`, PR #19468 merged 2026-02-10 |
 | Qwen 3.x, 7B class | `Qwen/Qwen3.5-9B` (2026-02-27) | `unsloth/Qwen3.5-9B-GGUF` | `Qwen3.5-9B-Q4_K_M.gguf` | 5,680,522,464 B (5.68 GB) | `03b74727a860a56338e042c4420bb3f04b2fec5734175f4cb9fa853daf52b7e8` | 262,144 | Apache-2.0 | yes | `qwen35` |
 | "Qwen 3.8 small" | does not exist; `Qwen/Qwen3.8-27B` (2026-08-05) is the smallest Qwen3.8 | `unsloth/Qwen3.8-27B-GGUF` | `Qwen3.8-27B-UD-Q4_K_M.gguf` | 16,464,440,224 B (16.5 GB) | `322e194ff79741c7baa497c240f677f54b201b0efab44ca8e50f122b39123482` | 262,144 | Apache-2.0 | yes by licence, no by size | `qwen35` (same architecture as 3.5) |
-| Muse Glimmer | `meta-models/Muse-Glimmer-30B` (2026-08-09), Meta Superintelligence Lab, 29.6B dense with a 1.8B vision encoder | `unsloth/Muse-Glimmer-30B-GGUF` | `Muse-Glimmer-30B-UD-Q4_K_XL.gguf` (no Q4_K_M is published) | 15,878,222,368 B (15.9 GB) | `82bece304887a313ece08400bc030f6066c7bff5b906b0cd40308ec8a409fd38` | 131,072 | Apache-2.0 | yes by licence, no by size; `weights.rs` has no `muse` row so it answers Unknown | `muse-glimmer`, PR #26841 merged 2026-08-10 |
+| Muse Glimmer | `meta-models/Muse-Glimmer-30B` (2026-08-09), Meta Superintelligence Lab, 29.6B dense with a 1.8B vision encoder | `meta-models/Muse-Glimmer-30B-GGUF` (first party) | `Muse-Glimmer-30B-KQuant-17GB-Q4_K_M.gguf` (text only; the `mmproj` and `dflash` files are optional) | 16,756,683,904 B (16.8 GB) | `4cc57c0f51040a226e5a72cc47b7613f7772950e460a665f7083de89f183f60e` | 131,072 | Apache-2.0 | yes by licence, no by size; `weights.rs` has no `muse` row so it answers Unknown | `muse-glimmer`, PR #26841 merged 2026-08-10; the card asks for build `b10353` or newer |
+| Muse Glimmer, smaller file | same | `unsloth/Muse-Glimmer-30B-GGUF` | `Muse-Glimmer-30B-UD-Q4_K_XL.gguf` | 15,878,222,368 B (15.9 GB) | `82bece304887a313ece08400bc030f6066c7bff5b906b0cd40308ec8a409fd38` | 131,072 | Apache-2.0 | same | same |
 | Phi-4-mini or successor | no successor; `microsoft/Phi-4-mini-instruct` (2025-02-19) | `unsloth/Phi-4-mini-instruct-GGUF` | `Phi-4-mini-instruct-Q4_K_M.gguf` | 2,491,874,272 B (2.49 GB) | `88c00229914083cd112853aab84ed51b87bdf6b9ce42f532d8c85c7c63b1730a` | 131,072 | MIT | yes, `phi-4` prefix | `phi3`, long supported |
 
 Notes:
@@ -71,6 +72,9 @@ Notes:
   A 15.9 GB dense model on a 27 GB shared iGPU would load, but at roughly a third of the Gemma-4-E4B token rate.
   Nothing in the card claims a grammar advantage.
   Its listed comparison points are Gemma4-31B and Qwen3.6-27B, so a 4B class comparison does not exist.
+  It is a reasoning model whose "reasoning cannot be switched off": the chat template opens the thinking channel unconditionally, and the card only offers `reasoning_strength` levels low, medium, high, and xhigh.
+  A Check would therefore pay for thinking tokens on every sentence, which no other local row does.
+  The first-party GGUF card names llama.cpp build `b10353` or newer, the only explicit version floor among the rows here.
 - Qwen3.8-27B.
   The Qwen organisation lists four Qwen3.8 repositories: 27B, 27B-FP8, 2.4T-A95B, 2.4T-A95B-FP8.
   Qwen3.6 (2026-04) ships as 27B and 35B-A3B; Qwen3.7 is API only (`qwen/qwen3.7-flash`, `-plus`, `-max` on OpenRouter, no weights on Hugging Face).
@@ -106,8 +110,9 @@ Considered and dropped:
 
 ### llama.cpp version requirement
 
-llama.cpp moved from `bNNNN` build tags to semantic tags in August 2026: `v0.2.0` on 2026-08-21 and `v0.3.0` on 2026-08-25 (GitHub releases API).
-Arch `extra/llama-cpp` is `0.2.0-1`, built from `tag=v0.2.0` (PKGBUILD), with `ggml` and `ggml-vulkan` `0.21.0`.
+llama.cpp added semantic tags in August 2026 beside the `bNNNN` build tags: `v0.2.0` on 2026-08-21 and `v0.3.0` on 2026-08-25, while `b10621` and `b10622` were also published on 2026-08-25 (GitHub releases API, three newest releases).
+Arch `extra/llama-cpp` is `0.2.0-1` since 2026-08-22 (archlinux.org package JSON), built from `tag=v0.2.0` (PKGBUILD), with `ggml` and `ggml-vulkan` `0.21.0`.
+A machine whose pacman database predates 2026-08-22 still shows `llama-cpp b10548-1` (built 2026-08-21), which is also newer than every floor below, including Muse Glimmer's `b10353`.
 Every architecture in the tables above merged before `v0.2.0`:
 
 | Architecture | First merged | Pull request |
@@ -166,6 +171,8 @@ Notes on the cloud rows:
   Every GPT-5.x row and Sonnet 5 omit `temperature` from `supported_parameters` and list `temperature: null` in `default_parameters`.
   OpenRouter drops the field, so a Check runs at the provider default (1.0 for OpenAI).
   Haiku 4.5, Gemini 3.7 Flash, and both DeepSeek rows honour it.
+  Gemini 3.7 Flash honours it only on some hosts: `GET /api/v1/models/google/gemini-3.7-flash/endpoints` lists `temperature` on the three Google AI Studio endpoints and not on the three Google (Vertex) endpoints, so a run should pin the provider or accept that half the routes ignore it.
+  DeepSeek's own documentation says thinking mode ignores `temperature`, so on DeepSeek the field only counts once reasoning is off.
 - Reasoning.
   Gemini 3.7 Flash is the only row that cannot switch reasoning off; the OpenRouter doc says a `mandatory` model "rejects" `effort: "none"`.
   Its reasoning tokens bill at the output rate (`internal_reasoning: 1.875`), so the 0.169 estimate is a floor.
@@ -187,7 +194,7 @@ Local, in order:
 1. `gemma-4-e4b-it`: `unsloth/gemma-4-E4B-it-GGUF/gemma-4-E4B-it-Q4_K_M.gguf`, 4.98 GB, Apache-2.0, eligible once `weights.rs` learns `gemma-4`.
 2. `qwen3.5-9b`: 5.68 GB, Apache-2.0, eligible, 26 of 30 in HUF-181, the fallback if Gemma 4 ever regresses.
 3. `qwen3.5-4b`: 2.74 GB, Apache-2.0, eligible, 22 of 30, the reference row for machines with less than 8 GB free.
-4. Reference only: `gemma-4-e2b-it` (false positives), `phi-4-mini-instruct` (18 of 30), `muse-glimmer-30b` and `qwen3.8-27b` (size).
+4. Reference only: `gemma-4-e2b-it` (false positives), `phi-4-mini-instruct` (18 of 30), `muse-glimmer-30b` (size, and reasoning cannot be turned off) and `qwen3.8-27b` (size).
 
 Cloud, in order:
 
