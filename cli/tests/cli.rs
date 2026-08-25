@@ -1,6 +1,7 @@
 //! End to end runs of the binary: stdout carries one envelope, stderr carries logs.
 
 use std::io::{ErrorKind, Write};
+use std::net::TcpListener;
 use std::process::{Child, Command, Stdio};
 
 use serde_json::Value;
@@ -10,8 +11,27 @@ struct Run {
     stdout: String,
 }
 
+/// An address on the loopback interface with nothing listening on it.
+fn silent_address() -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("a loopback port is free");
+    let address = listener
+        .local_addr()
+        .expect("the port is known")
+        .to_string();
+    drop(listener);
+    address
+}
+
+/// Point every run at a dead address and forbid the unit start, so the binary
+/// tests exercise argument handling only and never touch systemd.
+fn no_engine(command: &mut Command) -> &mut Command {
+    command
+        .env("GRAMMACHY_LANGUAGETOOL_ADDRESS", silent_address())
+        .env("GRAMMACHY_LANGUAGETOOL_START", "never")
+}
+
 fn run(args: &[&str], stdin: &str) -> Run {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_grammachy"))
+    let mut child = no_engine(&mut Command::new(env!("CARGO_BIN_EXE_grammachy")))
         .args(args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -116,7 +136,7 @@ fn every_valid_flag_value_is_accepted() {
 
 #[test]
 fn invalid_utf8_on_stdin_prints_bad_arguments() {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_grammachy"))
+    let mut child = no_engine(&mut Command::new(env!("CARGO_BIN_EXE_grammachy")))
         .arg("check")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())

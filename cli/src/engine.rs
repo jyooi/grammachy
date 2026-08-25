@@ -1,10 +1,11 @@
 //! The seam every engine adapter plugs into.
 //!
-//! No adapter exists yet. `resolve` answers `None` for every slug until the
-//! engine tickets land, and [`crate::check::run`] turns that into the
-//! `engine_unavailable` envelope the shell already handles.
+//! `resolve` answers `None` for a slug that has no adapter in this build, and
+//! [`crate::check::run`] turns that into the `engine_unavailable` envelope the
+//! shell already handles.
 
 use crate::args::{CheckOptions, EngineSlug};
+use crate::engines::languagetool::{self, LanguageTool};
 use crate::envelope::Issue;
 
 /// Why one Check did not produce Issues. Each variant maps to one error code.
@@ -30,6 +31,9 @@ pub trait Engine {
 /// Build the adapter for one slug, or `None` while the slug has no adapter.
 pub fn resolve(slug: EngineSlug) -> Option<Box<dyn Engine>> {
     match slug {
-        EngineSlug::Languagetool | EngineSlug::Openai | EngineSlug::Harper => None,
+        EngineSlug::Languagetool => Some(Box::new(LanguageTool::new(
+            languagetool::Config::from_env(),
+        ))),
+        EngineSlug::Openai | EngineSlug::Harper => None,
     }
 }

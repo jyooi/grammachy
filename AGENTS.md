@@ -15,8 +15,12 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   Spans are UTF-16 code units, because the shell indexes the text in JavaScript.
 - Each subcommand owns its result envelope and shares the error envelope in `cli/src/envelope.rs`.
   `check` uses `Envelope`, `chunk` uses `ChunkEnvelope` in `cli/src/chunk.rs`.
-- Engine adapters plug into the `Engine` trait in `cli/src/engine.rs`.
+- Engine adapters plug into the `Engine` trait in `cli/src/engine.rs` and live under `cli/src/engines/`.
   `engine::resolve` answers `None` for a slug with no adapter, which surfaces as `engine_unavailable`.
+- The `languagetool` adapter starts the transient unit itself, so tests must never reach the real one.
+  `cli/src/engines/languagetool/unit.rs` documents the exact server command read from the pacman package, including the two sharp edges of `/usr/bin/languagetool`: it needs `JAVA_HOME`, and `--http` is what picks the plain HTTP server.
+  `GRAMMACHY_LANGUAGETOOL_ADDRESS` and `GRAMMACHY_LANGUAGETOOL_START=never` are the test seams; `cli/tests/cli.rs` sets both.
+  Live tests in `cli/tests/languagetool_live.rs` and `cli/tests/interference_catch_rate.rs` skip when `127.0.0.1:8081` is silent, which keeps CI green without the package.
 - `manifest.json` version must equal the crate version; `cli/tests/manifest.rs` enforces that.
 
 ## Maintaining this file
