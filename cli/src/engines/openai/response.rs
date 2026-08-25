@@ -2,10 +2,10 @@
 //! Issues of spec section 5.1.
 //!
 //! A model quotes text; it does not count code units. So every suggestion is
-//! placed by looking its `original` up in the text the CLI sent, and a
-//! suggestion that quotes something the text does not hold is dropped. HUF-181
-//! measured why that matters: small models emit both no-op suggestions, where
-//! the fix equals the original, and unanchored ones. Neither is an Issue.
+//! placed on a whole-token match of its `original` in the text the CLI sent.
+//! The adapter drops a quotation that is not a whole token anywhere in the text.
+//! HUF-181 measured why that matters: small models emit both no-op suggestions,
+//! where the fix equals the original, and unanchored ones. Neither is an Issue.
 
 use serde::Deserialize;
 use serde_json::{Map, Value};
@@ -180,7 +180,7 @@ fn place(
         }
         let start = utf16_len(&text[..byte_index]);
         let end = start + utf16_len(original);
-        if used.iter().any(|span| *span == (start, end)) {
+        if used.contains(&(start, end)) {
             continue;
         }
         match hint {

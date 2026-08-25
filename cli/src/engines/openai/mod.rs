@@ -110,6 +110,8 @@ impl Openai {
         options: &CheckOptions,
         body: &str,
     ) -> Result<ChatResponse, EngineFailure> {
+        // Spec section 1: no text leaves the machine. ureq follows HTTP_PROXY
+        // and 3xx by default, so both must stay off on this Agent.
         let agent: ureq::Agent = ureq::Agent::config_builder()
             .timeout_global(Some(self.config.timeout))
             .proxy(None)
