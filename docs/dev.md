@@ -397,7 +397,8 @@ omarchy-shell shell summon io.github.jyooi.grammachy '{"mode":"compose","text":"
 ```
 
 SUPER + SHIFT + G once `grammachy setup` has written the bindings, and the `Grammachy compose` row of the Omarchy menu.
-The first two commands and both of those open the kept Draft; only the payload with a `text` brings its own, and only after the confirm when a Draft is already there.
+The first command, the hotkey, and the menu row open the kept Draft.
+Only the payload with a `text` sets a new Draft, and a confirm appears when a Draft is already there.
 
 ### The Draft and the Check
 
