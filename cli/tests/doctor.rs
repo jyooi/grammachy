@@ -1,0 +1,421 @@
+//! `grammachy doctor`, spec sections 4, 8, 10, and 12.
+//!
+//! Every test here builds the machine it wants as recorded [`Facts`] and reads
+//! the report back, so no test looks at the developer's own machine. The one
+//! end to end test runs the binary and asserts only what holds on any machine.
+
+use std::path::PathBuf;
+use std::process::Command;
+
+use serde_json::Value;
+
+use grammachy::args::EngineSlug;
+use grammachy::doctor::facts::{DrmCard, UnitState};
+use grammachy::doctor::{self, Facts, Report};
+
+/// A machine where every piece is in place and both units are stopped.
+fn ready() -> Facts {
+    Facts {
+        binary: Some(PathBuf::from("/home/u/plugin/bin/grammachy")),
+        version: "0.1.0".to_string(),
+        languagetool_launcher: Some(PathBuf::from("/usr/bin/languagetool")),
+        java: Some(PathBuf::from("/usr/lib/jvm/default/bin/java")),
+        languagetool_address: "127.0.0.1:8081".to_string(),
+        llama_server: Some(PathBuf::from("/usr/bin/llama-server")),
+        models_directory: Some(PathBuf::from("/home/u/.local/share/grammachy/models")),
+        model: "gemma-4-e4b-it".to_string(),
+        model_file: Some(PathBuf::from(
+            "/home/u/.local/share/grammachy/models/gemma-4-e4b-it-Q4_K_M.gguf",
+        )),
+        openai_endpoint: Ok("127.0.0.1:8080".to_string()),
+        languagetool_unit: UnitState::Stopped,
+        llama_unit: UnitState::Stopped,
+        cards: vec![DrmCard {
+            driver: "amdgpu".to_string(),
+            pci_address: Some("0000:65:00.0".to_string()),
+        }],
+    }
+}
+
+fn text_of(facts: &Facts, engine: EngineSlug) -> String {
+    doctor::run(facts, engine, false).text
+}
+
+/// The lines that report a missing piece.
+fn missing_lines(text: &str) -> Vec<&str> {
+    text.lines()
+        .filter(|line| line.trim_start().starts_with("missing"))
+        .collect()
+}
+
+#[test]
+fn a_ready_machine_reports_nothing_missing() {
+    let facts = ready();
+
+    for engine in [
+        EngineSlug::Languagetool,
+        EngineSlug::Openai,
+        EngineSlug::Harper,
+    ] {
+        let output = doctor::run(&facts, engine, false);
+
+        assert_eq!(output.exit_code, 0, "{engine:?} is ready: {}", output.text);
+        assert!(
+            missing_lines(&output.text).is_empty(),
+            "{engine:?}: {}",
+            output.text
+        );
+        assert!(
+            !output.text.contains("sudo pacman"),
+            "nothing to install: {}",
+            output.text
+        );
+        assert!(
+            !output.text.contains("Doctor installs nothing"),
+            "the manual-step footer is only for a missing piece: {}",
+            output.text
+        );
+    }
+}
+
+#[test]
+fn a_missing_languagetool_prints_its_pacman_line() {
+    let mut facts = ready();
+    facts.languagetool_launcher = None;
+
+    let text = text_of(&facts, EngineSlug::Languagetool);
+
+    assert_eq!(missing_lines(&text).len(), 1, "{text}");
+    assert!(
+        text.contains("sudo pacman -S languagetool"),
+        "the exact command is printed: {text}"
+    );
+    assert!(
+        text.contains("/usr/bin/languagetool does not exist"),
+        "{text}"
+    );
+    assert_eq!(
+        doctor::run(&facts, EngineSlug::Languagetool, false).exit_code,
+        1
+    );
+}
+
+#[test]
+fn an_installed_languagetool_has_no_pacman_line() {
+    let text = text_of(&ready(), EngineSlug::Languagetool);
+
+    assert!(
+        !text.contains("sudo pacman -S languagetool"),
+        "the line is gone once the package is there: {text}"
+    );
+}
+
+#[test]
+fn a_missing_java_runtime_prints_its_pacman_line() {
+    let mut facts = ready();
+    facts.java = None;
+
+    let text = text_of(&facts, EngineSlug::Languagetool);
+
+    assert_eq!(missing_lines(&text).len(), 1, "{text}");
+    assert!(text.contains("sudo pacman -S jre-openjdk"), "{text}");
+}
+
+#[test]
+fn a_missing_llama_server_names_the_backend_package_of_the_tier() {
+    let mut facts = ready();
+    facts.llama_server = None;
+
+    // A discrete GPU, so the Vulkan backend.
+    let text = text_of(&facts, EngineSlug::Openai);
+    assert_eq!(missing_lines(&text).len(), 1, "{text}");
+    assert!(
+        text.contains("sudo pacman -S llama-cpp ggml-vulkan"),
+        "{text}"
+    );
+
+    // The same machine with no graphics processor asks for the CPU backend.
+    facts.cards = Vec::new();
+    let text = text_of(&facts, EngineSlug::Openai);
+    assert!(text.contains("sudo pacman -S llama-cpp ggml-cpu"), "{text}");
+    assert!(!text.contains("ggml-vulkan"), "{text}");
+}
+
+#[test]
+fn missing_weights_point_at_setup_and_never_at_pacman() {
+    let mut facts = ready();
+    facts.model_file = None;
+
+    let text = text_of(&facts, EngineSlug::Openai);
+
+    assert_eq!(missing_lines(&text).len(), 1, "{text}");
+    assert!(text.contains("No weights for gemma-4-e4b-it"), "{text}");
+    assert!(text.contains("Run: grammachy setup"), "{text}");
+}
+
+#[test]
+fn a_model_directory_that_cannot_exist_is_reported_without_a_command() {
+    let mut facts = ready();
+    facts.models_directory = None;
+    facts.model_file = None;
+
+    let report = Report::new(&facts, EngineSlug::Openai);
+    let check = report
+        .checks
+        .iter()
+        .find(|check| check.id == "model")
+        .expect("the model check is there");
+
+    assert!(!check.ok);
+    assert_eq!(check.remedy, None, "there is nothing to run");
+    assert!(check.detail.contains("HOME is not set"), "{}", check.detail);
+}
+
+#[test]
+fn a_base_url_off_this_machine_is_reported_as_the_broken_setting_it_is() {
+    let mut facts = ready();
+    facts.openai_endpoint = Err(
+        "The OpenAI base URL must stay on this machine. Its host is api.openai.com, and v1 accepts only localhost, 127.0.0.1, and ::1."
+            .to_string(),
+    );
+
+    let text = text_of(&facts, EngineSlug::Openai);
+
+    assert_eq!(missing_lines(&text).len(), 1, "{text}");
+    assert!(text.contains("must stay on this machine"), "{text}");
+    // A setting is not a package, so no install line is invented for it.
+    assert!(!text.contains("sudo pacman"), "{text}");
+}
+
+#[test]
+fn a_binary_that_cannot_name_itself_fails_every_engine() {
+    let mut facts = ready();
+    facts.binary = None;
+
+    for engine in [
+        EngineSlug::Languagetool,
+        EngineSlug::Openai,
+        EngineSlug::Harper,
+    ] {
+        let output = doctor::run(&facts, engine, false);
+
+        assert_eq!(output.exit_code, 1, "{engine:?}: {}", output.text);
+        assert_eq!(missing_lines(&output.text).len(), 1, "{}", output.text);
+    }
+}
+
+#[test]
+fn a_running_unit_reads_as_running_and_a_stopped_one_is_no_fault() {
+    let mut facts = ready();
+    facts.languagetool_unit = UnitState::Running;
+
+    let text = text_of(&facts, EngineSlug::Languagetool);
+    assert!(
+        text.contains("grammachy-languagetool is running."),
+        "{text}"
+    );
+    assert!(missing_lines(&text).is_empty(), "{text}");
+
+    // Stopped is the normal state between logins: the next Check starts it.
+    let text = text_of(&ready(), EngineSlug::Languagetool);
+    assert!(
+        text.contains("grammachy-languagetool is not running. The next Check starts it."),
+        "{text}"
+    );
+    assert!(missing_lines(&text).is_empty(), "{text}");
+}
+
+#[test]
+fn a_systemd_that_does_not_answer_is_a_fault() {
+    let mut facts = ready();
+    facts.languagetool_unit = UnitState::Unknown;
+
+    let output = doctor::run(&facts, EngineSlug::Languagetool, false);
+
+    assert_eq!(output.exit_code, 1, "{}", output.text);
+    assert!(
+        output.text.contains("systemctl --user did not answer"),
+        "{}",
+        output.text
+    );
+}
+
+#[test]
+fn a_piece_another_engine_needs_never_fails_this_engine() {
+    let mut facts = ready();
+    facts.llama_server = None;
+    facts.model_file = None;
+
+    // The default engine owes nothing to llama.cpp.
+    let output = doctor::run(&facts, EngineSlug::Languagetool, false);
+    assert_eq!(output.exit_code, 0, "{}", output.text);
+    // The report still lists what is missing, whichever engine asked.
+    assert_eq!(missing_lines(&output.text).len(), 2, "{}", output.text);
+
+    assert_eq!(doctor::run(&facts, EngineSlug::Openai, false).exit_code, 1);
+}
+
+#[test]
+fn every_engine_slug_gets_its_own_ready_diagnosis() {
+    let facts = ready();
+
+    let languagetool = Report::new(&facts, EngineSlug::Languagetool);
+    assert!(languagetool.ready);
+    assert!(
+        languagetool.diagnosis.contains("127.0.0.1:8081"),
+        "{}",
+        languagetool.diagnosis
+    );
+
+    let openai = Report::new(&facts, EngineSlug::Openai);
+    assert!(openai.ready);
+    assert!(
+        openai.diagnosis.contains("127.0.0.1:8080"),
+        "{}",
+        openai.diagnosis
+    );
+
+    let harper = Report::new(&facts, EngineSlug::Harper);
+    assert!(harper.ready);
+    assert!(
+        harper.diagnosis.contains("inside the companion binary"),
+        "{}",
+        harper.diagnosis
+    );
+}
+
+#[test]
+fn a_running_unit_changes_the_ready_diagnosis() {
+    let mut facts = ready();
+    facts.languagetool_unit = UnitState::Running;
+    facts.llama_unit = UnitState::Running;
+
+    assert!(Report::new(&facts, EngineSlug::Languagetool)
+        .diagnosis
+        .contains("its unit runs on 127.0.0.1:8081"));
+    assert!(Report::new(&facts, EngineSlug::Openai)
+        .diagnosis
+        .contains("its unit runs on 127.0.0.1:8080"));
+}
+
+#[test]
+fn every_engine_slug_gets_its_own_failing_diagnosis() {
+    let mut facts = ready();
+    facts.languagetool_launcher = None;
+    facts.llama_server = None;
+    facts.binary = None;
+
+    let languagetool = Report::new(&facts, EngineSlug::Languagetool);
+    assert!(!languagetool.ready);
+    assert!(
+        languagetool
+            .diagnosis
+            .contains("its own path is not readable"),
+        "the first failing piece wins: {}",
+        languagetool.diagnosis
+    );
+
+    // With the binary in place, each engine names its own first missing piece.
+    facts.binary = Some(PathBuf::from("/home/u/plugin/bin/grammachy"));
+
+    assert_eq!(
+        Report::new(&facts, EngineSlug::Languagetool).diagnosis,
+        "LanguageTool is not installed: /usr/bin/languagetool does not exist. Run: sudo pacman -S languagetool"
+    );
+    assert_eq!(
+        Report::new(&facts, EngineSlug::Openai).diagnosis,
+        "llama.cpp is not installed: /usr/bin/llama-server does not exist. Run: sudo pacman -S llama-cpp ggml-vulkan"
+    );
+    // Harper needs nothing but the binary, so it stays ready.
+    let harper = Report::new(&facts, EngineSlug::Harper);
+    assert!(harper.ready, "{}", harper.diagnosis);
+}
+
+#[test]
+fn the_envelope_carries_the_contract_version_and_the_tier() {
+    let json = doctor::run(&ready(), EngineSlug::Openai, true).text;
+    let value: Value = serde_json::from_str(&json).expect("the envelope is one JSON object");
+
+    assert_eq!(value["contractVersion"], 1);
+    assert_eq!(value["engine"], "openai");
+    assert_eq!(value["ready"], true);
+    assert_eq!(value["hardwareTier"], "discrete-gpu");
+    assert_eq!(value["backendPackage"], "ggml-vulkan");
+    assert!(value["diagnosis"].as_str().is_some());
+
+    let checks = value["checks"].as_array().expect("checks is an array");
+    let ids: Vec<&str> = checks
+        .iter()
+        .map(|check| check["id"].as_str().expect("every id is a string"))
+        .collect();
+    assert_eq!(
+        ids,
+        [
+            "binary",
+            "languagetool",
+            "java",
+            "llama.cpp",
+            "model",
+            "endpoint",
+            "unit:languagetool",
+            "unit:llama",
+        ]
+    );
+    // A check that needs nothing carries no remedy key at all.
+    assert!(checks.iter().all(|check| check.get("remedy").is_none()));
+}
+
+#[test]
+fn a_missing_piece_carries_its_remedy_in_the_envelope() {
+    let mut facts = ready();
+    facts.llama_server = None;
+
+    let json = doctor::run(&facts, EngineSlug::Openai, true).text;
+    let value: Value = serde_json::from_str(&json).expect("the envelope is one JSON object");
+    let check = value["checks"]
+        .as_array()
+        .expect("checks is an array")
+        .iter()
+        .find(|check| check["id"] == "llama.cpp")
+        .expect("the llama.cpp check is there")
+        .clone();
+
+    assert_eq!(value["ready"], false);
+    assert_eq!(check["ok"], false);
+    assert_eq!(check["remedy"], "sudo pacman -S llama-cpp ggml-vulkan");
+    assert_eq!(check["engines"], serde_json::json!(["openai"]));
+}
+
+/// The one test that runs the real binary. It asserts only what holds whatever
+/// this machine has installed, so CI and a developer machine agree.
+#[test]
+fn the_binary_prints_a_report_and_a_json_envelope() {
+    let text = run_binary(&["doctor"]);
+    assert!(text.starts_with("Grammachy doctor"), "{text}");
+    assert!(text.contains("Hardware tier"), "{text}");
+    assert!(text.contains("Engine languagetool"), "{text}");
+    // Nothing is installed for the user, whatever is missing.
+    assert!(!text.contains("Installing"), "{text}");
+
+    let json = run_binary(&["doctor", "--json"]);
+    let value: Value = serde_json::from_str(json.trim()).expect("stdout is one JSON object");
+    assert_eq!(value["contractVersion"], 1);
+    assert_eq!(value["engine"], "languagetool");
+    assert_eq!(json.trim().lines().count(), 1, "one line only: {json}");
+
+    // Harper needs only the binary, which is running, so this machine is ready.
+    let harper = run_binary(&["doctor", "--engine", "harper", "--json"]);
+    let value: Value = serde_json::from_str(harper.trim()).expect("stdout is one JSON object");
+    assert_eq!(value["ready"], true, "{harper}");
+}
+
+fn run_binary(args: &[&str]) -> String {
+    let output = Command::new(env!("CARGO_BIN_EXE_grammachy"))
+        .args(args)
+        // No test reads the developer's real settings file (spec section 7).
+        .env("GRAMMACHY_SHELL_JSON", "/nonexistent/shell.json")
+        .output()
+        .expect("the binary runs");
+
+    String::from_utf8(output.stdout).expect("stdout is UTF-8")
+}

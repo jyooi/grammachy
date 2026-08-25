@@ -26,6 +26,9 @@ pub enum Command {
     /// Run the interference fixture through every engine this machine reaches
     /// and print the benchmark file on stdout (spec section 13.1).
     Bench(BenchArgs),
+
+    /// Report what this machine still needs, one line per piece.
+    Doctor(DoctorArgs),
 }
 
 #[derive(Debug, Parser)]
@@ -39,6 +42,18 @@ pub struct BenchArgs {
     /// A model to evaluate, repeatable, one Models row each.
     #[arg(long = "model", value_name = "NAME")]
     pub models: Vec<String>,
+}
+
+#[derive(Debug, Parser)]
+pub struct DoctorArgs {
+    /// The engine the one-line diagnosis is about. Omitted uses the stored
+    /// entry, then the default.
+    #[arg(long, value_enum)]
+    pub engine: Option<EngineSlug>,
+
+    /// Print the report as one JSON envelope instead of as text.
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(Debug, Parser)]

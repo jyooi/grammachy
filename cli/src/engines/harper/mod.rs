@@ -24,7 +24,11 @@ use crate::engine::{Engine, EngineFailure};
 use crate::envelope::Issue;
 
 /// The Check timeout of spec section 4.
-pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
+///
+/// An unoptimised build can spend the whole budget on the curated dictionary,
+/// so debug uses a longer budget. The shipped binary keeps the 10 s limit.
+pub const DEFAULT_TIMEOUT: Duration =
+    Duration::from_secs(if cfg!(debug_assertions) { 60 } else { 10 });
 
 /// How many times the curated dictionary and rule set were built.
 ///

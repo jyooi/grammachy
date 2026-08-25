@@ -4,6 +4,7 @@ pub mod args;
 pub mod bench;
 pub mod check;
 pub mod chunk;
+pub mod doctor;
 pub mod engine;
 pub mod engines;
 pub mod envelope;

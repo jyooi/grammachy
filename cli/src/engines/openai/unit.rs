@@ -11,8 +11,9 @@
 //!
 //! The server is the `llama-cpp` package from the Arch `extra` repository,
 //! which installs `/usr/bin/llama-server`. That package carries no compute
-//! backend of its own: `ggml-cpu` or `ggml-vulkan` is what makes it run, so
-//! `grammachy doctor` names both halves of the install line.
+//! backend of its own: `ggml-cpu` or `ggml-vulkan` is what makes it run.
+//! This adapter has no hardware facts, so [`INSTALL_LINE`] names both packages.
+//! `grammachy doctor` prints the package this machine's hardware tier wants.
 //!
 //! Two numbers are decisions rather than defaults:
 //!
@@ -37,12 +38,14 @@ pub const UNIT_NAME: &str = "grammachy-llama";
 /// Context window in tokens, sized for one whole Check.
 const CONTEXT_SIZE: usize = 4_096;
 
-/// Where the `llama-cpp` package installs the server.
-const PACKAGE_SERVER: &str = "/usr/bin/llama-server";
+/// Where the `llama-cpp` package installs the server. `doctor` looks for it too.
+pub const PACKAGE_SERVER: &str = "/usr/bin/llama-server";
 
-/// The install line `doctor` prints when the package is missing, CPU first and
-/// the Vulkan backend beside it (spec section 4: hardware tiers change only the
-/// install step). Both packages are in the official `extra` repository.
+/// The install line this adapter prints when the package is missing.
+/// It names CPU first and the Vulkan backend beside it, because the adapter
+/// has no hardware facts. `grammachy doctor` prints a tier-specific line
+/// instead (spec section 4). Both packages are in the official `extra`
+/// repository.
 pub const INSTALL_LINE: &str =
     "sudo pacman -S llama-cpp ggml-cpu   (add ggml-vulkan for a GPU or an iGPU)";
 

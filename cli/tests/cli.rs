@@ -245,7 +245,7 @@ fn the_harper_engine_answers_issues_with_no_unit_running() {
     let result = run(&["check", "--engine", "harper"], "He go home.");
     let value = envelope(&result);
 
-    assert_eq!(result.status, 0);
+    assert_eq!(result.status, 0, "harper Check failed: {value}");
     assert_eq!(value["contractVersion"], 1);
     assert_eq!(value["engine"], "harper");
 

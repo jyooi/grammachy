@@ -63,7 +63,11 @@ impl Stub {
     }
 }
 
-/// Drain the request headers so the stub answers a complete request.
+/// Drain one whole request, headers and body.
+///
+/// The body has to be read too. A stub that answers and closes while the
+/// client is still writing gives the client a reset, which the adapter reads
+/// as `engine_unavailable` rather than as the answer this stub sent.
 fn read_request(stream: &mut TcpStream) {
     let mut seen = Vec::new();
     let mut byte = [0u8; 1];
@@ -72,6 +76,21 @@ fn read_request(stream: &mut TcpStream) {
         if seen.ends_with(b"\r\n\r\n") {
             break;
         }
+    }
+
+    let headers = String::from_utf8_lossy(&seen).to_string();
+    let length = headers
+        .lines()
+        .find_map(|line| {
+            line.to_ascii_lowercase()
+                .strip_prefix("content-length:")
+                .and_then(|value| value.trim().parse::<usize>().ok())
+        })
+        .unwrap_or(0);
+
+    if length > 0 {
+        let mut body = vec![0u8; length];
+        let _ = stream.read_exact(&mut body);
     }
 }
 
