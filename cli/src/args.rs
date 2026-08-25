@@ -17,6 +17,9 @@ pub struct Cli {
 pub enum Command {
     /// Check the UTF-8 text on stdin and print one JSON envelope on stdout.
     Check(CheckArgs),
+
+    /// Split the Draft on stdin into Chunks that each fit one Check.
+    Chunk,
 }
 
 #[derive(Debug, Parser)]

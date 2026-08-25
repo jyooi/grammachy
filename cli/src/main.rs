@@ -4,33 +4,57 @@ use std::process::ExitCode;
 use clap::Parser;
 
 use grammachy::args::{CheckOptions, Cli, Command};
-use grammachy::check;
 use grammachy::envelope::{Envelope, ErrorCode};
+use grammachy::{check, chunk};
+
+/// The one envelope a run prints, already rendered.
+struct Output {
+    json: String,
+    exit_code: i32,
+}
+
+impl From<Envelope> for Output {
+    fn from(envelope: Envelope) -> Self {
+        Output {
+            json: envelope.to_json(),
+            exit_code: envelope.exit_code(),
+        }
+    }
+}
+
+impl From<chunk::ChunkEnvelope> for Output {
+    fn from(envelope: chunk::ChunkEnvelope) -> Self {
+        Output {
+            json: envelope.to_json(),
+            exit_code: envelope.exit_code(),
+        }
+    }
+}
 
 fn main() -> ExitCode {
-    let envelope = match run() {
-        Some(envelope) => envelope,
+    let output = match run() {
+        Some(output) => output,
         // clap printed help or the version already.
         None => return ExitCode::SUCCESS,
     };
 
     let mut stdout = io::stdout().lock();
-    let _ = writeln!(stdout, "{}", envelope.to_json());
+    let _ = writeln!(stdout, "{}", output.json);
     let _ = stdout.flush();
 
-    match envelope.exit_code() {
+    match output.exit_code {
         0 => ExitCode::SUCCESS,
         _ => ExitCode::FAILURE,
     }
 }
 
 /// `None` means clap handled the run itself, such as `--help`.
-fn run() -> Option<Envelope> {
+fn run() -> Option<Output> {
     let cli = match Cli::try_parse() {
         Ok(cli) => cli,
         Err(error) if error.use_stderr() => {
             eprintln!("{error}");
-            return Some(Envelope::error(ErrorCode::BadArguments, first_line(&error)));
+            return Some(Envelope::error(ErrorCode::BadArguments, first_line(&error)).into());
         }
         Err(error) => {
             let _ = error.print();
@@ -43,14 +67,23 @@ fn run() -> Option<Envelope> {
             let options = CheckOptions::resolve(&args);
             let text = match read_stdin() {
                 Ok(text) => text,
-                Err(message) => {
-                    eprintln!("grammachy: {message}");
-                    return Some(Envelope::error(ErrorCode::BadArguments, message));
-                }
+                Err(message) => return Some(bad_stdin(message)),
             };
-            Some(check::run(&text, &options))
+            Some(check::run(&text, &options).into())
+        }
+        Command::Chunk => {
+            let text = match read_stdin() {
+                Ok(text) => text,
+                Err(message) => return Some(bad_stdin(message)),
+            };
+            Some(chunk::run(&text).into())
         }
     }
+}
+
+fn bad_stdin(message: String) -> Output {
+    eprintln!("grammachy: {message}");
+    Envelope::error(ErrorCode::BadArguments, message).into()
 }
 
 /// The one-line summary of a clap error, without its "error: " prefix.

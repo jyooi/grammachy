@@ -11,6 +11,8 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 - The CLI prints exactly one JSON envelope on stdout and uses stderr for logs only.
   Exit 0 carries a result, exit 1 carries an error envelope.
   Spans are UTF-16 code units, because the shell indexes the text in JavaScript.
+- Each subcommand owns its result envelope and shares the error envelope in `cli/src/envelope.rs`.
+  `check` uses `Envelope`, `chunk` uses `ChunkEnvelope` in `cli/src/chunk.rs`.
 - Engine adapters plug into the `Engine` trait in `cli/src/engine.rs`.
   `engine::resolve` answers `None` for a slug with no adapter, which surfaces as `engine_unavailable`.
 - `manifest.json` version must equal the crate version; `cli/tests/manifest.rs` enforces that.
