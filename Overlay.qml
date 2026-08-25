@@ -430,7 +430,7 @@ Item {
     // Both cards of section 8 are about a Selection, so Compose keeps the
     // plain notice: it has no Selection to size and none to ask for.
     if (root.surface === "compose") {
-      root.showNotice("The check did not finish", message)
+      root.showNotice("The check did not finish", "The engine reported an error.")
       return
     }
     var settled = Errors.known(code)

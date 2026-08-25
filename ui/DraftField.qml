@@ -67,6 +67,7 @@ BorderSurface {
       selectedTextColor: root.foreground
       font.family: Style.font.family
       font.pixelSize: Style.font.body
+      selectByMouse: true
       persistentSelection: true
 
       Keys.priority: Keys.BeforeItem
