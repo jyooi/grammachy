@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Layouts
 import qs.Commons
 import qs.Ui
+import "format.js" as Format
 
 // The quick popup card, spec section 6, laid out after variant B of the
 // HUF-174 prototype: hero, marked text, inspector strip, footer.
@@ -111,14 +112,14 @@ BorderSurface {
     return total
   }
 
-  // Thousands separators, because the too-long card is about a size the
-  // reader has to compare at a glance.
+  // The counted sizes of the too-long card are worded in format.js, which
+  // Compose prints from too and which a node test owns.
   function grouped(count) {
-    return String(count).replace(/\B(?=(\d{3})+(?!\d))/g, ",")
+    return Format.grouped(count)
   }
 
   function units(count) {
-    return root.grouped(count) + (count === 1 ? " unit" : " units")
+    return Format.units(count)
   }
 
   function metaLine() {
@@ -162,113 +163,22 @@ BorderSurface {
     anchors.leftMargin: root.contentLeftInset
     spacing: Style.spacing.lg
 
-    // ------------------------------------------------------------------ hero
-
-    ColumnLayout {
+    CardHero {
       id: hero
 
       Layout.fillWidth: true
-      spacing: Style.spacing.lg
 
-      RowLayout {
-        Layout.fillWidth: true
-        spacing: Style.spacing.xxl
-
-        Text {
-          text: "G"
-          color: Color.accent
-          font.family: Style.font.family
-          font.pixelSize: Style.font.heading
-          font.bold: true
-        }
-
-        ColumnLayout {
-          Layout.fillWidth: true
-          spacing: Style.spacing.xxs
-
-          Text {
-            text: "Grammachy"
-            color: Color.popups.text
-            font.family: Style.font.family
-            font.pixelSize: Style.font.title
-            font.bold: true
-          }
-
-          Text {
-            Layout.fillWidth: true
-            text: root.metaLine()
-            color: Color.muted
-            elide: Text.ElideRight
-            font.family: Style.font.family
-            font.pixelSize: Style.font.bodySmall
-          }
-
-          // A first-N Check saw part of the Selection, which the reader has to
-          // know before they trust the counts above.
-          Text {
-            Layout.fillWidth: true
-            visible: root.truncated
-            text: "First " + root.grouped(root.limitUnits) + " of " + root.units(root.fullText.length) + " checked"
-            color: Color.accent
-            elide: Text.ElideRight
-            font.family: Style.font.family
-            font.pixelSize: Style.font.caption
-          }
-        }
-
-        // The auto-replace toggle, spec sections 6 and 7. The Settings view
-        // persists it; the hero holds a session-local override beside that.
-        RowLayout {
-          Layout.alignment: Qt.AlignVCenter
-          spacing: Style.spacing.lg
-
-          Text {
-            text: "Auto-replace"
-            color: Color.popups.text
-            font.family: Style.font.family
-            font.pixelSize: Style.font.bodySmall
-          }
-
-          ToggleSwitch {
-            checked: root.autoReplace
-            foreground: Color.popups.text
-            onToggled: root.autoReplaceToggled()
-          }
-        }
-
-        // The one control that flips the body, spec section 7. It sits in the
-        // hero so it is reachable from every phase, the notice card included,
-        // and it stays a gear both ways so the hero never shifts under a click.
-        Button {
-          Layout.alignment: Qt.AlignVCenter
-          iconText: "󰒓"
-          tooltipText: root.settingsOpen ? "Back to the check" : "Settings"
-          bordered: true
-          selected: root.settingsOpen
-          foreground: Color.popups.text
-          fontFamily: Style.font.family
-          onClicked: root.settingsToggled()
-        }
-      }
-
-      // The hint spans the hero rather than riding beside the switch, so it
-      // stays one line at any theme font and never squeezes the meta line.
-      Text {
-        Layout.fillWidth: true
-        Layout.topMargin: -Style.spacing.sm
-        text: "Replaces the highlighted text by pasting over it"
-        color: Color.muted
-        elide: Text.ElideRight
-        horizontalAlignment: Text.AlignRight
-        font.family: Style.font.family
-        font.pixelSize: Style.font.caption
-      }
-
-      Rectangle {
-        Layout.fillWidth: true
-        implicitHeight: Style.spacing.hairline
-        color: Style.normalBorderColor
-      }
+      metaText: root.metaLine()
+      // A first-N Check saw part of the Selection, which the reader has to
+      // know before they trust the counts above.
+      noteText: root.truncated
+        ? "First " + root.grouped(root.limitUnits) + " of " + root.units(root.fullText.length) + " checked"
+        : ""
+      showsAutoReplace: true
+      autoReplace: root.autoReplace
+      settingsOpen: root.settingsOpen
+      onAutoReplaceToggled: root.autoReplaceToggled()
+      onSettingsToggled: root.settingsToggled()
     }
 
     SettingsView {
@@ -484,118 +394,16 @@ BorderSurface {
 
       // ----------------------------------------------------- inspector strip
 
-      BorderSurface {
+      Inspector {
         Layout.fillWidth: true
         visible: root.showsCheck && root.hasIssues
-        color: "transparent"
-        radius: Style.cornerRadius
-        padding: Style.spacing.lg
-        borderSpec: Border.controlSpec("normal", Color.popups.text, Color.accent)
-        implicitHeight: inspector.implicitHeight + topPadding + bottomPadding + borderTop + borderBottom
 
-        RowLayout {
-          id: inspector
-
-          anchors.fill: parent
-          anchors.margins: Style.spacing.lg
-          spacing: Style.spacing.xxl
-
-          ColumnLayout {
-            Layout.fillWidth: true
-            spacing: Style.spacing.sm
-
-            RowLayout {
-              Layout.fillWidth: true
-              spacing: Style.spacing.lg
-
-              Text {
-                text: root.focusedIssue ? root.focusedIssue.original : ""
-                color: Color.urgent
-                font.family: Style.font.family
-                font.pixelSize: Style.font.subtitle
-                font.strikeout: true
-              }
-
-              Text {
-                text: "→"
-                color: Color.muted
-                font.family: Style.font.family
-                font.pixelSize: Style.font.subtitle
-              }
-
-              Text {
-                text: root.focusedIssue ? root.focusedIssue.fix : ""
-                color: root.acceptedColor
-                font.family: Style.font.family
-                font.pixelSize: Style.font.subtitle
-                font.bold: true
-              }
-
-              BorderSurface {
-                Layout.alignment: Qt.AlignVCenter
-                color: "transparent"
-                radius: Style.cornerRadius
-                padding: Style.spacing.xs
-                borderSpec: Border.controlSpec("normal", Color.popups.text, Color.accent)
-                implicitWidth: category.implicitWidth + padding * 2 + borderLeft + borderRight
-                implicitHeight: category.implicitHeight + padding * 2 + borderTop + borderBottom
-
-                Text {
-                  id: category
-                  anchors.centerIn: parent
-                  text: root.focusedIssue ? root.focusedIssue.category : ""
-                  color: Color.muted
-                  font.family: Style.font.family
-                  font.pixelSize: Style.font.caption
-                }
-              }
-
-              Item { Layout.fillWidth: true }
-            }
-
-            Text {
-              Layout.fillWidth: true
-              text: root.focusedIssue ? root.focusedIssue.reason : ""
-              color: Color.muted
-              wrapMode: Text.Wrap
-              font.family: Style.font.family
-              font.pixelSize: Style.font.bodySmall
-            }
-
-            Text {
-              Layout.fillWidth: true
-              text: "Issue " + (root.focusIndex + 1) + " of " + root.issueCount
-                + ". Enter accepts, Space skips, Up and Down move, A accepts all."
-              color: Color.muted
-              wrapMode: Text.Wrap
-              font.family: Style.font.family
-              font.pixelSize: Style.font.caption
-            }
-          }
-
-          RowLayout {
-            Layout.alignment: Qt.AlignTop
-            spacing: Style.spacing.lg
-
-            Button {
-              text: "Accept"
-              tooltipText: "Enter"
-              bordered: true
-              foreground: Color.popups.text
-              fontFamily: Style.font.family
-              onClicked: root.accepted(root.focusIndex)
-            }
-
-            Button {
-              text: "Skip"
-              tooltipText: "Space"
-              bordered: true
-              foreground: Color.popups.text
-              fontFamily: Style.font.family
-              onClicked: root.skipped(root.focusIndex)
-            }
-          }
-        }
+        issue: root.focusedIssue
+        focusIndex: root.focusIndex
+        issueCount: root.issueCount
+        acceptedColor: root.acceptedColor
+        onAccepted: function(index) { root.accepted(index) }
+        onSkipped: function(index) { root.skipped(index) }
       }
 
       // ---------------------------------------------------------- the footer
@@ -604,30 +412,11 @@ BorderSurface {
         Layout.fillWidth: true
         spacing: Style.spacing.lg
 
-        Row {
+        ReviewCounts {
           visible: root.showsCheck && root.hasIssues
-          spacing: Style.spacing.xxl
-
-          Text {
-            text: root.acceptedCount + " accepted"
-            color: Color.muted
-            font.family: Style.font.family
-            font.pixelSize: Style.font.bodySmall
-          }
-
-          Text {
-            text: root.skippedCount + " skipped"
-            color: Color.muted
-            font.family: Style.font.family
-            font.pixelSize: Style.font.bodySmall
-          }
-
-          Text {
-            text: root.openCount + " open"
-            color: Color.muted
-            font.family: Style.font.family
-            font.pixelSize: Style.font.bodySmall
-          }
+          acceptedCount: root.acceptedCount
+          skippedCount: root.skippedCount
+          openCount: root.openCount
         }
 
         Item { Layout.fillWidth: true }

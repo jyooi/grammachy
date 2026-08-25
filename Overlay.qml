@@ -8,24 +8,29 @@ import "ui/errors.js" as Errors
 import "ui/settings.js" as Settings
 import "ui/keymap.js" as Keymap
 import "ui/splice.js" as Splice
+import "ui/format.js" as Format
 
 // The overlay entry point. `open(payload)` routes a summon to a surface, spec
 // section 2. Quick mode captures the Selection (section 3), runs one Check
 // through the companion CLI (section 5.1), and shows the marked text with the
-// key map, the Apply path, and the too-long card of section 6.
+// key map, the Apply path, and the too-long card of section 6. Compose mode
+// (section 9) captures nothing: it holds a Draft, checks it on demand, and
+// reviews the answer over the same hero, inspector, footer, and keys.
 //
-// The gear flips the same card to the Settings view of spec section 7. This
+// Both surfaces share one Check, one review state, and one key map, so what
+// differs between them is `surface` and the card that draws it.
+//
+// The gear flips either card to the Settings view of spec section 7. This
 // file is the only thing that touches storage: it reads the plugin's entry in
 // shell.json reactively and writes one key at a time through
-// `shell.updateEntryInline`.
+// `shell.updateEntryInline`. The Draft is the one thing it keeps in memory and
+// never writes anywhere.
 //
-// A Check that fails shows one of the error cards of spec section 8, and this
-// file routes their buttons: Retry re-runs the Check on the same Selection
-// with no second capture, Settings flips the same card to the Settings view,
-// and Setup and Open Compose reach surfaces of their own tickets.
-//
-// Compose mode and the setup card are their own tickets; this file shows a
-// plain notice card where they will land.
+// A Check that fails on the quick surface shows one of the error cards of
+// spec section 8, and this file routes their buttons: Retry re-runs the Check
+// on the same Selection with no second capture, Settings flips the same card
+// to the Settings view, Open Compose opens the Compose surface, and Setup
+// still lands on a notice until that card arrives.
 Item {
   id: root
 
@@ -36,7 +41,11 @@ Item {
   // The shell reads `opened` to answer isPluginOpen, and calls close().
   property bool opened: false
 
-  // "capturing", "checking", "result", "error", "notice", or "toolong".
+  // Which surface of spec section 2 is on screen: "quick" or "compose".
+  property string surface: "quick"
+
+  // Quick: "capturing", "checking", "result", "error", "notice", or "toolong".
+  // Compose: "editing", "checking", "result", or "notice".
   property string phase: "capturing"
   // The whole capture, spec section 3. Every Check runs on this or on its head.
   property string capturedText: ""
@@ -67,6 +76,15 @@ Item {
   // One Check takes this many UTF-16 code units. This is `MAX_UTF16_UNITS` of
   // `cli/src/check.rs`, which `cli/tests/overlay_limit.rs` keeps in step.
   readonly property int checkLimitUnits: 5000
+
+  // A whole Draft takes this many. This is `MAX_DRAFT_UTF16_UNITS` of
+  // `cli/src/chunk.rs`, kept in step by the same test. Spec section 9: over it
+  // Compose refuses the Check rather than sending a request that would fail.
+  readonly property int draftCapUnits: 50000
+
+  // The Draft of spec section 9. It lives here for as long as the shell runs
+  // and goes nowhere else: no file, no clipboard, no setting.
+  property string draftText: ""
 
   // The clipboard the Ctrl + C fallback borrowed, put back once the Selection
   // is in hand. Spec section 3.
@@ -177,27 +195,10 @@ Item {
     root.noticeMeta = meta === undefined ? "" : meta
   }
 
-  // `Open in Compose` on the too-long card of spec section 6 and `Open Compose`
-  // on the `empty_selection` card of section 8. The window is its own ticket;
-  // it opens with the Draft this popup kept.
-  function showCompose() {
-    root.showNotice("Compose is not ready yet",
-      "The Compose window arrives in a later milestone. It opens with the draft the popup kept.",
-      "not ready yet")
-  }
-
-  // `Setup` on the `bad_arguments` card. The setup card of spec section 10
-  // names the pinned binary and runs `bin/bootstrap.sh`; the release ticket
-  // builds it, so until then the button says where the binary comes from.
-  function showSetup() {
-    root.showNotice("Setup is not ready yet",
-      "The setup card arrives with the release milestone. See docs/dev.md for how to build the companion binary into bin/grammachy.",
-      "not ready yet")
-  }
-
-  // ---------------------------------------------------------------- capture
-
-  function startQuick() {
+  // Every summon starts from the same clean state: nothing of the last one is
+  // still in flight, and no Check is on screen. The check view is what a
+  // summon shows, spec section 7, and the Draft is what it never touches.
+  function resetRun() {
     settleTimer.stop()
     pasteTimer.stop()
     primaryPaste.running = false
@@ -210,12 +211,9 @@ Item {
     doctorProcess.restartQueued = false
     doctorProcess.running = false
     copyProcess.pasteAfter = false
-    // New capture.
+    // Whatever answers next belongs to an older run than this one.
     root.runGeneration += 1
-    // Reset state. The check view is what a summon shows, spec section 7.
     root.settingsOpen = false
-    root.phase = "capturing"
-    root.capturedText = ""
     root.selectionText = ""
     root.truncated = false
     root.issues = []
@@ -232,6 +230,35 @@ Item {
       root.restoreBorrowedClipboard()
     root.borrowedClipboard = ""
     root.clipboardBorrowed = false
+  }
+
+  // Spec sections 2 and 9: Compose opens on the kept Draft and captures
+  // nothing. The `{"mode": "compose", "text": "..."}` payload, which replaces
+  // a non-empty Draft after a confirm, arrives with the remaining triggers in
+  // their own ticket; this function is the seam they land on.
+  function showCompose() {
+    root.resetRun()
+    root.surface = "compose"
+    root.phase = "editing"
+    Qt.callLater(root.restoreFocus)
+  }
+
+  // `Setup` on the `bad_arguments` card. The setup card of spec section 10
+  // names the pinned binary and runs `bin/bootstrap.sh`; the release ticket
+  // builds it, so until then the button says where the binary comes from.
+  function showSetup() {
+    root.showNotice("Setup is not ready yet",
+      "The setup card arrives with the release milestone. See docs/dev.md for how to build the companion binary into bin/grammachy.",
+      "not ready yet")
+  }
+
+  // ---------------------------------------------------------------- capture
+
+  function startQuick() {
+    root.resetRun()
+    root.surface = "quick"
+    root.phase = "capturing"
+    root.capturedText = ""
     root.beginPrimaryPaste()
   }
 
@@ -333,6 +360,53 @@ Item {
     root.runCheck(Splice.firstUnits(root.capturedText, root.checkLimitUnits))
   }
 
+  // ---------------------------------------------------------------- compose
+  //
+  // Spec section 9. The Draft is edited here, checked only when the reader
+  // asks, and reviewed with the same Issues and the same decisions as the
+  // popup. `Back to edit` is the one path that writes the Corrected text back.
+
+  function editDraft(text) {
+    root.draftText = text
+  }
+
+  function clearDraft() {
+    root.draftText = ""
+  }
+
+  // Why Compose will not check this Draft, or "" when it will. The Check
+  // button reads the same rule, so the two can never disagree.
+  function draftRefusal() {
+    return Format.draftRefusal(root.draftText.length, root.checkLimitUnits, root.draftCapUnits)
+  }
+
+  // One Check on the whole Draft, which is what fits while a Draft is one
+  // Chunk. Chunked checking replaces this body and nothing around it.
+  function startComposeCheck() {
+    if (root.surface !== "compose" || root.phase !== "editing") return
+    if (root.draftRefusal().length > 0) return
+    // A second Check must not be answered by the first one's output.
+    root.runGeneration += 1
+    root.runCheck(root.draftText)
+  }
+
+  function backToEdit() {
+    if (root.surface !== "compose" || root.phase === "editing") return
+    // Spec section 9: what the reader accepted becomes the Draft they go back
+    // to. A Check that never reached a result leaves the Draft as it was.
+    if (root.phase === "result") root.draftText = root.correctedText()
+    // A Check still in flight answers into a card that has moved on.
+    root.runGeneration += 1
+    root.phase = "editing"
+    root.selectionText = ""
+    root.issues = []
+    root.decisions = []
+    root.focusIndex = 0
+    root.applied = false
+    root.engineMessage = ""
+    Qt.callLater(root.restoreFocus)
+  }
+
   function finishCheckLaunch() {
     if (checkProcess.running) return
     if (checkProcess.restartQueued) return
@@ -353,6 +427,12 @@ Item {
   // card from `ui/errors.js`.
   function showError(code, message) {
     root.engineMessage = message
+    // Both cards of section 8 are about a Selection, so Compose keeps the
+    // plain notice: it has no Selection to size and none to ask for.
+    if (root.surface === "compose") {
+      root.showNotice("The check did not finish", "The engine reported an error.")
+      return
+    }
     var settled = Errors.known(code)
     if (settled === Errors.TEXT_TOO_LONG) {
       root.errorCard = null
@@ -496,7 +576,9 @@ Item {
 
   function applyCorrected() {
     if (!root.canApply()) return
-    root.runCopy(root.autoReplace)
+    // Spec section 9: auto-replace never applies in Compose, because the Draft
+    // came from this card rather than from a window still holding a Selection.
+    root.runCopy(root.surface === "quick" && root.autoReplace)
   }
 
   function runCopy(pasteAfter) {
@@ -526,13 +608,28 @@ Item {
     meta: Qt.MetaModifier
   })
 
+  // Which card the press landed on, spec sections 6 and 9. Settings owns its
+  // own fields, so every card key stays off while it is open.
+  function keyMode() {
+    if (root.settingsOpen) return Keymap.MODE_IDLE
+    if (root.surface === "compose") {
+      if (root.phase === "editing") return Keymap.MODE_COMPOSE_EDIT
+      // A Check in flight has no Issues to decide and no Draft to go back to
+      // yet, so Esc leaves the way it does everywhere else. The Draft stays.
+      if (root.phase === "checking") return Keymap.MODE_IDLE
+      return Keymap.MODE_COMPOSE_REVIEW
+    }
+    if (root.phase === "result" && root.issues.length > 0) return Keymap.MODE_REVIEW
+    return Keymap.MODE_IDLE
+  }
+
   function handleKey(event) {
-    // Settings owns its own fields, so review keys stay off while it is open.
-    var reviewing = !root.settingsOpen && root.phase === "result" && root.issues.length > 0
-    var action = Keymap.action(event, root.keyCodes, reviewing)
+    var action = Keymap.action(event, root.keyCodes, root.keyMode())
     if (action === Keymap.NONE) return
 
     if (action === Keymap.CLOSE) root.close()
+    else if (action === Keymap.CHECK) root.startComposeCheck()
+    else if (action === Keymap.BACK) root.backToEdit()
     else if (action === Keymap.ACCEPT) root.decide(root.focusIndex, true)
     else if (action === Keymap.SKIP) root.decide(root.focusIndex, false)
     else if (action === Keymap.FOCUS_PREVIOUS) root.moveFocus(-1)
@@ -732,11 +829,25 @@ Item {
     visible: root.opened && root.phase !== "capturing"
     anchors { top: true; bottom: true; left: true; right: true }
     color: "transparent"
-    WlrLayershell.namespace: "grammachy-quick"
+    WlrLayershell.namespace: "grammachy"
     WlrLayershell.layer: WlrLayer.Overlay
     WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
     exclusionMode: ExclusionMode.Ignore
 
+    // Spec section 9: Compose is a centred card over a dimmed backdrop. The
+    // popup hangs off the bar instead and leaves the desktop as it is.
+    Rectangle {
+      anchors.fill: parent
+      color: "black"
+      opacity: root.surface === "compose" ? 0.45 : 0
+
+      Behavior on opacity {
+        NumberAnimation { duration: 120; easing.type: Easing.OutCubic }
+      }
+    }
+
+    // A click that reaches this far is a click outside the card, which closes
+    // either surface.
     MouseArea {
       anchors.fill: parent
       onClicked: root.close()
@@ -753,7 +864,7 @@ Item {
       Connections {
         target: panel
         function onVisibleChanged() {
-          if (panel.visible) Qt.callLater(function() { keyCatcher.forceActiveFocus() })
+          if (panel.visible) Qt.callLater(root.restoreFocus)
         }
       }
 
@@ -761,6 +872,8 @@ Item {
 
       QuickCard {
         id: card
+
+        visible: root.surface === "quick"
 
         // The bar widget sits on the trailing edge, so the card hangs from the
         // same corner, under the bar. The overlay cannot see the widget's own
@@ -811,6 +924,66 @@ Item {
         onErrorActionRequested: function(action) { root.runErrorAction(action) }
         onCloseRequested: root.close()
       }
+
+      ComposeCard {
+        id: composeCard
+
+        anchors.centerIn: parent
+        visible: root.surface === "compose"
+
+        // Spec section 9: about 900 px wide and 80 percent of the screen high.
+        // The screen is what bounds both, so a small display still fits.
+        cardWidth: Math.min(Style.space(900), parent.width - root.gap * 2)
+        cardHeight: Math.min(Math.round(parent.height * 0.8), parent.height - root.gap * 2)
+
+        // The Draft text area holds the keyboard while it is being written, so
+        // it forwards to the same item the key map runs on.
+        keySink: keyCatcher
+
+        phase: root.phase
+        draftText: root.draftText
+        sourceText: root.selectionText
+        issues: root.issues
+        decisions: root.decisions
+        focusIndex: root.focusIndex
+        engine: root.engine
+        elapsedMs: root.elapsedMs
+        applied: root.applied
+        noticeTitle: root.noticeTitle
+        noticeBody: root.noticeBody
+        engineMessage: root.engineMessage
+        checkLimitUnits: root.checkLimitUnits
+        draftCapUnits: root.draftCapUnits
+
+        settingsOpen: root.settingsOpen
+        nativeLanguage: root.setting("nativeLanguage")
+        engineSetting: root.setting("engine")
+        autoReplace: root.autoReplace
+        openaiBaseUrl: root.setting("openaiBaseUrl")
+        openaiModel: root.setting("openaiModel")
+
+        onSettingsToggled: root.settingsOpen = !root.settingsOpen
+        onSettingChanged: function(name, value) { root.persistSetting(name, value) }
+        onDraftEdited: function(text) { root.editDraft(text) }
+        onClearRequested: root.clearDraft()
+        onCheckRequested: root.startComposeCheck()
+        onBackToEditRequested: root.backToEdit()
+        onAccepted: function(index) { root.decide(index, true) }
+        onSkipped: function(index) { root.decide(index, false) }
+        onAcceptAllRequested: root.acceptAllOpen()
+        onApplyRequested: root.applyCorrected()
+        onFocusRequested: function(index) { root.focusIndex = index }
+        onCloseRequested: root.close()
+      }
     }
+  }
+
+  // The Draft text area takes the keyboard in Compose edit mode, and the key
+  // map takes it everywhere else. Both live inside the panel, so this is the
+  // one place that decides which of them holds it.
+  function restoreFocus() {
+    if (!panel.visible) return
+    if (root.surface === "compose") composeCard.takeFocus()
+    else keyCatcher.forceActiveFocus()
   }
 }

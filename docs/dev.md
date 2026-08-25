@@ -4,6 +4,7 @@ This page is for a developer or a reviewer who wants the plugin on a real deskto
 The automated checks in spec section 13 run in CI.
 They cannot cover capture, because capture needs a compositor, a focused window, and a real selection.
 Smoke items 1, 2, 3, 4, 6, 7, 8, and 9 of spec section 13 are therefore run by hand, and this page is how.
+The Compose walkthrough later on this page is here for the same reason: spec section 13 lists no smoke item for it.
 
 ## What you need
 
@@ -21,7 +22,7 @@ The shell loads third-party plugins from `~/.config/omarchy/plugins/<plugin-id>/
 A plain clone is the recommended way, because the shell watches that directory and reloads plugin code when a file changes.
 
 ```bash
-git clone --branch main <repo-url> ~/.config/omarchy/plugins/io.github.jyooi.grammachy
+git clone --branch fm/grammachy-huf-198 <repo-url> ~/.config/omarchy/plugins/io.github.jyooi.grammachy
 ```
 
 To work from an existing checkout instead, link it:
@@ -132,7 +133,7 @@ The paste must give the text you copied first, not the sentence, until you press
 
 Expected: the popup opens with the `empty_selection` card of spec section 8.
 It reads `Nothing selected` over `Highlight some text, then press SUPER + G.`, with `Close` and `Open Compose`.
-`Open Compose` shows the Compose notice until the Compose window lands.
+`Open Compose` opens the Compose card on the kept Draft.
 Esc closes it, and so does a click outside the card.
 
 The capture tries the primary selection, then the Ctrl + C fallback, so this item takes about 150 ms longer than the others.
@@ -167,7 +168,8 @@ Check the two bounds that this selection is here to prove:
 - The text region scrolls. Drag inside it, or press Down until the focus passes the bottom of the region.
   The focused mark scrolls into view; the card does not grow.
 
-`Open in Compose` shows the Compose notice until the Compose window lands.
+`Open in Compose` opens the Compose card on the kept Draft.
+Handing the Selection over as the new Draft belongs to the chunked-checking ticket, so the Draft you left there is what the card shows.
 
 ## 9. Smoke item 6: the engine_unavailable card, then Retry
 
@@ -290,14 +292,98 @@ Expected: `Malay`, `Harper`, and `Auto-replace` on, all as they were left.
 The plugin keeps no state of its own: the values come back because `~/.config/omarchy/shell.json` holds them, and the shell reads that file at start.
 `targetEnglish` and `openaiApiKey` have no control, so check by hand that an edit of those two keys in the file also survives a round trip through the Settings view.
 
-## 13. Running the automated checks
+## 13. The Compose card
+
+Compose is spec section 9.
+It captures nothing: it holds a Draft, checks it only when you ask, and reviews the answer with the same hero, inspector, footer, and keys as the popup.
+No smoke item of spec section 13 covers it, so this walkthrough is the manual check.
+
+Open it in either of two ways:
+
+```bash
+omarchy-shell shell summon io.github.jyooi.grammachy '{"mode":"compose"}'
+```
+
+or press SUPER + SHIFT + G once `grammachy setup` has written the bindings.
+
+### The Draft and the Check
+
+1. Type `I has two book. She dont like it.` into the text area.
+
+Expected: the card is centred over a dimmed desktop, about 900 px wide and 80 percent of the screen high.
+The hero reads `draft, 33 units` and counts up as you type.
+There is no auto-replace toggle, because auto-replace never applies here.
+`Clear` and `Check` turn on the moment the Draft is not empty.
+
+2. Press `Check`, or Ctrl + Enter.
+
+Expected: the card switches to review mode.
+The marked text, the inspector strip, the counts, and `Accept all open` all behave as they do in the popup, and the whole key map of smoke item 1 works on them.
+The Apply button reads `Copy corrected text` and never `Replace selection`, whatever the auto-replace setting says.
+
+3. Accept every Issue, press `Copy corrected text`, and paste somewhere.
+
+Expected: the clipboard holds `I have two books. She does not like it.`
+
+4. Press `Back to edit`, or Esc.
+
+Expected: edit mode again, with the Corrected text as the new Draft.
+The unit count in the hero matches the new length.
+
+### The Draft survives a close
+
+1. Type a Draft and press Esc.
+
+Expected: the card closes and nothing is written anywhere.
+Confirm that with `git status` in the plugin folder and with `jq . ~/.config/omarchy/shell.json`; neither changes.
+
+2. Open Compose again.
+
+Expected: the same Draft, with the caret in the text area.
+`Clear` empties it, and the count returns to `0 units`.
+
+3. Restart the shell with `omarchy restart shell`, then open Compose again.
+
+Expected: an empty Draft.
+The Draft lives in memory for one shell run only, spec section 9.
+
+### The cap and the two refusals
+
+Compose refuses a Check it cannot run, and says why under the text area.
+
+1. Paste a Draft of 50,001 units:
+
+   ```bash
+   python3 -c "print('x' * 50001, end='')" | wl-copy
+   ```
+
+   Open Compose and paste with Ctrl + V.
+
+Expected: the hero reads `draft, 50,001 units`, the line under the text area reads `The draft is 50,001 units, over the cap of 50,000.`, and `Check` is off.
+Trim the Draft and `Check` turns back on.
+
+2. Paste a Draft of about 6,000 units, over what one Check takes.
+
+Expected: `The draft is 6,000 units, over the 5,000 one check takes. Checking in chunks arrives in a later milestone.`
+That second refusal is the seam chunked checking replaces; the cap refusal above it stays.
+
+### Esc, the backdrop, and the gear
+
+| Where | Esc | A click outside the card |
+|---|---|---|
+| Edit mode | Closes and keeps the Draft | Closes and keeps the Draft |
+| Review mode | Back to edit, with the Corrected text | Closes |
+
+The gear flips Compose to the same Settings view as the popup, and `Back` returns to whichever mode was on screen.
+
+## 14. Running the automated checks
 
 The same three plugin checks CI runs, against the shell installed on this machine:
 
 ```bash
 for file in $(find . -name '*.qml' | sort); do qmllint -I /usr/share/omarchy/shell "$file" || echo "FAILED $file"; done
 omarchy-plugin-validate .
-node --test ui/splice.test.js ui/tokens.test.js ui/settings.test.js ui/keymap.test.js ui/errors.test.js
+node --test ui/splice.test.js ui/tokens.test.js ui/settings.test.js ui/keymap.test.js ui/errors.test.js ui/format.test.js
 ```
 
 The `qmllint` on `PATH` reports a syntax error through its exit status alone and prints nothing.
@@ -318,7 +404,7 @@ cargo clippy --all-targets -- -D warnings
 cargo test
 ```
 
-## 14. Removing it
+## 15. Removing it
 
 Remove the hotkeys and the menu entry first (spec section 10):
 

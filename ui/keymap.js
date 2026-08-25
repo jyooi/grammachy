@@ -1,4 +1,4 @@
-// The quick popup key map, spec section 6.
+// The key map of both surfaces, spec sections 6 and 9.
 //
 // Loaded twice: by Overlay.qml through `import "keymap.js" as Keymap`, and by
 // `keymap.test.js` under node. Nothing here may touch a QML or a node API,
@@ -17,14 +17,25 @@ var FOCUS_NEXT = "focusNext"
 var ACCEPT_ALL = "acceptAll"
 var COPY = "copy"
 var APPLY = "apply"
+var CHECK = "check"
+var BACK = "back"
+
+// Which card the press landed on. The popup review keys are the whole map;
+// Compose reuses them in its own review mode and keeps almost nothing in edit
+// mode, because there the Draft text area owns every printable key.
+var MODE_IDLE = "idle"
+var MODE_REVIEW = "review"
+var MODE_COMPOSE_EDIT = "composeEdit"
+var MODE_COMPOSE_REVIEW = "composeReview"
 
 // The action a key press asks for, or NONE.
 //
-// `reviewing` is true only while the card shows Issues to decide on. Esc works
-// from every card, because a summoned overlay that cannot be dismissed from
-// the keyboard is a trap. Availability is the caller's call: an action that is
-// asked for while it is disabled is a no-op there, not a different action.
-function action(event, codes, reviewing) {
+// Esc works from every card, because a summoned overlay that cannot be
+// dismissed from the keyboard is a trap. What it means is the mode's: it
+// leaves the popup, and it leaves Compose review for the Draft behind it.
+// Availability is the caller's call: an action that is asked for while it is
+// disabled is a no-op there, not a different action.
+function action(event, codes, mode) {
   if (!event || !codes) return NONE
 
   var key = event.key
@@ -35,9 +46,14 @@ function action(event, codes, reviewing) {
   var foreign = (modifiers & (codes.alt | codes.meta)) !== 0
   var enter = key === codes.enter || key === codes.returnKey
 
-  if (key === codes.escape) return CLOSE
-  if (!reviewing) return NONE
+  if (key === codes.escape) return mode === MODE_COMPOSE_REVIEW ? BACK : CLOSE
   if (foreign) return NONE
+
+  // Edit mode hands every other key to the text area, so that typing a draft
+  // is typing a draft. Ctrl + Enter is the one key the card keeps.
+  if (mode === MODE_COMPOSE_EDIT) return control && enter ? CHECK : NONE
+
+  if (mode !== MODE_REVIEW && mode !== MODE_COMPOSE_REVIEW) return NONE
 
   if (control) {
     if (enter) return APPLY
@@ -64,6 +80,12 @@ if (typeof module !== "undefined" && module.exports) {
     FOCUS_NEXT: FOCUS_NEXT,
     ACCEPT_ALL: ACCEPT_ALL,
     COPY: COPY,
-    APPLY: APPLY
+    APPLY: APPLY,
+    CHECK: CHECK,
+    BACK: BACK,
+    MODE_IDLE: MODE_IDLE,
+    MODE_REVIEW: MODE_REVIEW,
+    MODE_COMPOSE_EDIT: MODE_COMPOSE_EDIT,
+    MODE_COMPOSE_REVIEW: MODE_COMPOSE_REVIEW
   }
 }

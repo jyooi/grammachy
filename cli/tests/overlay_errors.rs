@@ -87,6 +87,10 @@ fn the_overlay_timeouts_equal_the_adapter_timeouts() {
 }
 
 /// Every `ErrorCode` of `cli/src/envelope.rs`, in its serialised snake_case.
+///
+/// `setup_failed` shares the enum with the Check codes.
+/// A Check never answers it (spec sections 10 and 12).
+/// The overlay has no card for it.
 fn contract_codes() -> Vec<String> {
     let source = read("cli/src/envelope.rs");
     let block = source
@@ -122,7 +126,10 @@ fn contract_codes() -> Vec<String> {
 #[test]
 fn the_overlay_knows_every_code_the_cli_can_emit() {
     let source = read("ui/errors.js");
-    let codes = contract_codes();
+    let codes: Vec<String> = contract_codes()
+        .into_iter()
+        .filter(|code| code != "setup_failed")
+        .collect();
     assert_eq!(codes.len(), 6, "spec section 5.1 fixes six codes");
 
     for code in codes {
