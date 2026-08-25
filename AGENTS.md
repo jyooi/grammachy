@@ -55,17 +55,25 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 - `doctor` reports the install state and the one-line engine diagnosis the `engine_unavailable` card shows.
   `docs/doctor.md` documents its envelope, exit code, and hardware tiers.
   `cli/src/doctor/facts.rs` is the only place that reads the machine, so the report is a pure function of recorded `Facts` and no test reads real hardware.
+- Compose (spec section 9) keeps the Draft in `Overlay.draftText` and nowhere else: no file, no clipboard, no setting.
+  `ui/DraftField.qml` is the text area; it forwards key presses to the overlay's key catcher through `Keys.forwardTo` with `Keys.priority: Keys.BeforeItem`, which is what lets Ctrl + Enter run the Check while every printable key still types.
+  `Overlay.restoreFocus` is the one place that decides whether the Draft or the key catcher holds the keyboard.
+  `ui/format.js` owns both refusals Compose can print, so the wording of the cap has a node test.
+  Chunked checking replaces the body of `Overlay.startComposeCheck` and the second refusal in `format.js`, and nothing else.
 - `manifest.json` version must equal the crate version; `cli/tests/manifest.rs` enforces that.
-  The Check limit lives twice, in `check::MAX_UTF16_UNITS` and in the QML that draws the too-long card; `cli/tests/overlay_limit.rs` keeps the copies equal.
+  Both size limits live twice, in `check::MAX_UTF16_UNITS` and `chunk::MAX_DRAFT_UTF16_UNITS` and in the QML that draws the too-long card and refuses an oversize Draft; `cli/tests/overlay_limit.rs` keeps the copies equal.
 - The Omarchy plugin is the repo root: `manifest.json`, `BarWidget.qml`, `Overlay.qml`, and `ui/`.
-  `Overlay.qml` owns capture, the CLI run, the key map dispatch, the Apply path, the review state, and the settings storage; `ui/QuickCard.qml`, `ui/SettingsView.qml`, `ui/ErrorCard.qml`, and `ui/MarkedText.qml` only draw.
-  `ui/splice.js`, `ui/tokens.js`, `ui/keymap.js`, `ui/settings.js`, and `ui/errors.js` are loaded by QML and by node, so they may use neither's API.
+  `Overlay.qml` owns capture, the CLI run, the key map dispatch, the Apply path, the review state, the Draft, and the settings storage; every file in `ui/` only draws.
+  `root.surface` is `"quick"` or `"compose"` and is what routes a summon (spec section 2); both surfaces share one `phase`, one Check, one review state, and one key map, so a change to either belongs in `Overlay.qml` rather than in a card.
+  `ui/QuickCard.qml` and `ui/ComposeCard.qml` are the two surfaces; `ui/CardHero.qml`, `ui/Inspector.qml`, `ui/ReviewCounts.qml`, `ui/MarkedText.qml`, `ui/ErrorCard.qml`, and `ui/SettingsView.qml` are shared parts, so a change to the hero, the inspector, or the counts reaches both at once.
+  `ui/splice.js`, `ui/tokens.js`, `ui/keymap.js`, `ui/format.js`, `ui/settings.js`, and `ui/errors.js` are loaded by QML and by node, so they may use neither's API.
   Their `*.test.js` siblings run under `node --test`; add a new one to `.github/workflows/ci.yml` and to `docs/dev.md`.
-  `keymap.js` takes the Qt key codes as an argument, which is what lets node run it.
+  `keymap.js` takes the Qt key codes as an argument, which is what lets node run it, and a mode string that says which card the press landed on.
   Anything worth a test belongs in one of those rather than in QML, because the repo has no QML test harness: `Overlay.qml` cannot be instantiated outside the shell's plugin loader, so a standalone Quickshell config hangs on it.
   `ui/*.qml` alone is another matter: a throwaway Quickshell config whose root symlinks `Commons` and `Ui` from `/usr/share/omarchy/shell` draws a card under `QT_QPA_PLATFORM=offscreen`, which is how a layout is checked without the live shell.
   `QuickCard.maxCardHeight` is the whole bound of spec section 6; the card measures its own chrome and gives the rest to the scrolling text, so no part of the layout carries a guessed reserve.
-  `docs/dev.md` is the only route onto a live desktop, including the manual smoke items.
+  `docs/dev.md` is the only route onto a live desktop, including the manual smoke items and the Compose walkthrough.
+  A leaf card does run outside the shell: a scratch Quickshell config whose root directory holds `Commons` and `Ui` symlinks into `/usr/share/omarchy/shell` plus a `ui` symlink into the repo can instantiate `ComposeCard` or `QuickCard` in a `FloatingWindow`, which is the fastest way to see a layout change without installing the plugin.
 - `ui/errors.js` owns the whole route from the stdout of one Check to the card of spec section 8: `readCheck` reads the envelope and `card` builds the title, body, and buttons, so a node test can run a stub binary and read the card back.
   It carries its own copy of the per-engine timeout, because a Check that never answered leaves the shell nothing to read it from; `cli/tests/overlay_errors.rs` keeps that copy, the code list, and the no-re-capture promise of Retry in step.
   A test may never reach a real engine or touch the LanguageTool unit the live shell uses; a stub binary is the seam.
@@ -79,6 +87,7 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 - The `qmllint` on `PATH` is the Qt 5 syntax verifier: it prints nothing and reports a syntax error through its exit status alone.
   Its JavaScript parser also rejects ECMAScript reserved words such as `native` as identifiers, with no message.
   Run `/usr/lib/qt6/bin/qmllint <file>` for line and column; ignore its import and unqualified-access warnings, which the shell's own plugins raise too.
+  Neither `qmllint` resolves `qs.*`, so neither catches a missing `import qs.Ui` or `import qs.Commons`: only loading the file finds that, which is the other reason to run a leaf card in a scratch config.
 
 ## Maintaining this file
 
