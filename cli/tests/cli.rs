@@ -1,7 +1,7 @@
 //! End to end runs of the binary: stdout carries one envelope, stderr carries logs.
 
-use std::io::Write;
-use std::process::{Command, Stdio};
+use std::io::{ErrorKind, Write};
+use std::process::{Child, Command, Stdio};
 
 use serde_json::Value;
 
@@ -19,17 +19,22 @@ fn run(args: &[&str], stdin: &str) -> Run {
         .spawn()
         .expect("the binary runs");
 
-    child
-        .stdin
-        .take()
-        .expect("stdin is piped")
-        .write_all(stdin.as_bytes())
-        .expect("stdin is written");
+    write_stdin(&mut child, stdin.as_bytes());
 
     let output = child.wait_with_output().expect("the binary exits");
     Run {
         status: output.status.code().expect("the binary was not signalled"),
         stdout: String::from_utf8(output.stdout).expect("stdout is UTF-8"),
+    }
+}
+
+/// Clap may reject flags before it reads stdin. The child then closes the pipe.
+fn write_stdin(child: &mut Child, stdin: &[u8]) {
+    let mut pipe = child.stdin.take().expect("stdin is piped");
+    match pipe.write_all(stdin) {
+        Ok(()) => {}
+        Err(error) if error.kind() == ErrorKind::BrokenPipe => {}
+        Err(error) => panic!("stdin is written: {error}"),
     }
 }
 
@@ -118,12 +123,7 @@ fn invalid_utf8_on_stdin_prints_bad_arguments() {
         .stderr(Stdio::piped())
         .spawn()
         .expect("the binary runs");
-    child
-        .stdin
-        .take()
-        .unwrap()
-        .write_all(&[0xff, 0xfe, 0x00])
-        .expect("stdin is written");
+    write_stdin(&mut child, &[0xff, 0xfe, 0x00]);
     let output = child.wait_with_output().expect("the binary exits");
 
     let value: Value = serde_json::from_slice(&output.stdout).expect("stdout is JSON");
