@@ -15,6 +15,8 @@ Terms used in the Grammachy domain. No implementation detail.
 - **Target English**: the English variant the text is checked against. Default en-US.
 - **Depth**: the class of mistake a Check reports. v1 is grammar and spelling only. Style is never reported.
 - **Trigger**: the event that starts a Check. v1 triggers are the hotkey and the Compose window.
-- **Compose window**: the second v1 surface. A full window where the user pastes or types long text and the plugin checks it in chunks. The Panel hands a Selection over the size limit to it.
+- **Compose window**: the second v1 surface. A window where the user pastes or types long text and the plugin checks it in Chunks. The Panel hands a Selection over the size limit to it. Shortened to **Compose** on buttons and in the hotkey name.
+- **Draft**: the text held in the Compose window. It persists between opens until the user clears it.
+- **Chunk**: one slice of a Draft that fits under the Check size limit. A Check of a Draft is one Check per Chunk, and the Issues merge into one list.
 - **Panel**: the popup under the bar widget where Issues are shown as marks on the Selection and Accepted or Skipped.
 - **Settings**: the user's standing choices that shape every Check: Native language, Target English, Engine, and the Apply mode. Changed inside the Panel, kept by the shell.
