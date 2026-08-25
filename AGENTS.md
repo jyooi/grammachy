@@ -40,8 +40,9 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   `--engine openai --model <name>` fills the Models table and does not narrow the Engines table.
   An engine the machine cannot reach is a skipped row, never an error, so a machine without llama.cpp still produces a valid file.
   `cli/src/bench/weights.rs` is the product rule for which models may be recommended (spec section 13.1).
-- `doctor` reports the install state and the one-line engine diagnosis the `engine_unavailable` card shows; `docs/doctor.md` documents its envelope, exit code, and hardware tiers.
-  `cli/src/doctor/facts.rs` is the only place that reads the machine, so the report is a pure function of recorded `Facts` and no test touches real hardware.
+- `doctor` reports the install state and the one-line engine diagnosis the `engine_unavailable` card shows.
+  `docs/doctor.md` documents its envelope, exit code, and hardware tiers.
+  `cli/src/doctor/facts.rs` is the only place that reads the machine, so the report is a pure function of recorded `Facts` and no test reads real hardware.
 - `manifest.json` version must equal the crate version; `cli/tests/manifest.rs` enforces that.
 - The Omarchy plugin is the repo root: `manifest.json`, `BarWidget.qml`, `Overlay.qml`, and `ui/`.
   `Overlay.qml` owns capture, the CLI run, and the review state; `ui/QuickCard.qml` and `ui/MarkedText.qml` only draw.

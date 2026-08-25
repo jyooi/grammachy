@@ -1,11 +1,13 @@
 # `grammachy doctor`
 
 The install check of spec sections 4, 8, 10, and 12.
-It looks at the binary, LanguageTool, llama.cpp, the model file, and the two transient units, and prints one line per piece.
-A missing piece carries the exact command that installs it.
+It checks the binary, LanguageTool, llama.cpp, the model file, and the two transient units.
+It also checks the Java runtime and the local LLM endpoint.
+It prints one line per piece.
+A missing package carries the exact command that installs it.
 
 Doctor never installs anything.
-pacman steps stay manual, so every line is a command the user runs.
+pacman steps stay manual.
 
 ```
 grammachy doctor [--engine <slug>] [--json]
@@ -101,7 +103,8 @@ Check fields:
 | `harper` | `binary` |
 
 The first missing piece in that order is the diagnosis.
-When nothing is missing, the diagnosis says the engine can run and names the address its unit answers on.
+When nothing is missing, the diagnosis says the engine can run.
+For `languagetool` and `openai` it also names the address its unit answers on.
 
 ## Hardware tiers
 
