@@ -1,2 +1,4 @@
 .lavish/
 node_modules/
+cli/target/
+bin/grammachy
