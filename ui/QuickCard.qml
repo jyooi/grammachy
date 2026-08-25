@@ -281,6 +281,7 @@ BorderSurface {
 
       ColumnLayout {
         Layout.fillWidth: true
+        Layout.maximumWidth: layout.width
         Layout.topMargin: Style.spacing.lg
         Layout.bottomMargin: Style.spacing.lg
         visible: root.showsCheck && root.isEmptyResult
