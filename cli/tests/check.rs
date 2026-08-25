@@ -45,10 +45,9 @@ fn an_astral_character_counts_as_two_units() {
 #[test]
 fn text_at_the_limit_passes_validation() {
     let text = text_of_units(MAX_UTF16_UNITS);
-    let envelope = check::run(&text, &CheckOptions::default());
 
-    // The limit is not the failure. Only the missing engine is.
-    assert_eq!(code_of(&envelope), "engine_unavailable");
+    // Validation, not the engine, so no test reaches for a server.
+    assert!(check::validate(&text).is_none());
 }
 
 #[test]
@@ -68,7 +67,7 @@ fn the_last_astral_character_can_cross_the_limit() {
 
     assert_eq!(check::utf16_len(&text), MAX_UTF16_UNITS + 1);
     assert_eq!(
-        code_of(&check::run(&text, &CheckOptions::default())),
+        code_of(&check::validate(&text).expect("the text is too long")),
         "text_too_long"
     );
 }

@@ -10,23 +10,32 @@ use crate::envelope::{Envelope, ErrorCode};
 pub const MAX_UTF16_UNITS: usize = 5_000;
 
 /// Length in UTF-16 code units, the unit the shell indexes with.
-pub fn utf16_len(text: &str) -> usize {
-    text.chars().map(char::len_utf16).sum()
-}
+pub use crate::text::utf16_len;
 
-/// Validate the text, run the engine, and answer exactly one envelope.
-pub fn run(text: &str, options: &CheckOptions) -> Envelope {
+/// The error envelope the text itself earns, before any engine runs.
+pub fn validate(text: &str) -> Option<Envelope> {
     // A selection of only whitespace has nothing to check, so it is empty.
     if text.trim().is_empty() {
-        return Envelope::error(ErrorCode::EmptySelection, "The selection is empty.");
+        return Some(Envelope::error(
+            ErrorCode::EmptySelection,
+            "The selection is empty.",
+        ));
     }
 
     let length = utf16_len(text);
     if length > MAX_UTF16_UNITS {
-        return Envelope::error(
+        return Some(Envelope::error(
             ErrorCode::TextTooLong,
             format!("The selection is {length} units long, over the limit of {MAX_UTF16_UNITS}."),
-        );
+        ));
+    }
+    None
+}
+
+/// Validate the text, run the engine, and answer exactly one envelope.
+pub fn run(text: &str, options: &CheckOptions) -> Envelope {
+    if let Some(envelope) = validate(text) {
+        return envelope;
     }
 
     let engine_slug = options.engine.as_str();

@@ -1,0 +1,96 @@
+{
+  "_note": "Hand-built /v2/check matches for the ordering rules of spec section 5.1. Shaped like a real LanguageTool answer but arranged to cover out-of-order matches, overlaps, a no-op fix, a match with no suggestion, and a style match. The recorded live answer is languagetool-response.json.",
+  "_text": "She bought three book from teh store, and he go home.",
+  "software": { "name": "LanguageTool", "version": "6.6" },
+  "language": { "name": "English (US)", "code": "en-US" },
+  "matches": [
+    {
+      "message": "Possible agreement error. The noun 'go' seems to be a verb here.",
+      "offset": 45,
+      "length": 2,
+      "replacements": [{ "value": "goes" }, { "value": "went" }],
+      "rule": {
+        "id": "PERS_PRONOUN_AGREEMENT",
+        "issueType": "grammar",
+        "category": { "id": "GRAMMAR", "name": "Grammar" }
+      }
+    },
+    {
+      "message": "Possible spelling mistake found.",
+      "offset": 27,
+      "length": 3,
+      "replacements": [{ "value": "the" }, { "value": "ten" }],
+      "rule": {
+        "id": "MORFOLOGIK_RULE_EN_US",
+        "issueType": "misspelling",
+        "category": { "id": "TYPOS", "name": "Possible Typo" }
+      }
+    },
+    {
+      "message": "Possible agreement error. The noun 'book' seems to be countable.",
+      "offset": 17,
+      "length": 4,
+      "replacements": [{ "value": "books" }],
+      "rule": {
+        "id": "CD_NN",
+        "issueType": "grammar",
+        "category": { "id": "GRAMMAR", "name": "Grammar" }
+      }
+    },
+    {
+      "message": "This phrase starts at the same place as the agreement match and reaches further, so it loses to the earlier Issue.",
+      "offset": 17,
+      "length": 9,
+      "replacements": [{ "value": "books from" }],
+      "rule": {
+        "id": "OVERLAPPING_SAME_START",
+        "issueType": "grammar",
+        "category": { "id": "GRAMMAR", "name": "Grammar" }
+      }
+    },
+    {
+      "message": "This match starts inside the typo span, so it loses to the earlier Issue.",
+      "offset": 29,
+      "length": 7,
+      "replacements": [{ "value": "h store" }],
+      "rule": {
+        "id": "OVERLAPPING_LATER_START",
+        "issueType": "grammar",
+        "category": { "id": "GRAMMAR", "name": "Grammar" }
+      }
+    },
+    {
+      "message": "The suggestion is the text that is already there.",
+      "offset": 4,
+      "length": 6,
+      "replacements": [{ "value": "bought" }],
+      "rule": {
+        "id": "NO_OP_FIX",
+        "issueType": "grammar",
+        "category": { "id": "GRAMMAR", "name": "Grammar" }
+      }
+    },
+    {
+      "message": "This rule found something but suggests nothing.",
+      "offset": 11,
+      "length": 5,
+      "replacements": [],
+      "rule": {
+        "id": "NO_SUGGESTION",
+        "issueType": "grammar",
+        "category": { "id": "GRAMMAR", "name": "Grammar" }
+      }
+    },
+    {
+      "message": "Consider a shorter sentence.",
+      "offset": 0,
+      "length": 3,
+      "replacements": [{ "value": "The woman" }],
+      "rule": {
+        "id": "TOO_WORDY",
+        "issueType": "style",
+        "category": { "id": "STYLE", "name": "Style" }
+      }
+    }
+  ]
+}
