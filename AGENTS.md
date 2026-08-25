@@ -69,7 +69,8 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 - `manifest.json` version must equal the crate version; `cli/tests/manifest.rs` enforces that.
   Both size limits live twice, in `check::MAX_UTF16_UNITS` and `chunk::MAX_DRAFT_UTF16_UNITS` and in the QML that draws the too-long card and refuses an oversize Draft; `cli/tests/overlay_limit.rs` keeps the copies equal.
 - The Omarchy plugin is the repo root: `manifest.json`, `BarWidget.qml`, `Overlay.qml`, and `ui/`.
-  `Overlay.qml` owns capture, the CLI run, the key map dispatch, the Apply path, the review state, the Draft, and the settings storage; every file in `ui/` only draws.
+  `Overlay.qml` owns capture, the CLI run, the key map dispatch, the Apply path, the review state, the Draft, and the settings storage.
+  Every QML file in `ui/` only draws.
   `root.surface` is `"quick"` or `"compose"` and is what routes a summon (spec section 2); both surfaces share one `phase`, one Check, one review state, and one key map, so a change to either belongs in `Overlay.qml` rather than in a card.
   `Overlay.keyMode` is where a new `phase` has to be named, or its card silently inherits the review keys.
   `ui/QuickCard.qml` and `ui/ComposeCard.qml` are the two surfaces; `ui/CardHero.qml`, `ui/Inspector.qml`, `ui/ReviewCounts.qml`, `ui/MarkedText.qml`, `ui/ErrorCard.qml`, and `ui/SettingsView.qml` are shared parts, so a change to the hero, the inspector, or the counts reaches both at once.
@@ -81,7 +82,7 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   Offscreen still renders, so `card.grabToImage(function (r) { r.saveToFile(path) })` on a `Timer` that steps a phase and quits at the end gives one PNG per state, which is the cheapest way to actually look at a card.
   `QuickCard.maxCardHeight` is the whole bound of spec section 6; the card measures its own chrome and gives the rest to the scrolling text, so no part of the layout carries a guessed reserve.
   `docs/dev.md` is the only route onto a live desktop, including the manual smoke items and the Compose walkthrough.
-  A plugin folder that is a symlink needs `omarchy restart shell` after a QML edit, not `omarchy-shell shell rescanPlugins`: the watcher does not follow the link, and a rescan leaves an already loaded overlay on the code it started with.
+  A plugin folder that is a symlink reloads as `docs/dev.md` step 4 says.
   A leaf card does run outside the shell: a scratch Quickshell config whose root directory holds `Commons` and `Ui` symlinks into `/usr/share/omarchy/shell` plus a `ui` symlink into the repo can instantiate `ComposeCard` or `QuickCard` in a `FloatingWindow`, which is the fastest way to see a layout change without installing the plugin.
 - `ui/anchor.js` owns both answers the source window of spec section 3 gives: where the quick popup opens (`placeCard`) and where Replace types (`focusCommand`, `isFocused`).
   `Overlay.sourceWindow` is that one recorded fact, read by `hyprctl activewindow -j` before the capture, because the popup window itself takes the answer away.

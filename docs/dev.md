@@ -32,7 +32,7 @@ ln -s /path/to/grammachy ~/.config/omarchy/plugins/io.github.jyooi.grammachy
 ```
 
 The link works, but the shell's file watcher does not follow it.
-After every edit, force the reload by hand with the command in step 4.
+After every QML edit, restart the shell as step 4 says.
 
 ## 2. Build the companion binary
 
@@ -72,8 +72,17 @@ Move it with `omarchy bar move io.github.jyooi.grammachy --section right`.
 
 ## 4. Reload after an edit
 
-A saved file under `~/.config/omarchy/plugins/` reloads by itself.
-Force it when the plugin folder is a link, or when a reload does not seem to happen:
+A saved file under `~/.config/omarchy/plugins/` reloads by itself when the folder is a real clone.
+A plugin folder that is a symlink does not.
+The watcher does not follow the link.
+`omarchy-shell shell rescanPlugins` leaves an already loaded overlay on the code from the first load.
+After a QML edit on a symlink, restart the shell:
+
+```bash
+omarchy restart shell
+```
+
+Use a rescan only when the shell must discover a new plugin:
 
 ```bash
 omarchy-shell shell rescanPlugins
