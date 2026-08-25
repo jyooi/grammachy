@@ -1,6 +1,6 @@
 //! The weights `grammachy setup` downloads for the `openai` engine.
 //!
-//! Spec section 10, step 1: the file lands in
+//! Spec section 10: the file lands in
 //! `~/.local/share/grammachy/models/`, and only when the engine setting is
 //! `openai`. The other two engines need nothing on disk, so the step is skipped
 //! for them and nothing is ever downloaded behind the user's back.

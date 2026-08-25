@@ -160,7 +160,7 @@ impl Setup {
         SetupEnvelope::report("install", steps)
     }
 
-    /// Steps 2 and 3 reversed. The model stays where it is.
+    /// The hotkeys and the menu entry, reversed. The model stays where it is.
     pub fn remove(&self) -> SetupEnvelope {
         let mut steps = Vec::with_capacity(4);
 
@@ -199,7 +199,7 @@ impl Setup {
         SetupEnvelope::report("remove", steps)
     }
 
-    /// Step 1: the weights, and only when the engine setting asks for them.
+    /// The weights, and only when the engine setting asks for them.
     fn model_step(&self, engine: EngineSlug, model_name: &str) -> Result<Step, String> {
         if engine != EngineSlug::Openai {
             return Ok(Step::new(

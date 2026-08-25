@@ -19,7 +19,7 @@ use std::ops::Range;
 /// The comment lead and the indent one file uses for the two markers.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Markers {
-    /// What starts a comment line, such as `#` or `//`.
+    /// What starts a comment line, such as `--` or `//`.
     pub comment: &'static str,
     /// What sits in front of the comment lead, such as the two spaces the menu
     /// extension indents its members by.
@@ -122,7 +122,7 @@ pub fn is_present(content: &str, markers: &Markers) -> bool {
 
 /// The byte range of the block region, or `None` when the file holds none.
 ///
-/// A marker only counts on a line of its own, so a `bindd` line that mentions
+/// A marker only counts on a line of its own, so a binding line that mentions
 /// the words in a payload never matches.
 fn find(content: &str, markers: &Markers) -> Option<Range<usize>> {
     let begin = markers.begin();
