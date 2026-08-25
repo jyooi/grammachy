@@ -5,6 +5,7 @@
 //! shell already handles.
 
 use crate::args::{CheckOptions, EngineSlug};
+use crate::engines::harper::Harper;
 use crate::engines::languagetool::{self, LanguageTool};
 use crate::envelope::Issue;
 
@@ -34,6 +35,7 @@ pub fn resolve(slug: EngineSlug) -> Option<Box<dyn Engine>> {
         EngineSlug::Languagetool => Some(Box::new(LanguageTool::new(
             languagetool::Config::from_env(),
         ))),
-        EngineSlug::Openai | EngineSlug::Harper => None,
+        EngineSlug::Harper => Some(Box::new(Harper::default())),
+        EngineSlug::Openai => None,
     }
 }

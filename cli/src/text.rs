@@ -36,3 +36,20 @@ pub fn utf16_slice(text: &str, start: usize, end: usize) -> Option<&str> {
     let to = byte_index_of_utf16(text, end)?;
     Some(&text[from..to])
 }
+
+/// A prefix table from char index to UTF-16 offset, with one extra entry that
+/// holds the length of the whole text.
+///
+/// Engines that count in `char`s, as `harper-core` does, index into this to
+/// reach the UTF-16 offsets the contract asks for. One table serves every span
+/// of one Check.
+pub fn utf16_offsets(text: &str) -> Vec<usize> {
+    let mut offsets = Vec::with_capacity(text.chars().count() + 1);
+    let mut units = 0;
+    for character in text.chars() {
+        offsets.push(units);
+        units += character.len_utf16();
+    }
+    offsets.push(units);
+    offsets
+}
