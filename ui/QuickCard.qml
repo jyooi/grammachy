@@ -177,8 +177,15 @@ BorderSurface {
       showsAutoReplace: true
       autoReplace: root.autoReplace
       settingsOpen: root.settingsOpen
+      // Spec sections 2 and 6: the header carries the Selection into Compose,
+      // even one under the limit. The too-long card offers the same handover
+      // as its primary button, so the hero stands aside there.
+      actions: root.showsCheck && root.phase !== "toolong"
+        ? [{ id: "compose", text: "Compose", tooltip: "Open the selection in Compose", primary: false }]
+        : []
       onAutoReplaceToggled: root.autoReplaceToggled()
       onSettingsToggled: root.settingsToggled()
+      onActionRequested: root.composeRequested()
     }
 
     SettingsView {

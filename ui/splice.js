@@ -72,11 +72,57 @@ function firstUnits(text, limit) {
   return source.slice(0, end)
 }
 
+// The text of one Chunk, spec section 5.2. The CLI cuts a Chunk on a character
+// boundary, so a plain slice never halves a surrogate pair the way `firstUnits`
+// above has to guard against.
+function chunkText(text, chunk) {
+  var source = text === undefined || text === null ? "" : String(text)
+  if (!chunk) return source
+  return source.slice(chunk.start, chunk.end)
+}
+
+// The Issues of one Chunk in the coordinates of the whole Draft, spec section
+// 9. A Chunk is checked on its own text, so every span the CLI answers is an
+// offset into that Chunk and the Chunk's own `start` is what makes it an offset
+// into the Draft.
+//
+// The Issue is copied rather than moved in place, so the envelope the caller
+// parsed stays what the CLI said.
+function shiftIssues(issues, start) {
+  var offset = Math.round(Number(start) || 0)
+  var list = issues || []
+  var out = []
+  for (var i = 0; i < list.length; i++) {
+    var issue = list[i]
+    var moved = {}
+    for (var key in issue) {
+      if (Object.prototype.hasOwnProperty.call(issue, key)) moved[key] = issue[key]
+    }
+    moved.start = issue.start + offset
+    moved.end = issue.end + offset
+    out.push(moved)
+  }
+  return out
+}
+
+// One Chunk's answer merged into the list the review will show. Chunks tile the
+// Draft in order and never overlap (spec 5.2), so appending keeps the sort by
+// `start` and the no-overlap guarantee of spec 5.1 that the review relies on.
+function mergeIssues(merged, more) {
+  var out = (merged || []).slice()
+  var list = more || []
+  for (var i = 0; i < list.length; i++) out.push(list[i])
+  return out
+}
+
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
     correctedText: correctedText,
     displaySpans: displaySpans,
     verifiedIssues: verifiedIssues,
-    firstUnits: firstUnits
+    firstUnits: firstUnits,
+    chunkText: chunkText,
+    shiftIssues: shiftIssues,
+    mergeIssues: mergeIssues
   }
 }

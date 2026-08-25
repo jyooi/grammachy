@@ -1,5 +1,6 @@
-// Counted sizes as the cards word them, and the one rule that decides whether
-// a Draft may be checked at all. Spec sections 6, 8, and 9.
+// Counted sizes as the cards word them, the one rule that decides whether a
+// Draft may be checked at all, and the progress line of a chunked Check.
+// Spec sections 6, 8, and 9.
 //
 // Loaded twice: by the QML cards through `import "format.js" as Format`, and
 // by `format.test.js` under node. Nothing here may touch a QML or a node API,
@@ -20,25 +21,39 @@ function units(count) {
 
 // Why Compose will not run a Check on this Draft, or "" when it will.
 //
-// `checkLimit` is what one `grammachy check` takes and `cap` is the whole
-// Draft limit of spec section 5.2. Between the two lies the chunked path of
-// spec section 9, which is its own ticket: until it lands, a Draft that needs
-// more than one Chunk is refused here rather than sent to a Check that would
-// answer `text_too_long`.
-function draftRefusal(count, checkLimit, cap) {
+// `cap` is the whole Draft limit of spec section 5.2. Anything under it that
+// needs more than one `grammachy check` is checked in Chunks (spec section 9),
+// so the size of one Check is not a refusal here: only an empty Draft and one
+// over the cap are.
+function draftRefusal(count, cap) {
   if (count <= 0) return "Type or paste a draft, then check it."
   if (count > cap)
     return "The draft is " + units(count) + ", over the cap of " + grouped(cap) + "."
-  if (count > checkLimit)
-    return "The draft is " + units(count) + ", over the " + grouped(checkLimit)
-      + " one check takes. Checking in chunks arrives in a later milestone."
   return ""
+}
+
+// How long a run has taken, as the hero says it. Milliseconds while a Check is
+// still a moment, and seconds once a chunked run has become a wait, because a
+// six-digit millisecond count is not a number anyone reads at a glance.
+function elapsed(milliseconds) {
+  var value = Math.max(0, Math.round(Number(milliseconds) || 0))
+  if (value < 1000) return value + " ms"
+  return (Math.round(value / 100) / 10).toFixed(1) + " s"
+}
+
+// The hero meta line of a chunked Check, spec section 9. `index` is the Chunk
+// being checked, counted from one, so the line reads as progress rather than
+// as how many are already behind it.
+function chunkProgress(index, total, engine, milliseconds) {
+  return "Checking " + index + " of " + total + ", " + engine + ", " + elapsed(milliseconds)
 }
 
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
     grouped: grouped,
     units: units,
-    draftRefusal: draftRefusal
+    draftRefusal: draftRefusal,
+    elapsed: elapsed,
+    chunkProgress: chunkProgress
   }
 }
