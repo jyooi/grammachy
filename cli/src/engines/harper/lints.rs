@@ -16,8 +16,9 @@ use crate::text::utf16_offsets;
 /// Depth in v1 is grammar and spelling only and the user's voice is kept, so
 /// these are reported to nobody (spec section 1). The list mirrors the style
 /// filter of the LanguageTool adapter.
-const STYLE_KINDS: [LintKind; 4] = [
+const STYLE_KINDS: [LintKind; 5] = [
     LintKind::Enhancement,
+    LintKind::Formatting,
     LintKind::Readability,
     LintKind::Redundancy,
     LintKind::Style,
@@ -124,6 +125,7 @@ mod tests {
     fn a_style_lint_is_dropped_and_a_typo_is_spelling() {
         assert_eq!(category_of(LintKind::Style), None);
         assert_eq!(category_of(LintKind::Enhancement), None);
+        assert_eq!(category_of(LintKind::Formatting), None);
         assert_eq!(category_of(LintKind::Spelling), Some(Category::Spelling));
         assert_eq!(category_of(LintKind::Typo), Some(Category::Spelling));
         assert_eq!(category_of(LintKind::Agreement), Some(Category::Grammar));
