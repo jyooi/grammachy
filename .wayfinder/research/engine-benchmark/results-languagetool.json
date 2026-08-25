@@ -1,0 +1,479 @@
+{
+  "engine": "languagetool",
+  "version": "6.6 (standalone, en-US, motherTongue set)",
+  "offline": true,
+  "license": "LGPL-2.1",
+  "cold_start_ms": 872,
+  "rss_kb": 748688,
+  "items": [
+    {
+      "id": "zh-01",
+      "latency_ms": 60,
+      "issues": [],
+      "found": false,
+      "found_precise": false,
+      "fix_match": false,
+      "false_positive": null
+    },
+    {
+      "id": "zh-02",
+      "latency_ms": 51,
+      "issues": [
+        {
+          "start": 17,
+          "end": 21,
+          "original": "book",
+          "fix": "books",
+          "reason": "CD_NN: Possible agreement error. The noun ‘book’ seems to be countable."
+        }
+      ],
+      "found": true,
+      "found_precise": true,
+      "fix_match": true,
+      "false_positive": null
+    },
+    {
+      "id": "zh-03",
+      "latency_ms": 61,
+      "issues": [],
+      "found": false,
+      "found_precise": false,
+      "fix_match": false,
+      "false_positive": null
+    },
+    {
+      "id": "zh-04",
+      "latency_ms": 39,
+      "issues": [],
+      "found": false,
+      "found_precise": false,
+      "fix_match": false,
+      "false_positive": null
+    },
+    {
+      "id": "zh-05",
+      "latency_ms": 44,
+      "issues": [],
+      "found": false,
+      "found_precise": false,
+      "fix_match": false,
+      "false_positive": null
+    },
+    {
+      "id": "zh-06",
+      "latency_ms": 38,
+      "issues": [],
+      "found": false,
+      "found_precise": false,
+      "fix_match": false,
+      "false_positive": null
+    },
+    {
+      "id": "zh-07",
+      "latency_ms": 55,
+      "issues": [],
+      "found": false,
+      "found_precise": false,
+      "fix_match": false,
+      "false_positive": null
+    },
+    {
+      "id": "zh-08",
+      "latency_ms": 42,
+      "issues": [],
+      "found": false,
+      "found_precise": false,
+      "fix_match": false,
+      "false_positive": null
+    },
+    {
+      "id": "ms-01",
+      "latency_ms": 26,
+      "issues": [],
+      "found": false,
+      "found_precise": false,
+      "fix_match": false,
+      "false_positive": null
+    },
+    {
+      "id": "ms-02",
+      "latency_ms": 20,
+      "issues": [
+        {
+          "start": 12,
+          "end": 18,
+          "original": "finish",
+          "fix": "finishes",
+          "reason": "HE_VERB_AGR: The pronoun ‘She’ is usually used with a third-person or a past tense verb."
+        }
+      ],
+      "found": true,
+      "found_precise": true,
+      "fix_match": false,
+      "false_positive": null
+    },
+    {
+      "id": "ms-03",
+      "latency_ms": 17,
+      "issues": [
+        {
+          "start": 30,
+          "end": 35,
+          "original": "since",
+          "fix": "for",
+          "reason": "SINCE_FOR: Did you mean “for”? (‘since’ refers to a point in time, whereas ‘for’ refers to a period)"
+        }
+      ],
+      "found": true,
+      "found_precise": true,
+      "fix_match": true,
+      "false_positive": null
+    },
+    {
+      "id": "ms-04",
+      "latency_ms": 20,
+      "issues": [
+        {
+          "start": 3,
+          "end": 22,
+          "original": "discussed about the",
+          "fix": "discussed the",
+          "reason": "MENTION_ABOUT: Did you mean simply “discussed the”? You do not need the word “about” here."
+        }
+      ],
+      "found": true,
+      "found_precise": true,
+      "fix_match": true,
+      "false_positive": null
+    },
+    {
+      "id": "ms-05",
+      "latency_ms": 19,
+      "issues": [
+        {
+          "start": 6,
+          "end": 17,
+          "original": "more taller",
+          "fix": "taller",
+          "reason": "MOST_COMPARATIVE: Use only “taller” (without ‘more’) when you use the comparative."
+        }
+      ],
+      "found": true,
+      "found_precise": true,
+      "fix_match": true,
+      "false_positive": null
+    },
+    {
+      "id": "ms-06",
+      "latency_ms": 26,
+      "issues": [
+        {
+          "start": 19,
+          "end": 31,
+          "original": "informations",
+          "fix": "information",
+          "reason": "INFORMATIONS: The word ‘informations’ is a legal term. In standard English, the word ‘information’ is a non-count noun."
+        }
+      ],
+      "found": true,
+      "found_precise": true,
+      "fix_match": true,
+      "false_positive": null
+    },
+    {
+      "id": "ms-07",
+      "latency_ms": 23,
+      "issues": [],
+      "found": false,
+      "found_precise": false,
+      "fix_match": false,
+      "false_positive": null
+    },
+    {
+      "id": "ms-08",
+      "latency_ms": 20,
+      "issues": [],
+      "found": false,
+      "found_precise": false,
+      "fix_match": false,
+      "false_positive": null
+    },
+    {
+      "id": "fr-01",
+      "latency_ms": 24,
+      "issues": [
+        {
+          "start": 2,
+          "end": 10,
+          "original": "am agree",
+          "fix": "agree",
+          "reason": "I_AM_VB: The base form of a verb does not usually follow ‘am’. Double-check that the verb is in the correct form."
+        }
+      ],
+      "found": true,
+      "found_precise": true,
+      "fix_match": true,
+      "false_positive": null
+    },
+    {
+      "id": "fr-02",
+      "latency_ms": 25,
+      "issues": [
+        {
+          "start": 2,
+          "end": 23,
+          "original": "have thirty years old",
+          "fix": "are thirty years old",
+          "reason": "HAVE_CD_YEARS: This phrase is used with ‘be’."
+        },
+        {
+          "start": 23,
+          "end": 27,
+          "original": " and",
+          "fix": ", and",
+          "reason": "COMMA_COMPOUND_SENTENCE: Use a comma before ‘and’ if it connects two independent clauses (unless they are closely connected and short)."
+        }
+      ],
+      "found": true,
+      "found_precise": true,
+      "fix_match": false,
+      "false_positive": null
+    },
+    {
+      "id": "fr-03",
+      "latency_ms": 23,
+      "issues": [],
+      "found": false,
+      "found_precise": false,
+      "fix_match": false,
+      "false_positive": null
+    },
+    {
+      "id": "fr-04",
+      "latency_ms": 22,
+      "issues": [
+        {
+          "start": 2,
+          "end": 4,
+          "original": "am",
+          "fix": "have been",
+          "reason": "PERFECT_TENSE_SINCE: The perfect tense may be more appropriate here."
+        },
+        {
+          "start": 10,
+          "end": 15,
+          "original": "since",
+          "fix": "for",
+          "reason": "SINCE_FOR: Did you mean “for”? (‘since’ refers to a point in time, whereas ‘for’ refers to a period)"
+        }
+      ],
+      "found": true,
+      "found_precise": true,
+      "fix_match": false,
+      "false_positive": null
+    },
+    {
+      "id": "fr-05",
+      "latency_ms": 19,
+      "issues": [
+        {
+          "start": 14,
+          "end": 16,
+          "original": "me",
+          "fix": "to me",
+          "reason": "EXPLAIN_TO: The preposition ‘to’ may be missing (explain something to someone)."
+        }
+      ],
+      "found": true,
+      "found_precise": true,
+      "fix_match": true,
+      "false_positive": null
+    },
+    {
+      "id": "fr-06",
+      "latency_ms": 22,
+      "issues": [],
+      "found": false,
+      "found_precise": false,
+      "fix_match": false,
+      "false_positive": null
+    },
+    {
+      "id": "fr-07",
+      "latency_ms": 16,
+      "issues": [],
+      "found": false,
+      "found_precise": false,
+      "fix_match": false,
+      "false_positive": null
+    },
+    {
+      "id": "es-01",
+      "latency_ms": 14,
+      "issues": [],
+      "found": false,
+      "found_precise": false,
+      "fix_match": false,
+      "false_positive": null
+    },
+    {
+      "id": "es-02",
+      "latency_ms": 18,
+      "issues": [],
+      "found": false,
+      "found_precise": false,
+      "fix_match": false,
+      "false_positive": null
+    },
+    {
+      "id": "es-03",
+      "latency_ms": 19,
+      "issues": [],
+      "found": false,
+      "found_precise": false,
+      "fix_match": false,
+      "false_positive": null
+    },
+    {
+      "id": "es-04",
+      "latency_ms": 16,
+      "issues": [],
+      "found": false,
+      "found_precise": false,
+      "fix_match": false,
+      "false_positive": null
+    },
+    {
+      "id": "es-05",
+      "latency_ms": 14,
+      "issues": [],
+      "found": false,
+      "found_precise": false,
+      "fix_match": false,
+      "false_positive": null
+    },
+    {
+      "id": "es-06",
+      "latency_ms": 15,
+      "issues": [],
+      "found": false,
+      "found_precise": false,
+      "fix_match": false,
+      "false_positive": null
+    },
+    {
+      "id": "es-07",
+      "latency_ms": 28,
+      "issues": [],
+      "found": false,
+      "found_precise": false,
+      "fix_match": false,
+      "false_positive": null
+    },
+    {
+      "id": "ok-01",
+      "latency_ms": 27,
+      "issues": [],
+      "found": null,
+      "found_precise": null,
+      "fix_match": null,
+      "false_positive": false
+    },
+    {
+      "id": "ok-02",
+      "latency_ms": 24,
+      "issues": [],
+      "found": null,
+      "found_precise": null,
+      "fix_match": null,
+      "false_positive": false
+    },
+    {
+      "id": "ok-03",
+      "latency_ms": 13,
+      "issues": [],
+      "found": null,
+      "found_precise": null,
+      "fix_match": null,
+      "false_positive": false
+    },
+    {
+      "id": "ok-04",
+      "latency_ms": 16,
+      "issues": [],
+      "found": null,
+      "found_precise": null,
+      "fix_match": null,
+      "false_positive": false
+    },
+    {
+      "id": "ok-05",
+      "latency_ms": 16,
+      "issues": [],
+      "found": null,
+      "found_precise": null,
+      "fix_match": null,
+      "false_positive": false
+    },
+    {
+      "id": "ok-06",
+      "latency_ms": 14,
+      "issues": [],
+      "found": null,
+      "found_precise": null,
+      "fix_match": null,
+      "false_positive": false
+    },
+    {
+      "id": "ok-07",
+      "latency_ms": 19,
+      "issues": [],
+      "found": null,
+      "found_precise": null,
+      "fix_match": null,
+      "false_positive": false
+    },
+    {
+      "id": "ok-08",
+      "latency_ms": 15,
+      "issues": [],
+      "found": null,
+      "found_precise": null,
+      "fix_match": null,
+      "false_positive": false
+    },
+    {
+      "id": "ok-09",
+      "latency_ms": 18,
+      "issues": [],
+      "found": null,
+      "found_precise": null,
+      "fix_match": null,
+      "false_positive": false
+    },
+    {
+      "id": "ok-10",
+      "latency_ms": 16,
+      "issues": [],
+      "found": null,
+      "found_precise": null,
+      "fix_match": null,
+      "false_positive": false
+    }
+  ],
+  "summary": {
+    "error_items": 30,
+    "caught": 10,
+    "caught_precise": 10,
+    "fix_exact": 7,
+    "correct_items": 10,
+    "false_positives": 0,
+    "errors": 0,
+    "latency_p50_ms": 20,
+    "latency_p90_ms": 51,
+    "catch_zh": 1,
+    "catch_ms": 5,
+    "catch_fr": 4,
+    "catch_es": 0
+  }
+}

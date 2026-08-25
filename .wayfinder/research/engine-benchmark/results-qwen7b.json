@@ -1,0 +1,594 @@
+{
+  "engine": "qwen2.5-7b",
+  "version": "Qwen2.5-7B-Instruct Q4_K_M via llama.cpp b10615, 12 threads",
+  "offline": true,
+  "license": "llama.cpp MIT; Qwen2.5 Apache-2.0",
+  "cold_start_ms": 2528,
+  "rss_kb": 7867756,
+  "items": [
+    {
+      "id": "zh-01",
+      "latency_ms": 1629,
+      "issues": [
+        {
+          "start": 10,
+          "end": 14,
+          "original": "I go",
+          "fix": "I went",
+          "reason": "Incorrect tense"
+        }
+      ],
+      "found": true,
+      "found_precise": true,
+      "fix_match": true,
+      "false_positive": null
+    },
+    {
+      "id": "zh-02",
+      "latency_ms": 1720,
+      "issues": [
+        {
+          "start": 11,
+          "end": 21,
+          "original": "three book",
+          "fix": "three books",
+          "reason": "plural"
+        }
+      ],
+      "found": true,
+      "found_precise": true,
+      "fix_match": true,
+      "false_positive": null
+    },
+    {
+      "id": "zh-03",
+      "latency_ms": 1842,
+      "issues": [
+        {
+          "start": 24,
+          "end": 37,
+          "original": "study English",
+          "fix": "studying English",
+          "reason": "verb form"
+        }
+      ],
+      "found": true,
+      "found_precise": true,
+      "fix_match": true,
+      "false_positive": null
+    },
+    {
+      "id": "zh-04",
+      "latency_ms": 1784,
+      "issues": [
+        {
+          "start": 3,
+          "end": 13,
+          "original": "is teacher",
+          "fix": "is a teacher",
+          "reason": "article"
+        }
+      ],
+      "found": true,
+      "found_precise": true,
+      "fix_match": true,
+      "false_positive": null
+    },
+    {
+      "id": "zh-05",
+      "latency_ms": 2363,
+      "issues": [
+        {
+          "start": 0,
+          "end": 28,
+          "original": "Although it was raining, but",
+          "fix": "Although it was raining, ",
+          "reason": "Redundant conjunction"
+        }
+      ],
+      "found": true,
+      "found_precise": false,
+      "fix_match": true,
+      "false_positive": null
+    },
+    {
+      "id": "zh-06",
+      "latency_ms": 1882,
+      "issues": [
+        {
+          "start": 0,
+          "end": 11,
+          "original": "I very like",
+          "fix": "I like",
+          "reason": "Incorrect verb form"
+        }
+      ],
+      "found": true,
+      "found_precise": true,
+      "fix_match": false,
+      "false_positive": null
+    },
+    {
+      "id": "zh-07",
+      "latency_ms": 338,
+      "issues": [],
+      "found": false,
+      "found_precise": false,
+      "fix_match": false,
+      "false_positive": null
+    },
+    {
+      "id": "zh-08",
+      "latency_ms": 1838,
+      "issues": [
+        {
+          "start": 6,
+          "end": 15,
+          "original": "have many",
+          "fix": "are many",
+          "reason": "incorrect verb form"
+        }
+      ],
+      "found": true,
+      "found_precise": true,
+      "fix_match": true,
+      "false_positive": null
+    },
+    {
+      "id": "ms-01",
+      "latency_ms": 5026,
+      "issues": [],
+      "found": false,
+      "found_precise": false,
+      "fix_match": false,
+      "false_positive": null
+    },
+    {
+      "id": "ms-02",
+      "latency_ms": 1816,
+      "issues": [
+        {
+          "start": 4,
+          "end": 18,
+          "original": "already finish",
+          "fix": "has finished",
+          "reason": "Present perfect tense"
+        }
+      ],
+      "found": true,
+      "found_precise": true,
+      "fix_match": false,
+      "false_positive": null
+    },
+    {
+      "id": "ms-03",
+      "latency_ms": 2007,
+      "issues": [
+        {
+          "start": 30,
+          "end": 45,
+          "original": "since ten years",
+          "fix": "for ten years",
+          "reason": "incorrect preposition"
+        }
+      ],
+      "found": true,
+      "found_precise": true,
+      "fix_match": true,
+      "false_positive": null
+    },
+    {
+      "id": "ms-04",
+      "latency_ms": 2038,
+      "issues": [
+        {
+          "start": 3,
+          "end": 18,
+          "original": "discussed about",
+          "fix": "discussed",
+          "reason": "Redundant preposition"
+        }
+      ],
+      "found": true,
+      "found_precise": true,
+      "fix_match": true,
+      "false_positive": null
+    },
+    {
+      "id": "ms-05",
+      "latency_ms": 1890,
+      "issues": [
+        {
+          "start": 6,
+          "end": 17,
+          "original": "more taller",
+          "fix": "taller",
+          "reason": "Redundant comparative"
+        }
+      ],
+      "found": true,
+      "found_precise": true,
+      "fix_match": true,
+      "false_positive": null
+    },
+    {
+      "id": "ms-06",
+      "latency_ms": 1688,
+      "issues": [
+        {
+          "start": 19,
+          "end": 31,
+          "original": "informations",
+          "fix": "information",
+          "reason": "singular form"
+        }
+      ],
+      "found": true,
+      "found_precise": true,
+      "fix_match": true,
+      "false_positive": null
+    },
+    {
+      "id": "ms-07",
+      "latency_ms": 2123,
+      "issues": [
+        {
+          "start": 0,
+          "end": 14,
+          "original": "The car red is",
+          "fix": "The red car is",
+          "reason": "Incorrect article placement"
+        }
+      ],
+      "found": true,
+      "found_precise": true,
+      "fix_match": true,
+      "false_positive": null
+    },
+    {
+      "id": "ms-08",
+      "latency_ms": 1897,
+      "issues": [
+        {
+          "start": 0,
+          "end": 14,
+          "original": "Everybody were",
+          "fix": "Everybody was",
+          "reason": "Subject-verb agreement"
+        }
+      ],
+      "found": true,
+      "found_precise": true,
+      "fix_match": true,
+      "false_positive": null
+    },
+    {
+      "id": "fr-01",
+      "latency_ms": 3086,
+      "issues": [
+        {
+          "start": 2,
+          "end": 10,
+          "original": "am agree",
+          "fix": "agree",
+          "reason": "Verb conjugation"
+        }
+      ],
+      "found": true,
+      "found_precise": true,
+      "fix_match": true,
+      "false_positive": null
+    },
+    {
+      "id": "fr-02",
+      "latency_ms": 3836,
+      "issues": [
+        {
+          "start": 7,
+          "end": 23,
+          "original": "thirty years old",
+          "fix": "thirty years",
+          "reason": "Incorrect use of article"
+        },
+        {
+          "start": 38,
+          "end": 42,
+          "original": "Lyon",
+          "fix": "Lyon, France",
+          "reason": "City name requires country specification"
+        }
+      ],
+      "found": false,
+      "found_precise": false,
+      "fix_match": false,
+      "false_positive": null
+    },
+    {
+      "id": "fr-03",
+      "latency_ms": 1974,
+      "issues": [
+        {
+          "start": 3,
+          "end": 14,
+          "original": "assisted to",
+          "fix": "assisted at",
+          "reason": "incorrect preposition"
+        }
+      ],
+      "found": true,
+      "found_precise": true,
+      "fix_match": false,
+      "false_positive": null
+    },
+    {
+      "id": "fr-04",
+      "latency_ms": 1921,
+      "issues": [
+        {
+          "start": 10,
+          "end": 25,
+          "original": "since two hours",
+          "fix": "for two hours",
+          "reason": "Incorrect preposition"
+        }
+      ],
+      "found": true,
+      "found_precise": false,
+      "fix_match": false,
+      "false_positive": null
+    },
+    {
+      "id": "fr-05",
+      "latency_ms": 1872,
+      "issues": [
+        {
+          "start": 4,
+          "end": 16,
+          "original": "explained me",
+          "fix": "explained to me",
+          "reason": "incorrect preposition"
+        }
+      ],
+      "found": true,
+      "found_precise": true,
+      "fix_match": true,
+      "false_positive": null
+    },
+    {
+      "id": "fr-06",
+      "latency_ms": 1950,
+      "issues": [
+        {
+          "start": 2,
+          "end": 16,
+          "original": "like very much",
+          "fix": "like this",
+          "reason": "Redundant phrase"
+        }
+      ],
+      "found": true,
+      "found_precise": true,
+      "fix_match": false,
+      "false_positive": null
+    },
+    {
+      "id": "fr-07",
+      "latency_ms": 2061,
+      "issues": [
+        {
+          "start": 2,
+          "end": 25,
+          "original": "received an information",
+          "fix": "received the information",
+          "reason": "Article 'the' required"
+        }
+      ],
+      "found": true,
+      "found_precise": false,
+      "fix_match": false,
+      "false_positive": null
+    },
+    {
+      "id": "es-01",
+      "latency_ms": 1614,
+      "issues": [],
+      "found": false,
+      "found_precise": false,
+      "fix_match": false,
+      "false_positive": null
+    },
+    {
+      "id": "es-02",
+      "latency_ms": 2324,
+      "issues": [
+        {
+          "start": 0,
+          "end": 24,
+          "original": "The people in my town is",
+          "fix": "The people in my town are",
+          "reason": "plural subject"
+        }
+      ],
+      "found": true,
+      "found_precise": false,
+      "fix_match": true,
+      "false_positive": null
+    },
+    {
+      "id": "es-03",
+      "latency_ms": 1914,
+      "issues": [
+        {
+          "start": 4,
+          "end": 20,
+          "original": "is very sensible",
+          "fix": "is very sensitive",
+          "reason": "False friend"
+        }
+      ],
+      "found": true,
+      "found_precise": true,
+      "fix_match": true,
+      "false_positive": null
+    },
+    {
+      "id": "es-04",
+      "latency_ms": 273,
+      "issues": [],
+      "found": false,
+      "found_precise": false,
+      "fix_match": false,
+      "false_positive": null
+    },
+    {
+      "id": "es-05",
+      "latency_ms": 1988,
+      "issues": [
+        {
+          "start": 12,
+          "end": 18,
+          "original": "saw to",
+          "fix": "met with",
+          "reason": "Incorrect preposition usage"
+        }
+      ],
+      "found": true,
+      "found_precise": true,
+      "fix_match": false,
+      "false_positive": null
+    },
+    {
+      "id": "es-06",
+      "latency_ms": 1774,
+      "issues": [
+        {
+          "start": 7,
+          "end": 18,
+          "original": "waiting the",
+          "fix": "waiting for",
+          "reason": "preposition"
+        }
+      ],
+      "found": true,
+      "found_precise": true,
+      "fix_match": false,
+      "false_positive": null
+    },
+    {
+      "id": "es-07",
+      "latency_ms": 272,
+      "issues": [],
+      "found": false,
+      "found_precise": false,
+      "fix_match": false,
+      "false_positive": null
+    },
+    {
+      "id": "ok-01",
+      "latency_ms": 273,
+      "issues": [],
+      "found": null,
+      "found_precise": null,
+      "fix_match": null,
+      "false_positive": false
+    },
+    {
+      "id": "ok-02",
+      "latency_ms": 292,
+      "issues": [],
+      "found": null,
+      "found_precise": null,
+      "fix_match": null,
+      "false_positive": false
+    },
+    {
+      "id": "ok-03",
+      "latency_ms": 280,
+      "issues": [],
+      "found": null,
+      "found_precise": null,
+      "fix_match": null,
+      "false_positive": false
+    },
+    {
+      "id": "ok-04",
+      "latency_ms": 311,
+      "issues": [],
+      "found": null,
+      "found_precise": null,
+      "fix_match": null,
+      "false_positive": false
+    },
+    {
+      "id": "ok-05",
+      "latency_ms": 276,
+      "issues": [],
+      "found": null,
+      "found_precise": null,
+      "fix_match": null,
+      "false_positive": false
+    },
+    {
+      "id": "ok-06",
+      "latency_ms": 315,
+      "issues": [],
+      "found": null,
+      "found_precise": null,
+      "fix_match": null,
+      "false_positive": false
+    },
+    {
+      "id": "ok-07",
+      "latency_ms": 278,
+      "issues": [],
+      "found": null,
+      "found_precise": null,
+      "fix_match": null,
+      "false_positive": false
+    },
+    {
+      "id": "ok-08",
+      "latency_ms": 298,
+      "issues": [],
+      "found": null,
+      "found_precise": null,
+      "fix_match": null,
+      "false_positive": false
+    },
+    {
+      "id": "ok-09",
+      "latency_ms": 276,
+      "issues": [],
+      "found": null,
+      "found_precise": null,
+      "fix_match": null,
+      "false_positive": false
+    },
+    {
+      "id": "ok-10",
+      "latency_ms": 276,
+      "issues": [],
+      "found": null,
+      "found_precise": null,
+      "fix_match": null,
+      "false_positive": false
+    }
+  ],
+  "summary": {
+    "error_items": 30,
+    "caught": 24,
+    "caught_precise": 20,
+    "fix_exact": 16,
+    "correct_items": 10,
+    "false_positives": 0,
+    "errors": 0,
+    "issues_per_error_item": 0.87,
+    "noise_issues_dropped": 2,
+    "latency_p50_ms": 1838,
+    "latency_p90_ms": 2363,
+    "catch_zh": 7,
+    "catch_ms": 7,
+    "catch_fr": 6,
+    "catch_es": 4
+  }
+}

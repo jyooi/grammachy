@@ -1,0 +1,696 @@
+{
+  "engine": "qwen2.5-3b",
+  "version": "Qwen2.5-3B-Instruct Q4_K_M via llama.cpp b10615, 12 threads",
+  "offline": true,
+  "license": "llama.cpp MIT; Qwen2.5 Apache-2.0",
+  "cold_start_ms": 1329,
+  "rss_kb": 3656656,
+  "items": [
+    {
+      "id": "zh-01",
+      "latency_ms": 7755,
+      "issues": [
+        {
+          "start": 0,
+          "end": 9,
+          "original": "Yesterday",
+          "fix": "Today",
+          "reason": "Incorrect tense - should be 'Today' for present time"
+        },
+        {
+          "start": 12,
+          "end": 14,
+          "original": "go",
+          "fix": "went",
+          "reason": "Incorrect tense - should be 'went' for past time"
+        },
+        {
+          "start": 15,
+          "end": 17,
+          "original": "to",
+          "fix": "",
+          "reason": "Redundant - 'to' is implied in 'went to'"
+        },
+        {
+          "start": 18,
+          "end": 21,
+          "original": "the",
+          "fix": "",
+          "reason": "Redundant - 'the' is implied in 'went to'"
+        },
+        {
+          "start": 22,
+          "end": 29,
+          "original": "library",
+          "fix": "",
+          "reason": "Redundant - 'library' is implied in 'went to'"
+        },
+        {
+          "start": 30,
+          "end": 34,
+          "original": "with",
+          "fix": "",
+          "reason": "Redundant - 'with' is implied in 'went to'"
+        },
+        {
+          "start": 35,
+          "end": 37,
+          "original": "my",
+          "fix": "",
+          "reason": "Redundant - 'my' is implied in 'went to'"
+        },
+        {
+          "start": 38,
+          "end": 44,
+          "original": "friend",
+          "fix": "",
+          "reason": "Redundant - 'friend' is implied in 'went to'"
+        }
+      ],
+      "found": true,
+      "found_precise": true,
+      "fix_match": true,
+      "false_positive": null
+    },
+    {
+      "id": "zh-02",
+      "latency_ms": 1380,
+      "issues": [
+        {
+          "start": 17,
+          "end": 21,
+          "original": "book",
+          "fix": "books",
+          "reason": "plural"
+        },
+        {
+          "start": 22,
+          "end": 26,
+          "original": "from",
+          "fix": "at",
+          "reason": "false friend"
+        }
+      ],
+      "found": true,
+      "found_precise": true,
+      "fix_match": true,
+      "false_positive": null
+    },
+    {
+      "id": "zh-03",
+      "latency_ms": 2202,
+      "issues": [
+        {
+          "start": 24,
+          "end": 29,
+          "original": "study",
+          "fix": "studying",
+          "reason": "Present participle"
+        }
+      ],
+      "found": true,
+      "found_precise": true,
+      "fix_match": true,
+      "false_positive": null
+    },
+    {
+      "id": "zh-04",
+      "latency_ms": 5291,
+      "issues": [],
+      "found": false,
+      "found_precise": false,
+      "fix_match": false,
+      "false_positive": null
+    },
+    {
+      "id": "zh-05",
+      "latency_ms": 6917,
+      "issues": [
+        {
+          "start": 0,
+          "end": 8,
+          "original": "Although",
+          "fix": "Despite",
+          "reason": "Corrects the beginning of the sentence"
+        },
+        {
+          "start": 9,
+          "end": 11,
+          "original": "it",
+          "fix": "that",
+          "reason": "Needed to introduce the clause"
+        },
+        {
+          "start": 25,
+          "end": 28,
+          "original": "but",
+          "fix": "and",
+          "reason": "Correct conjunction"
+        }
+      ],
+      "found": true,
+      "found_precise": true,
+      "fix_match": false,
+      "false_positive": null
+    },
+    {
+      "id": "zh-06",
+      "latency_ms": 2691,
+      "issues": [
+        {
+          "start": 0,
+          "end": 6,
+          "original": "I very",
+          "fix": "I",
+          "reason": "Articles"
+        }
+      ],
+      "found": true,
+      "found_precise": true,
+      "fix_match": false,
+      "false_positive": null
+    },
+    {
+      "id": "zh-07",
+      "latency_ms": 144,
+      "issues": [],
+      "found": false,
+      "found_precise": false,
+      "fix_match": false,
+      "false_positive": null
+    },
+    {
+      "id": "zh-08",
+      "latency_ms": 4889,
+      "issues": [
+        {
+          "start": 6,
+          "end": 10,
+          "original": "have",
+          "fix": "is",
+          "reason": "Tense agreement"
+        }
+      ],
+      "found": true,
+      "found_precise": true,
+      "fix_match": false,
+      "false_positive": null
+    },
+    {
+      "id": "ms-01",
+      "latency_ms": 2323,
+      "issues": [
+        {
+          "start": 10,
+          "end": 18,
+          "original": "he works",
+          "fix": "his works",
+          "reason": "Article missing before 'works'"
+        }
+      ],
+      "found": false,
+      "found_precise": false,
+      "fix_match": false,
+      "false_positive": null
+    },
+    {
+      "id": "ms-02",
+      "latency_ms": 1781,
+      "issues": [
+        {
+          "start": 12,
+          "end": 18,
+          "original": "finish",
+          "fix": "finished",
+          "reason": "Past tense verb"
+        },
+        {
+          "start": 19,
+          "end": 22,
+          "original": "her",
+          "fix": "hers",
+          "reason": "Possessive pronoun agreement with "
+        }
+      ],
+      "found": true,
+      "found_precise": true,
+      "fix_match": true,
+      "false_positive": null
+    },
+    {
+      "id": "ms-03",
+      "latency_ms": 1221,
+      "issues": [],
+      "found": false,
+      "found_precise": false,
+      "fix_match": false,
+      "false_positive": null
+    },
+    {
+      "id": "ms-04",
+      "latency_ms": 1722,
+      "issues": [
+        {
+          "start": 13,
+          "end": 18,
+          "original": "about",
+          "fix": "on",
+          "reason": "correct preposition for discussion"
+        },
+        {
+          "start": 39,
+          "end": 44,
+          "original": "hours",
+          "fix": "hour",
+          "reason": "singular form of hours for duration of discussion"
+        }
+      ],
+      "found": true,
+      "found_precise": true,
+      "fix_match": false,
+      "false_positive": null
+    },
+    {
+      "id": "ms-05",
+      "latency_ms": 132,
+      "issues": [],
+      "found": false,
+      "found_precise": false,
+      "fix_match": false,
+      "false_positive": null
+    },
+    {
+      "id": "ms-06",
+      "latency_ms": 1784,
+      "issues": [
+        {
+          "start": 19,
+          "end": 31,
+          "original": "informations",
+          "fix": "information",
+          "reason": "singular form of 'information'"
+        },
+        {
+          "start": 32,
+          "end": 34,
+          "original": "by",
+          "fix": "on",
+          "reason": "correct preposition for 'tomorrow'"
+        }
+      ],
+      "found": true,
+      "found_precise": true,
+      "fix_match": true,
+      "false_positive": null
+    },
+    {
+      "id": "ms-07",
+      "latency_ms": 1688,
+      "issues": [
+        {
+          "start": 4,
+          "end": 11,
+          "original": "car red",
+          "fix": "car",
+          "reason": "Missing article before color"
+        },
+        {
+          "start": 12,
+          "end": 14,
+          "original": "is",
+          "fix": "isn't",
+          "reason": "Incorrect tense for negation"
+        }
+      ],
+      "found": true,
+      "found_precise": true,
+      "fix_match": false,
+      "false_positive": null
+    },
+    {
+      "id": "ms-08",
+      "latency_ms": 1505,
+      "issues": [],
+      "found": false,
+      "found_precise": false,
+      "fix_match": false,
+      "false_positive": null
+    },
+    {
+      "id": "fr-01",
+      "latency_ms": 3961,
+      "issues": [],
+      "found": false,
+      "found_precise": false,
+      "fix_match": false,
+      "false_positive": null
+    },
+    {
+      "id": "fr-02",
+      "latency_ms": 2525,
+      "issues": [],
+      "found": false,
+      "found_precise": false,
+      "fix_match": false,
+      "false_positive": null
+    },
+    {
+      "id": "fr-03",
+      "latency_ms": 1587,
+      "issues": [
+        {
+          "start": 0,
+          "end": 14,
+          "original": "He assisted to",
+          "fix": "He attended",
+          "reason": "to -> to"
+        },
+        {
+          "start": 15,
+          "end": 18,
+          "original": "the",
+          "fix": "a",
+          "reason": "the -> a"
+        }
+      ],
+      "found": true,
+      "found_precise": true,
+      "fix_match": true,
+      "false_positive": null
+    },
+    {
+      "id": "fr-04",
+      "latency_ms": 1544,
+      "issues": [
+        {
+          "start": 20,
+          "end": 25,
+          "original": "hours",
+          "fix": "hour",
+          "reason": "singular form of hours"
+        }
+      ],
+      "found": false,
+      "found_precise": false,
+      "fix_match": false,
+      "false_positive": null
+    },
+    {
+      "id": "fr-05",
+      "latency_ms": 1109,
+      "issues": [
+        {
+          "start": 14,
+          "end": 16,
+          "original": "me",
+          "fix": "her",
+          "reason": "Incorrect pronoun usage. The correct pronoun is her."
+        }
+      ],
+      "found": true,
+      "found_precise": true,
+      "fix_match": false,
+      "false_positive": null
+    },
+    {
+      "id": "fr-06",
+      "latency_ms": 1935,
+      "issues": [
+        {
+          "start": 7,
+          "end": 11,
+          "original": "very",
+          "fix": "much",
+          "reason": "Too many words, use 'much' instead of 'very much'"
+        },
+        {
+          "start": 12,
+          "end": 16,
+          "original": "much",
+          "fix": "",
+          "reason": "Redundant, remove 'much'"
+        }
+      ],
+      "found": true,
+      "found_precise": true,
+      "fix_match": false,
+      "false_positive": null
+    },
+    {
+      "id": "fr-07",
+      "latency_ms": 1995,
+      "issues": [
+        {
+          "start": 36,
+          "end": 44,
+          "original": "schedule",
+          "fix": "schedules",
+          "reason": "Plural form of 'schedule' is 'schedules'"
+        }
+      ],
+      "found": false,
+      "found_precise": false,
+      "fix_match": false,
+      "false_positive": null
+    },
+    {
+      "id": "es-01",
+      "latency_ms": 2366,
+      "issues": [
+        {
+          "start": 8,
+          "end": 20,
+          "original": "twenty years",
+          "fix": "twenty years old",
+          "reason": "missing age"
+        },
+        {
+          "start": 25,
+          "end": 32,
+          "original": "studies",
+          "fix": "studied",
+          "reason": "past tense agreement with years old"
+        }
+      ],
+      "found": true,
+      "found_precise": true,
+      "fix_match": false,
+      "false_positive": null
+    },
+    {
+      "id": "es-02",
+      "latency_ms": 2752,
+      "issues": [
+        {
+          "start": 22,
+          "end": 24,
+          "original": "is",
+          "fix": "are",
+          "reason": "Subject-Verb Agreement"
+        }
+      ],
+      "found": true,
+      "found_precise": true,
+      "fix_match": true,
+      "false_positive": null
+    },
+    {
+      "id": "es-03",
+      "latency_ms": 1432,
+      "issues": [
+        {
+          "start": 12,
+          "end": 20,
+          "original": "sensible",
+          "fix": "sensitive",
+          "reason": "English adjective for 'sensible' is 'sensitive' when referring to being aware of criticism."
+        }
+      ],
+      "found": true,
+      "found_precise": true,
+      "fix_match": true,
+      "false_positive": null
+    },
+    {
+      "id": "es-04",
+      "latency_ms": 2111,
+      "issues": [
+        {
+          "start": 3,
+          "end": 10,
+          "original": "raining",
+          "fix": "rain",
+          "reason": "Present tense of rain"
+        },
+        {
+          "start": 4,
+          "end": 5,
+          "original": "a",
+          "fix": "the",
+          "reason": "False friend, 'a' is used in Spanish but 'the' is correct in this context"
+        }
+      ],
+      "found": false,
+      "found_precise": false,
+      "fix_match": false,
+      "false_positive": null
+    },
+    {
+      "id": "es-05",
+      "latency_ms": 2220,
+      "issues": [
+        {
+          "start": 16,
+          "end": 18,
+          "original": "to",
+          "fix": "at",
+          "reason": "Preposition agreement with the object of the preposition"
+        },
+        {
+          "start": 19,
+          "end": 21,
+          "original": "my",
+          "fix": "his",
+          "reason": "False friend - 'my' is not used with 'cousin' in this context"
+        }
+      ],
+      "found": true,
+      "found_precise": true,
+      "fix_match": false,
+      "false_positive": null
+    },
+    {
+      "id": "es-06",
+      "latency_ms": 2070,
+      "issues": [
+        {
+          "start": 15,
+          "end": 18,
+          "original": "the",
+          "fix": "for",
+          "reason": "Preposition agreement"
+        }
+      ],
+      "found": false,
+      "found_precise": false,
+      "fix_match": false,
+      "false_positive": null
+    },
+    {
+      "id": "es-07",
+      "latency_ms": 1153,
+      "issues": [],
+      "found": false,
+      "found_precise": false,
+      "fix_match": false,
+      "false_positive": null
+    },
+    {
+      "id": "ok-01",
+      "latency_ms": 130,
+      "issues": [],
+      "found": null,
+      "found_precise": null,
+      "fix_match": null,
+      "false_positive": false
+    },
+    {
+      "id": "ok-02",
+      "latency_ms": 135,
+      "issues": [],
+      "found": null,
+      "found_precise": null,
+      "fix_match": null,
+      "false_positive": false
+    },
+    {
+      "id": "ok-03",
+      "latency_ms": 131,
+      "issues": [],
+      "found": null,
+      "found_precise": null,
+      "fix_match": null,
+      "false_positive": false
+    },
+    {
+      "id": "ok-04",
+      "latency_ms": 143,
+      "issues": [],
+      "found": null,
+      "found_precise": null,
+      "fix_match": null,
+      "false_positive": false
+    },
+    {
+      "id": "ok-05",
+      "latency_ms": 131,
+      "issues": [],
+      "found": null,
+      "found_precise": null,
+      "fix_match": null,
+      "false_positive": false
+    },
+    {
+      "id": "ok-06",
+      "latency_ms": 143,
+      "issues": [],
+      "found": null,
+      "found_precise": null,
+      "fix_match": null,
+      "false_positive": false
+    },
+    {
+      "id": "ok-07",
+      "latency_ms": 131,
+      "issues": [],
+      "found": null,
+      "found_precise": null,
+      "fix_match": null,
+      "false_positive": false
+    },
+    {
+      "id": "ok-08",
+      "latency_ms": 139,
+      "issues": [],
+      "found": null,
+      "found_precise": null,
+      "fix_match": null,
+      "false_positive": false
+    },
+    {
+      "id": "ok-09",
+      "latency_ms": 130,
+      "issues": [],
+      "found": null,
+      "found_precise": null,
+      "fix_match": null,
+      "false_positive": false
+    },
+    {
+      "id": "ok-10",
+      "latency_ms": 128,
+      "issues": [],
+      "found": null,
+      "found_precise": null,
+      "fix_match": null,
+      "false_positive": false
+    }
+  ],
+  "summary": {
+    "error_items": 30,
+    "caught": 17,
+    "caught_precise": 17,
+    "fix_exact": 8,
+    "correct_items": 10,
+    "false_positives": 0,
+    "errors": 0,
+    "issues_per_error_item": 1.37,
+    "noise_issues_dropped": 42,
+    "latency_p50_ms": 1688,
+    "latency_p90_ms": 4889,
+    "catch_zh": 6,
+    "catch_ms": 4,
+    "catch_fr": 3,
+    "catch_es": 4
+  }
+}
