@@ -28,5 +28,5 @@ Terms used in the Grammachy domain. No implementation detail.
 - **Exact fix**: a Check whose Corrected text, with every Fix Accepted, equals the corrected sentence the eval item expects.
 - **Style creep**: an Issue that pairs with no Edit on an item that has Edits. Measures how far an Engine strays past Depth.
 - **Valid Check**: a Check that returned a result. A Check that returned an error or timed out is invalid and counts as finding nothing.
-- **Eval set**: the sentences with known mistakes that a benchmark ranks Engines against. They are drawn from a licensed learner corpus that is fetched at benchmark time and never committed. They stand beside the **Fixture**, the hand-written sentences committed with the code.
-- **Record file**: the readable, per-sentence output of one benchmark run, kept only on the machine that ran it. It is the one place the Eval set text appears beside an Engine's answer.
+- **Eval set**: the 365 sentences with known mistakes that a benchmark ranks models against. Most of them come from a licensed learner corpus that the benchmark fetches at run time and never commits. The rest is the committed 40-item **Fixture**. It stands beside the Fixture and the Chunk fixture, which are regression gates rather than rankings.
+- **Record file**: the readable, per-sentence output of one benchmark run, kept only on the machine that ran it. It is the one place the fetched Eval set sentences appear beside an Engine's answer.

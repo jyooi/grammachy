@@ -3,7 +3,7 @@
 Settled on the evals map [HUF-202](https://linear.app/huffman/issue/HUF-202) between 2026-08-25 and 2026-08-26.
 Each section names the ticket that holds its detail.
 This spec fixes the eval set, the metrics, the `bench` runner, the `openrouter` cloud engine, the local engine changes the pilot forced, the model shortlist, and the milestones.
-It amends `docs/spec/v1.md` sections 1, 4, 5.2, 6, 7, 10, and 13.1 as stated in section 10.
+It amends `docs/spec/v1.md` sections 1, 4, 5.2, 6, 7, 10, 11, and 13.1 as stated in section 10.
 
 ## 1. Purpose and the two sets
 
@@ -237,6 +237,7 @@ Out: Muse Glimmer (16.8 GB, over the tier and the device), LFM2.5 (restricted li
 - Section 6: the too-long card fires at the selected engine's limit.
 - Section 7: `localThinking`, `openrouterModel`, `cloudConsent`; the dropdown label.
 - Section 10: `setup --openrouter-key` joins the subcommand list and writes the key file; `setup --remove` deletes it.
+- Section 11: the layout tree gains `spec/evals.md`, the two ADRs, `LICENSE`, and the `openrouter` engine.
 - Section 13.1: replaced by a pointer to this spec for sets, metrics, tables, flags, and recommendation rules; the regression rule sentence stays.
 - `CONTEXT.md`: Check size limit belongs to the Engine; terms Edit, Pair, Exact fix, Style creep, Valid Check, Eval set, Record file, Cloud engine, Consent (from the glossary branches).
 
