@@ -20,3 +20,5 @@ Terms used in the Grammachy domain. No implementation detail.
 - **Chunk**: one slice of a Draft that fits under the Check size limit. A Check of a Draft is one Check per Chunk, and the Issues merge into one list.
 - **Panel**: the popup where Issues are shown as marks on the Selection and Accepted or Skipped.
 - **Settings**: the user's standing choices that shape every Check: Native language, Target English, Engine, and the Apply mode. Changed inside the Panel, kept by the shell.
+- **Eval set**: the sentences with known mistakes that a benchmark scores an Engine against. Two kinds: the **Fixture**, hand-written sentences committed with the code, and the **Corpus set**, sentences drawn from a licensed learner corpus that is fetched at benchmark time and never committed.
+- **Record file**: the readable, per-sentence output of one benchmark run, kept only on the machine that ran it. It is the one place the Corpus set text appears beside an Engine's answer.
