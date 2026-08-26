@@ -4,10 +4,13 @@
 //! non-overlapping, and indexed in UTF-16 code units. Whole paragraphs pack
 //! greedily up to the Check size limit, an oversize paragraph splits at
 //! sentence ends, and an oversize sentence takes a hard cut at the limit.
+//!
+//! The limit is the selected Engine's, not one fixed number, so the Chunks a
+//! Draft yields depend on the engine the Check will run on (spec section 4).
 
 use serde::Serialize;
 
-use crate::check::{utf16_len, MAX_UTF16_UNITS};
+use crate::check::utf16_len;
 use crate::envelope::{CheckError, ErrorBody, ErrorCode, CONTRACT_VERSION};
 
 /// The size limit of one Draft, in UTF-16 code units (spec section 5.2).
@@ -67,7 +70,10 @@ impl ChunkEnvelope {
 }
 
 /// Validate the Draft and answer exactly one envelope.
-pub fn run(text: &str) -> ChunkEnvelope {
+///
+/// `limit` is the Check size limit of the selected Engine, which
+/// [`crate::args::EngineSlug::check_limit_utf16`] owns.
+pub fn run(text: &str, limit: usize) -> ChunkEnvelope {
     if text.trim().is_empty() {
         return ChunkEnvelope::error(ErrorCode::EmptySelection, "The Draft is empty.");
     }
@@ -80,12 +86,12 @@ pub fn run(text: &str) -> ChunkEnvelope {
         );
     }
 
-    ChunkEnvelope::chunks(chunks_of(text))
+    ChunkEnvelope::chunks(chunks_of(text, limit))
 }
 
-/// The Chunks of `text`, in UTF-16 code units.
-pub fn chunks_of(text: &str) -> Vec<Chunk> {
-    let ranges = pack(text, units(text));
+/// The Chunks of `text`, in UTF-16 code units, each at most `limit` long.
+pub fn chunks_of(text: &str, limit: usize) -> Vec<Chunk> {
+    let ranges = pack(text, units(text, limit), limit);
 
     let mut chunks = Vec::with_capacity(ranges.len());
     let mut start = 0;
@@ -101,18 +107,18 @@ pub fn chunks_of(text: &str) -> Vec<Chunk> {
 ///
 /// Every unit that fits stays whole. A paragraph over the limit becomes its
 /// sentences, and a sentence over the limit becomes hard cuts at the limit.
-fn units(text: &str) -> Vec<(usize, usize)> {
+fn units(text: &str, limit: usize) -> Vec<(usize, usize)> {
     let mut units = Vec::new();
     for paragraph in paragraphs(text) {
-        if fits(text, paragraph) {
+        if fits(text, paragraph, limit) {
             units.push(paragraph);
             continue;
         }
         for sentence in sentences(text, paragraph) {
-            if fits(text, sentence) {
+            if fits(text, sentence, limit) {
                 units.push(sentence);
             } else {
-                units.extend(hard_cuts(text, sentence));
+                units.extend(hard_cuts(text, sentence, limit));
             }
         }
     }
@@ -120,14 +126,14 @@ fn units(text: &str) -> Vec<(usize, usize)> {
 }
 
 /// Pack the units greedily, up to the limit per Chunk.
-fn pack(text: &str, units: Vec<(usize, usize)>) -> Vec<(usize, usize)> {
+fn pack(text: &str, units: Vec<(usize, usize)>, limit: usize) -> Vec<(usize, usize)> {
     let mut packed: Vec<(usize, usize)> = Vec::new();
     let mut filled = 0;
 
     for unit in units {
         let length = utf16_len(&text[unit.0..unit.1]);
         match packed.last_mut() {
-            Some(open) if filled + length <= MAX_UTF16_UNITS => {
+            Some(open) if filled + length <= limit => {
                 open.1 = unit.1;
                 filled += length;
             }
@@ -140,8 +146,8 @@ fn pack(text: &str, units: Vec<(usize, usize)>) -> Vec<(usize, usize)> {
     packed
 }
 
-fn fits(text: &str, range: (usize, usize)) -> bool {
-    utf16_len(&text[range.0..range.1]) <= MAX_UTF16_UNITS
+fn fits(text: &str, range: (usize, usize), limit: usize) -> bool {
+    utf16_len(&text[range.0..range.1]) <= limit
 }
 
 /// The paragraphs of `text` as byte ranges, each carrying its own trailing
@@ -251,15 +257,15 @@ fn is_closing_quote(c: char) -> bool {
 }
 
 /// Cut one oversize sentence at the limit, never inside a character.
-fn hard_cuts(text: &str, range: (usize, usize)) -> Vec<(usize, usize)> {
+fn hard_cuts(text: &str, range: (usize, usize), limit: usize) -> Vec<(usize, usize)> {
     let mut cuts = Vec::new();
     let mut start = range.0;
 
-    while !fits(text, (start, range.1)) {
+    while !fits(text, (start, range.1), limit) {
         let mut units = 0;
         let mut end = start;
         for (offset, c) in text[start..range.1].char_indices() {
-            if units + c.len_utf16() > MAX_UTF16_UNITS {
+            if units + c.len_utf16() > limit {
                 break;
             }
             units += c.len_utf16();
@@ -278,6 +284,11 @@ fn hard_cuts(text: &str, range: (usize, usize)) -> Vec<(usize, usize)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::args::EngineSlug;
+
+    /// The limit of the default engine, which every case here packs to unless
+    /// it names the local engine's smaller one.
+    const LIMIT: usize = EngineSlug::Languagetool.check_limit_utf16();
 
     fn text_of(text: &str, chunk: Chunk) -> String {
         let units: Vec<u16> = text.encode_utf16().collect();
@@ -288,7 +299,7 @@ mod tests {
     fn short_text_is_one_chunk() {
         let text = "One paragraph.\n\nAnother paragraph.";
         assert_eq!(
-            chunks_of(text),
+            chunks_of(text, LIMIT),
             vec![Chunk {
                 start: 0,
                 end: utf16_len(text)
@@ -303,7 +314,7 @@ mod tests {
         let paragraph = "a".repeat(1_998);
         let text = format!("{paragraph}\n\n{paragraph}\n\n{paragraph}");
 
-        let chunks = chunks_of(&text);
+        let chunks = chunks_of(&text, LIMIT);
         assert_eq!(chunks.len(), 2);
         assert_eq!(
             chunks[0],
@@ -321,7 +332,7 @@ mod tests {
         let sentence = format!("{}. ", "a".repeat(1_998));
         let text = sentence.repeat(4);
 
-        let chunks = chunks_of(&text);
+        let chunks = chunks_of(&text, LIMIT);
         assert_eq!(chunks.len(), 2);
         assert_eq!(
             chunks[0],
@@ -338,7 +349,7 @@ mod tests {
         let quoted = format!("\"{}?\" ", "a".repeat(1_996));
         let text = quoted.repeat(4);
 
-        let chunks = chunks_of(&text);
+        let chunks = chunks_of(&text, LIMIT);
         assert_eq!(chunks.len(), 2);
         assert_eq!(text_of(&text, chunks[0]), quoted.repeat(2));
         assert!(text_of(&text, chunks[1]).starts_with('"'));
@@ -348,7 +359,7 @@ mod tests {
     fn a_period_inside_a_word_is_not_a_sentence_end() {
         let text = format!("{}.{} ", "a".repeat(3_000), "b".repeat(3_000));
 
-        let chunks = chunks_of(&text);
+        let chunks = chunks_of(&text, LIMIT);
         assert_eq!(
             chunks[0],
             Chunk {
@@ -362,7 +373,7 @@ mod tests {
     fn a_sentence_over_the_limit_is_a_hard_cut_at_the_limit() {
         let text = format!("{}. ", "a".repeat(11_000));
 
-        let chunks = chunks_of(&text);
+        let chunks = chunks_of(&text, LIMIT);
         assert_eq!(
             chunks,
             vec![
@@ -388,7 +399,7 @@ mod tests {
         // when one single-unit character leads the text.
         let text = format!("a{}", "\u{1F600}".repeat(4_000));
 
-        let chunks = chunks_of(&text);
+        let chunks = chunks_of(&text, LIMIT);
         assert_eq!(
             chunks[0],
             Chunk {
@@ -404,7 +415,7 @@ mod tests {
         let paragraph = "a".repeat(1_998);
         let text = format!("{paragraph}\r\n\r\n{paragraph}\r\n\r\n{paragraph}");
 
-        let chunks = chunks_of(&text);
+        let chunks = chunks_of(&text, LIMIT);
         assert_eq!(chunks.len(), 2);
         assert_eq!(
             chunks[0],
@@ -418,7 +429,7 @@ mod tests {
     #[test]
     fn empty_stdin_answers_empty_selection() {
         assert_eq!(
-            run("").to_json(),
+            run("", LIMIT).to_json(),
             r#"{"contractVersion":1,"error":{"code":"empty_selection","message":"The Draft is empty."}}"#
         );
     }
@@ -426,11 +437,25 @@ mod tests {
     #[test]
     fn a_draft_over_the_draft_limit_answers_text_too_long() {
         let over = "a".repeat(MAX_DRAFT_UTF16_UNITS + 1);
-        assert!(matches!(run(&over), ChunkEnvelope::Error(_)));
-        assert_eq!(run(&over).exit_code(), 1);
+        assert!(matches!(run(&over, LIMIT), ChunkEnvelope::Error(_)));
+        assert_eq!(run(&over, LIMIT).exit_code(), 1);
 
         let at_limit = "a".repeat(MAX_DRAFT_UTF16_UNITS);
-        assert!(matches!(run(&at_limit), ChunkEnvelope::Chunks(_)));
-        assert_eq!(run(&at_limit).exit_code(), 0);
+        assert!(matches!(run(&at_limit, LIMIT), ChunkEnvelope::Chunks(_)));
+        assert_eq!(run(&at_limit, LIMIT).exit_code(), 0);
+    }
+
+    /// The local engine reads 2,000 units, so the same Draft yields more, and
+    /// smaller, Chunks than on any other engine (spec section 4).
+    #[test]
+    fn the_local_engine_packs_to_its_own_smaller_limit() {
+        let local = EngineSlug::Openai.check_limit_utf16();
+        let text = "a".repeat(20_000);
+
+        let chunks = chunks_of(&text, local);
+        assert_eq!(chunks.len(), 10);
+        assert!(chunks.iter().all(|chunk| chunk.end - chunk.start <= local));
+
+        assert_eq!(chunks_of(&text, LIMIT).len(), 4);
     }
 }

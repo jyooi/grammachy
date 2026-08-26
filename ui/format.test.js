@@ -6,10 +6,13 @@ const test = require("node:test")
 const assert = require("node:assert/strict")
 
 const Format = require("./format.js")
+const Splice = require("./splice.js")
+const Limits = require("./limits.js")
 
 // The two limits of the CLI. `cli/tests/overlay_limit.rs` keeps the QML copies
-// of these equal to `check::MAX_UTF16_UNITS` and `chunk::MAX_DRAFT_UTF16_UNITS`.
-const CHECK_LIMIT = 5000
+// of these equal to `EngineSlug::check_limit_utf16` and
+// `chunk::MAX_DRAFT_UTF16_UNITS`.
+const CHECK_LIMIT = Limits.checkLimit("languagetool")
 const CAP = 50000
 
 test("a size over a thousand is grouped, so it can be read at a glance", () => {
@@ -48,6 +51,41 @@ test("a Draft over one Chunk is checked in chunks rather than refused", () => {
   assert.equal(Format.draftRefusal(CHECK_LIMIT + 1, CAP), "")
   assert.equal(Format.draftRefusal(20000, CAP), "")
   assert.equal(Format.draftRefusal(CAP, CAP), "")
+})
+
+// ---------------------------------------------------- the first-N note
+//
+// The note names the text the Check ran on, never the limit it was cut to. The
+// limit belongs to the Engine (spec section 4) and the gear is on the hero
+// while the answer is on screen, so a limit read after the Check can name a
+// number no Check ever used.
+
+test("the first-N note names the text that was checked and the whole selection", () => {
+  assert.equal(Format.truncatedNote(5000, 6000), "First 5,000 of 6,000 units checked")
+})
+
+test("the first-N note follows the cut rather than the limit it was cut to", () => {
+  // A capture whose unit at the limit is the high half of a surrogate pair, so
+  // `firstUnits` backs off one unit to keep the character whole.
+  const capture = "a".repeat(CHECK_LIMIT - 1) + "\u{1F600}" + "b".repeat(10)
+  const checked = Splice.firstUnits(capture, CHECK_LIMIT)
+
+  assert.equal(checked.length, CHECK_LIMIT - 1)
+  assert.equal(
+    Format.truncatedNote(checked.length, capture.length),
+    "First 4,999 of " + Format.units(capture.length) + " checked")
+})
+
+test("the note of a Check stays what it was when the Engine setting moves", () => {
+  const capture = "a".repeat(6000)
+  // The Check ran on the default engine's limit.
+  const checked = Splice.firstUnits(capture, Limits.checkLimit("languagetool"))
+  const note = Format.truncatedNote(checked.length, capture.length)
+
+  assert.equal(note, "First 5,000 of 6,000 units checked")
+  // The reader then picks the local engine, whose limit is another number.
+  assert.notEqual(Limits.checkLimit("openai"), checked.length)
+  assert.equal(Format.truncatedNote(checked.length, capture.length), note)
 })
 
 // ------------------------------------------------------- the progress line

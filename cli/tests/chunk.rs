@@ -1,21 +1,41 @@
 //! `grammachy chunk` end to end, plus the tiling property over varied Drafts.
 
 use std::io::{ErrorKind, Write};
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 
+use grammachy::args::EngineSlug;
 use grammachy::chunk::{chunks_of, MAX_DRAFT_UTF16_UNITS};
 use serde_json::Value;
 
-/// The size limit of one Chunk, in UTF-16 code units (spec section 5.2).
-const MAX_CHUNK_UTF16_UNITS: usize = 5_000;
+/// The size limit of one Chunk on the default engine, in UTF-16 code units
+/// (spec sections 4 and 5.2).
+const MAX_CHUNK_UTF16_UNITS: usize = EngineSlug::Languagetool.check_limit_utf16();
+
+/// The same limit on the local LLM engine, which reads less per Check.
+const LOCAL_CHUNK_UTF16_UNITS: usize = EngineSlug::Openai.check_limit_utf16();
 
 struct Run {
     status: i32,
     stdout: String,
 }
 
+/// A directory of this test binary, removed with the target directory.
+fn scratch_dir() -> PathBuf {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("chunk-settings");
+    std::fs::create_dir_all(&dir).expect("the scratch directory is created");
+    dir
+}
+
 fn run(args: &[&str], stdin: &str) -> Run {
+    // `chunk` resolves the engine the way `check` does, so it reads the
+    // Settings entry. The path below does not exist, which keeps every run on
+    // the built-in defaults and off the developer's real file (spec section 7).
     let mut child = Command::new(env!("CARGO_BIN_EXE_grammachy"))
+        .env(
+            "GRAMMACHY_SHELL_JSON",
+            scratch_dir().join("no-such-shell.json"),
+        )
         .args(args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -90,6 +110,75 @@ fn a_draft_at_the_limit_succeeds_and_one_unit_over_is_text_too_long() {
     assert_eq!(envelope(&over)["error"]["code"], "text_too_long");
 }
 
+/// Spec section 4: the local engine packs to 2,000 units, so a 20,000-unit
+/// Draft is ten Chunks rather than four.
+#[test]
+fn the_local_engine_packs_a_twenty_thousand_unit_draft_into_ten_chunks() {
+    let draft = "a".repeat(20_000);
+
+    let local = run(&["chunk", "--engine", "openai"], &draft);
+    assert_eq!(local.status, 0);
+    let chunks = envelope(&local)["chunks"]
+        .as_array()
+        .expect("chunks is an array")
+        .clone();
+    assert_eq!(chunks.len(), 10);
+    for chunk in &chunks {
+        let span = chunk["end"].as_u64().unwrap() - chunk["start"].as_u64().unwrap();
+        assert!(
+            span <= LOCAL_CHUNK_UTF16_UNITS as u64,
+            "a Chunk fits one Check"
+        );
+    }
+
+    for slug in ["languagetool", "harper"] {
+        let wide = run(&["chunk", "--engine", slug], &draft);
+        assert_eq!(wide.status, 0);
+        assert_eq!(
+            envelope(&wide)["chunks"]
+                .as_array()
+                .expect("chunks is an array")
+                .len(),
+            4,
+            "{slug} packs to its own wider limit"
+        );
+    }
+}
+
+/// The flag is the caller's choice of limit, and the limits it names are the
+/// ones the CLI enforces for a Check.
+#[test]
+fn the_engine_flag_packs_to_that_engine_limit() {
+    for slug in [
+        EngineSlug::Openai,
+        EngineSlug::Languagetool,
+        EngineSlug::Harper,
+    ] {
+        let limit = slug.check_limit_utf16();
+        let draft = "a".repeat(limit + 1);
+        let result = run(&["chunk", "--engine", slug.as_str()], &draft);
+
+        assert_eq!(result.status, 0);
+        assert_eq!(
+            envelope(&result)["chunks"],
+            serde_json::json!([
+                {"start": 0, "end": limit},
+                {"start": limit, "end": limit + 1},
+            ]),
+            "{} cuts at its own limit",
+            slug.as_str()
+        );
+    }
+}
+
+#[test]
+fn an_unknown_engine_prints_bad_arguments() {
+    let result = run(&["chunk", "--engine", "gector"], "Some text.");
+
+    assert_eq!(result.status, 1);
+    assert_eq!(envelope(&result)["error"]["code"], "bad_arguments");
+}
+
 #[test]
 fn an_unknown_flag_prints_bad_arguments() {
     let result = run(&["chunk", "--size", "100"], "Some text.");
@@ -133,7 +222,7 @@ fn chunks_tile_the_hard_edges() {
 
 fn assert_tiles(draft: &str) {
     let units: Vec<u16> = draft.encode_utf16().collect();
-    let chunks = chunks_of(draft);
+    let chunks = chunks_of(draft, MAX_CHUNK_UTF16_UNITS);
 
     assert!(!chunks.is_empty(), "a non-empty Draft has Chunks");
 

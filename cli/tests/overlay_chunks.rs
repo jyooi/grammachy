@@ -211,3 +211,93 @@ fn a_carried_text_replaces_a_non_empty_draft_only_after_a_confirm() {
         "a compose payload with a text lands on the same route"
     );
 }
+
+/// The Check limit belongs to the Engine (spec section 4), so a Chunk list fits
+/// only the size it was packed to. The Settings view is reachable while the
+/// failure is on screen, so `Retry remaining` has to pack the Draft again when
+/// the reader picked an Engine of another size rather than resend a Chunk it
+/// cannot read. Two Engines of one size share the list, so the retry resumes on
+/// the new one instead of paying for a re-check.
+#[test]
+fn a_retry_after_an_engine_change_packs_the_draft_again() {
+    let source = read("Overlay.qml");
+
+    assert!(
+        function_body(&source, "runChunkList").contains("root.chunkEngine ="),
+        "the run records the Engine its Chunk list was packed for"
+    );
+
+    let retry = function_body(&source, "retryRemaining");
+    assert!(
+        retry.contains(
+            "Limits.checkLimit(root.chunkEngine) !== Limits.checkLimit(root.setting(\"engine\"))"
+        ),
+        "Retry remaining compares the sizes rather than the slugs: {retry}"
+    );
+    assert!(
+        retry.contains("root.chunkEngine = root.setting(\"engine\")"),
+        "a list of the same size resumes on the Engine the reader picked: {retry}"
+    );
+    assert!(
+        retry.contains("root.runChunkList()"),
+        "a dropped Chunk list is packed again: {retry}"
+    );
+
+    // The new list covers the whole Draft, so the Issues of the old one go with
+    // it or every one of them would be reported twice.
+    let dropped = function_body(&source, "dropChunkListForNewEngine");
+    for cleared in [
+        "root.chunks = []",
+        "root.chunkIndex = 0",
+        "root.issues = []",
+    ] {
+        assert!(
+            dropped.contains(cleared),
+            "the dropped run clears {cleared}: {dropped}"
+        );
+    }
+}
+
+/// A Chunk is cut to the size one Engine reads, so that Engine is the one that
+/// reads it. The Settings view has no phase guard, so the setting can move
+/// while the walk runs, and a Chunk sent to a narrower Engine answers
+/// `text_too_long` for a size the shell itself chose.
+#[test]
+fn every_chunk_is_checked_on_the_engine_its_list_was_packed_for() {
+    let source = read("Overlay.qml");
+    let run_chunk = function_body(&source, "runChunk");
+
+    assert!(
+        run_chunk.contains("root.runEngine()"),
+        "the Chunk names the Engine of its own list: {run_chunk}"
+    );
+    assert!(
+        !run_chunk.contains("root.setting(\"engine\")"),
+        "the Chunk must not name the live setting: {run_chunk}"
+    );
+    assert!(
+        function_body(&source, "runEngine").contains("root.chunkEngine"),
+        "the run's Engine is the recorded one"
+    );
+
+    // The command carries whatever the caller named, so nothing under it can
+    // reach back to the setting.
+    let command = function_body(&source, "checkCommand");
+    assert!(
+        command.contains("command.push(\"--engine\", engineSlug)"),
+        "the check command names the Engine it was handed: {command}"
+    );
+    assert!(
+        !command.contains("root.setting(\"engine\")"),
+        "the check command must not read the setting itself: {command}"
+    );
+
+    // The failure card names the Engine that actually ran, or it blames one the
+    // Chunk never reached.
+    let failed = function_body(&source, "showChunkError");
+    assert!(
+        failed.contains("engineSlug: root.runEngine()")
+            && failed.contains("root.engineLabel(root.runEngine())"),
+        "the inline card names the Engine the Chunk ran on: {failed}"
+    );
+}

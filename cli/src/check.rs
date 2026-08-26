@@ -6,14 +6,14 @@ use crate::args::CheckOptions;
 use crate::engine::{self, EngineFailure};
 use crate::envelope::{Envelope, ErrorCode};
 
-/// The size limit of one Check, in UTF-16 code units (spec sections 5.2 and 6).
-pub const MAX_UTF16_UNITS: usize = 5_000;
-
 /// Length in UTF-16 code units, the unit the shell indexes with.
 pub use crate::text::utf16_len;
 
 /// The error envelope the text itself earns, before any engine runs.
-pub fn validate(text: &str) -> Option<Envelope> {
+///
+/// `limit` is the Check size limit of the selected Engine, which
+/// [`crate::args::EngineSlug::check_limit_utf16`] owns.
+pub fn validate(text: &str, limit: usize) -> Option<Envelope> {
     // A selection of only whitespace has nothing to check, so it is empty.
     if text.trim().is_empty() {
         return Some(Envelope::error(
@@ -23,10 +23,10 @@ pub fn validate(text: &str) -> Option<Envelope> {
     }
 
     let length = utf16_len(text);
-    if length > MAX_UTF16_UNITS {
+    if length > limit {
         return Some(Envelope::error(
             ErrorCode::TextTooLong,
-            format!("The selection is {length} units long, over the limit of {MAX_UTF16_UNITS}."),
+            format!("The selection is {length} units long, over the limit of {limit}."),
         ));
     }
     None
@@ -34,7 +34,7 @@ pub fn validate(text: &str) -> Option<Envelope> {
 
 /// Validate the text, run the engine, and answer exactly one envelope.
 pub fn run(text: &str, options: &CheckOptions) -> Envelope {
-    if let Some(envelope) = validate(text) {
+    if let Some(envelope) = validate(text, options.engine.check_limit_utf16()) {
         return envelope;
     }
 
