@@ -114,6 +114,10 @@ Item {
   property int chunkIndex: 0
   property bool chunkRun: false
   property bool chunkCancelled: false
+  // The engine slug the Chunk list was packed for. The limit belongs to the
+  // Engine (spec section 4), so a Chunk list only fits the engine that sized
+  // it, and a Chunk packed for a wider Engine is refused by a narrower one.
+  property string chunkEngine: ""
   // Engine time from every Chunk that finished, which is what the result line
   // names, the same number the popup's does.
   property int chunkElapsedMs: 0
@@ -552,6 +556,7 @@ Item {
     root.chunkCancelled = false
     root.chunks = []
     root.chunkIndex = 0
+    root.chunkEngine = ""
     root.chunkElapsedMs = 0
     root.chunkTickMs = 0
   }
@@ -560,8 +565,11 @@ Item {
     chunkProcess.generation = root.runGeneration
     chunkProcess.stdinText = root.draftText
     // The Chunks are packed to the selected engine's limit, so the engine is
-    // named here the way `checkCommand` names it.
-    chunkProcess.command = [root.binaryPath, "chunk", "--engine", root.setting("engine")]
+    // named here the way `checkCommand` names it, and the run remembers which
+    // one it packed for.
+    var engineSlug = root.setting("engine")
+    root.chunkEngine = engineSlug
+    chunkProcess.command = [root.binaryPath, "chunk", "--engine", engineSlug]
     // Writing to stdin closes it, so every run arms the channel again.
     chunkProcess.stdinEnabled = true
     chunkProcess.restartQueued = chunkProcess.running
@@ -668,6 +676,22 @@ Item {
     if (root.errorCard.needsDiagnosis) root.runDoctor()
   }
 
+  // A Chunk list fits only the Engine that sized it, because the limit belongs
+  // to the Engine (spec section 4). A reader who opens Settings at the failure
+  // and picks a narrower Engine leaves every remaining Chunk too long for it,
+  // so that list ends here and the retry packs a new one from the whole Draft.
+  // The Issues of the finished Chunks go with it, or the Chunks that answer
+  // again would report each of them twice.
+  function dropChunkListForNewEngine() {
+    root.chunks = []
+    root.chunkIndex = 0
+    root.chunkEngine = ""
+    root.chunkElapsedMs = 0
+    root.issues = []
+    root.decisions = []
+    root.focusIndex = 0
+  }
+
   // `Retry remaining`, spec section 9. A Chunk list that never arrived starts
   // the run over; a Chunk that failed resumes at itself, so every Chunk before
   // it keeps the Issues it already found. The wall clock starts again, because
@@ -678,6 +702,7 @@ Item {
     root.errorCard = null
     root.errorDiagnosis = ""
     root.engineMessage = ""
+    if (root.chunkEngine !== root.setting("engine")) root.dropChunkListForNewEngine()
     root.beginChunkAttempt()
     if (root.chunks.length === 0) root.runChunkList()
     else root.runChunk()

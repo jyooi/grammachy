@@ -213,7 +213,7 @@ impl EngineSlug {
     /// 2,000 units, because a longer Chunk cannot be answered inside the
     /// timeout, and every other Engine reads 5,000. The match is exhaustive on
     /// purpose, so a new slug has to name its own limit.
-    pub fn check_limit_utf16(self) -> usize {
+    pub const fn check_limit_utf16(self) -> usize {
         match self {
             EngineSlug::Openai => 2_000,
             EngineSlug::Languagetool | EngineSlug::Harper | EngineSlug::Openrouter => 5_000,

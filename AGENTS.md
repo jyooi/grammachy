@@ -80,6 +80,8 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 - The chunked Check is the loop between `Overlay.startComposeCheck` and `Overlay.finishChunkRun`: one `grammachy chunk`, then `launchCheck` per Chunk, with `absorbChunk` moving each answer by that Chunk's `start` before `Splice.verifiedIssues` checks it against the whole Draft.
   `chunkRun` is what tells the shared `onCheckOutput` that this Check is a Chunk rather than a Selection.
   Cancel only sets `chunkCancelled`, which `absorbChunk` reads after the merge, so the Chunk in flight is always kept; a failure leaves `chunkIndex` on the Chunk that failed, which is what makes `Retry remaining` a resume rather than a restart.
+  `chunkEngine` records the Engine the Chunk list was packed for, because the limit belongs to the Engine.
+  `retryRemaining` drops that list through `dropChunkListForNewEngine` when the setting names another Engine, so the retry packs again rather than resends a Chunk the new Engine refuses.
   `ui/errors.js` owns both envelope readers and the inline card: `readChunks` for spec 5.2 and `chunkCard` for the two recovery buttons of section 9.
   `ui/errors.test.js` runs the whole loop against a stub binary that answers both subcommands, and `cli/tests/overlay_chunks.rs` is what keeps `Overlay.qml` on those same calls, because no QML test can.
 - Every Compose trigger that carries a text lands on `Overlay.composeWith`, which is the only route to the replace confirm of spec section 2; `showCompose` is the kept-Draft route that SUPER + SHIFT + G and the menu entry take.

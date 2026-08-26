@@ -211,3 +211,41 @@ fn a_carried_text_replaces_a_non_empty_draft_only_after_a_confirm() {
         "a compose payload with a text lands on the same route"
     );
 }
+
+/// The Check limit belongs to the Engine (spec section 4), so a Chunk list fits
+/// only the Engine that packed it. The Settings gear is reachable while the
+/// failure is on screen, so `Retry remaining` has to pack the Draft again when
+/// the Engine changed rather than resend a Chunk it cannot read.
+#[test]
+fn a_retry_after_an_engine_change_packs_the_draft_again() {
+    let source = read("Overlay.qml");
+
+    assert!(
+        function_body(&source, "runChunkList").contains("root.chunkEngine ="),
+        "the run records the Engine its Chunk list was packed for"
+    );
+
+    let retry = function_body(&source, "retryRemaining");
+    assert!(
+        retry.contains("root.chunkEngine !== root.setting(\"engine\")"),
+        "Retry remaining notices a changed Engine: {retry}"
+    );
+    assert!(
+        retry.contains("root.runChunkList()"),
+        "a dropped Chunk list is packed again: {retry}"
+    );
+
+    // The new list covers the whole Draft, so the Issues of the old one go with
+    // it or every one of them would be reported twice.
+    let dropped = function_body(&source, "dropChunkListForNewEngine");
+    for cleared in [
+        "root.chunks = []",
+        "root.chunkIndex = 0",
+        "root.issues = []",
+    ] {
+        assert!(
+            dropped.contains(cleared),
+            "the dropped run clears {cleared}: {dropped}"
+        );
+    }
+}

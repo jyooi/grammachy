@@ -5,7 +5,7 @@ use grammachy::check;
 use grammachy::envelope::Envelope;
 
 /// The Check size limit of the default engine (spec section 4).
-const MAX_UTF16_UNITS: usize = 5_000;
+const MAX_UTF16_UNITS: usize = EngineSlug::Languagetool.check_limit_utf16();
 
 fn code_of(envelope: &Envelope) -> String {
     let value: serde_json::Value = serde_json::from_str(&envelope.to_json()).unwrap();

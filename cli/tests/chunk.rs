@@ -10,10 +10,10 @@ use serde_json::Value;
 
 /// The size limit of one Chunk on the default engine, in UTF-16 code units
 /// (spec sections 4 and 5.2).
-const MAX_CHUNK_UTF16_UNITS: usize = 5_000;
+const MAX_CHUNK_UTF16_UNITS: usize = EngineSlug::Languagetool.check_limit_utf16();
 
 /// The same limit on the local LLM engine, which reads less per Check.
-const LOCAL_CHUNK_UTF16_UNITS: usize = 2_000;
+const LOCAL_CHUNK_UTF16_UNITS: usize = EngineSlug::Openai.check_limit_utf16();
 
 struct Run {
     status: i32,

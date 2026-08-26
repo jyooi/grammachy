@@ -435,79 +435,139 @@ const SENTENCE = "I has a cat. "
 const DRAFT = SENTENCE.repeat(20)
 const CHUNK_UNITS = SENTENCE.length * 5
 const CHUNK_COUNT = 4
+// The engine a Check runs on when nothing else is said, spec section 7.
+const DEFAULT_ENGINE = "languagetool"
+// What the stub packs to, one size per Engine. The limit belongs to the Engine
+// (spec section 4), so a Chunk list fits only the Engine that sized it. These
+// are the shape of that rule rather than its numbers, which `limits.test.js`
+// owns.
+const LOCAL_CHUNK_UNITS = SENTENCE.length * 2
+const LOCAL_CHUNK_COUNT = 10
+const CHUNK_UNITS_BY_ENGINE = { languagetool: CHUNK_UNITS, harper: CHUNK_UNITS, openai: LOCAL_CHUNK_UNITS }
 // One Issue per sentence, at the same offset in each.
 const WANTED_STARTS = Array.from({ length: 20 }, (_, i) => 2 + SENTENCE.length * i)
 
-// A stub that answers `chunk` with a fixed tiling and `check` with one Issue per
-// "has" in the text it was handed, in that text's own coordinates. `delayMs`
-// makes a run take long enough for a Cancel to be a real decision, and
-// `failOnCall` fails the nth `check` once and succeeds on every call after it.
+// A stub that answers `chunk` with a tiling of the named Engine's size and
+// `check` with one Issue per "has" in the text it was handed, in that text's
+// own coordinates. It refuses a text over that Engine's size with
+// `text_too_long`, the way the CLI does before any engine runs. `delayMs` makes
+// a run take long enough for a Cancel to be a real decision, and `failOnCall`
+// fails the nth `check` once and succeeds on every call after it.
 function chunkedStub(name, delayMs, failOnCall) {
   const counter = path.join(stubDirectory, name + ".count")
+  const packs = path.join(stubDirectory, name + ".packs")
   const file = path.join(stubDirectory, name)
   fs.writeFileSync(file, [
     "#!/usr/bin/env node",
     'const fs = require("fs")',
     'const input = fs.readFileSync(0, "utf8")',
-    "const SIZE = " + CHUNK_UNITS,
+    "const SIZES = " + JSON.stringify(CHUNK_UNITS_BY_ENGINE),
     "const DELAY = " + Number(delayMs || 0),
     "const FAIL_ON = " + Number(failOnCall || 0),
     "const COUNTER = " + JSON.stringify(counter),
+    "const PACKS = " + JSON.stringify(packs),
+    'const named = process.argv.indexOf("--engine")',
+    'const engine = named === -1 ? ' + JSON.stringify(DEFAULT_ENGINE) + ' : process.argv[named + 1]',
+    "const SIZE = SIZES[engine] || SIZES." + DEFAULT_ENGINE,
+    "function bump(file) {",
+    "  let count = 0",
+    '  try { count = Number(fs.readFileSync(file, "utf8")) || 0 } catch (error) { count = 0 }',
+    "  count += 1",
+    "  fs.writeFileSync(file, String(count))",
+    "  return count",
+    "}",
     'if (process.argv[2] === "chunk") {',
+    "  bump(PACKS)",
     "  const chunks = []",
     "  for (let start = 0; start < input.length; start += SIZE)",
     "    chunks.push({ start: start, end: Math.min(input.length, start + SIZE) })",
     '  process.stdout.write(JSON.stringify({ contractVersion: 1, chunks: chunks }))',
     "  process.exit(0)",
     "}",
-    "let calls = 0",
-    "try { calls = Number(fs.readFileSync(COUNTER, \"utf8\")) || 0 } catch (error) { calls = 0 }",
-    "calls += 1",
-    "fs.writeFileSync(COUNTER, String(calls))",
+    "const calls = bump(COUNTER)",
     "if (DELAY > 0) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, DELAY)",
     "if (calls === FAIL_ON) {",
     '  process.stdout.write(JSON.stringify({ contractVersion: 1, error: { code: "engine_unavailable", message: "LanguageTool did not answer on 127.0.0.1:8081" } }))',
     "  process.exit(1)",
     "}",
+    "if (input.length > SIZE) {",
+    '  process.stdout.write(JSON.stringify({ contractVersion: 1, error: { code: "text_too_long", message: "The selection is " + input.length + " units long, over the limit of " + SIZE + "." } }))',
+    "  process.exit(1)",
+    "}",
     "const issues = []",
     'for (let at = input.indexOf("has"); at !== -1; at = input.indexOf("has", at + 3))',
     '  issues.push({ start: at, end: at + 3, original: "has", fix: "have", reason: "Subject and verb do not agree.", category: "grammar" })',
-    'process.stdout.write(JSON.stringify({ contractVersion: 1, engine: "languagetool", elapsedMs: 7, issues: issues }))',
+    'process.stdout.write(JSON.stringify({ contractVersion: 1, engine: engine, elapsedMs: 7, issues: issues }))',
     ""
   ].join("\n"))
   fs.chmodSync(file, 0o755)
   return file
 }
 
-// The chunked Check of spec section 9, driven in the order Overlay.qml drives
-// it: one `grammachy chunk`, then one `grammachy check` per Chunk in sequence,
-// every Chunk's spans moved by its own start before they merge and are verified
-// against the whole Draft. `cli/tests/overlay_chunks.rs` is what keeps
-// Overlay.qml on these same steps.
-function runChunked(binary, draft, options) {
-  const settings = options || {}
-  const run = { issues: [], index: 0, chunks: [], elapsedMs: 0, engine: "", card: null, cancelled: false }
+// How many Chunk lists that stub has packed, which is what says whether a
+// retry resumed the list in hand or asked for a new one.
+function packCount(name) {
+  try {
+    return Number(fs.readFileSync(path.join(stubDirectory, name + ".packs"), "utf8")) || 0
+  } catch (error) {
+    return 0
+  }
+}
 
-  const listed = readChunks(spawnSync(binary, ["chunk"], { input: draft, encoding: "utf8" }).stdout)
+function chunkCardOf(engineSlug, code, message, hasPartial) {
+  return chunkCard(code, {
+    engineLabel: labelOf(ENGINE_OPTIONS, engineSlug),
+    engineSlug: engineSlug,
+    message: message || "",
+    hasPartial: hasPartial === true
+  })
+}
+
+// The chunked Check of spec section 9, driven in the order Overlay.qml drives
+// it: one `grammachy chunk` for the selected Engine, then one `grammachy check`
+// per Chunk in sequence, every Chunk's spans moved by its own start before they
+// merge and are verified against the whole Draft. `cli/tests/overlay_chunks.rs`
+// is what keeps Overlay.qml on these same steps.
+function runChunked(binary, draft, options) {
+  const run = {
+    issues: [], index: 0, chunks: [], chunkEngine: "",
+    elapsedMs: 0, engine: "", card: null, cancelled: false
+  }
+  return packChunks(binary, draft, run, options || {})
+}
+
+// `Overlay.runChunkList`: the Chunks are packed to the selected Engine's limit,
+// and the run remembers which Engine that was.
+function packChunks(binary, draft, run, options) {
+  const settings = options || {}
+  const engine = settings.engine || DEFAULT_ENGINE
+  run.chunkEngine = engine
+  run.card = null
+
+  const listed = readChunks(
+    spawnSync(binary, ["chunk", "--engine", engine], { input: draft, encoding: "utf8" }).stdout)
   if (listed.error) {
-    run.card = languageToolChunkCard(listed.error.code, listed.error.message, false)
+    run.card = chunkCardOf(engine, listed.error.code, listed.error.message, run.issues.length > 0)
     return run
   }
   run.chunks = listed.chunks
+  run.index = 0
   return resumeChunked(binary, draft, run, settings)
 }
 
-// `Retry remaining`: the same walk, resumed at the Chunk that stopped it.
+// The walk itself, resumed at the Chunk that stopped it. Every Check names the
+// Engine the settings hold now, the way `Overlay.checkCommand` does.
 function resumeChunked(binary, draft, run, options) {
   const settings = options || {}
+  const engine = settings.engine || DEFAULT_ENGINE
   run.card = null
   while (run.index < run.chunks.length) {
     const chunk = run.chunks[run.index]
-    const answer = readCheck(spawnSync(binary, ["check", "--engine", "languagetool"],
+    const answer = readCheck(spawnSync(binary, ["check", "--engine", engine],
       { input: chunkText(draft, chunk), encoding: "utf8" }).stdout)
 
     if (answer.error) {
-      run.card = languageToolChunkCard(answer.error.code, answer.error.message, run.issues.length > 0)
+      run.card = chunkCardOf(engine, answer.error.code, answer.error.message, run.issues.length > 0)
       return run
     }
 
@@ -524,6 +584,23 @@ function resumeChunked(binary, draft, run, options) {
     }
   }
   return run
+}
+
+// `Retry remaining` as `Overlay.retryRemaining` drives it. A Chunk list packed
+// for another Engine no longer fits, so it is dropped and the Draft is packed
+// again; every other failure resumes at the Chunk that stopped the run.
+function retryRemaining(binary, draft, run, options) {
+  const settings = options || {}
+  const engine = settings.engine || DEFAULT_ENGINE
+  if (run.chunkEngine !== engine) {
+    run.chunks = []
+    run.index = 0
+    run.chunkEngine = ""
+    run.elapsedMs = 0
+    run.issues = []
+  }
+  if (run.chunks.length === 0) return packChunks(binary, draft, run, settings)
+  return resumeChunked(binary, draft, run, settings)
 }
 
 test("a whole Draft merges into one list whose spans point at the right text", () => {
@@ -575,7 +652,7 @@ test("a Chunk that fails once shows both recoveries and Retry remaining finishes
 
   // `Retry remaining` resumes at the Chunk that failed, so nothing before it
   // runs again and nothing after it is skipped.
-  const resumed = resumeChunked(binary, DRAFT, run, {})
+  const resumed = retryRemaining(binary, DRAFT, run, {})
   assert.equal(resumed.card, null)
   assert.equal(resumed.index, CHUNK_COUNT)
   assert.deepEqual(resumed.issues.map(issue => issue.start), WANTED_STARTS)
@@ -592,8 +669,54 @@ test("a first Chunk that fails has nothing to review", () => {
   assert.equal(run.index, 0)
 
   // Retry remaining starts at the same Chunk, which is the first one.
-  const resumed = resumeChunked(binary, DRAFT, run, {})
+  const resumed = retryRemaining(binary, DRAFT, run, {})
   assert.equal(resumed.card, null)
+  assert.deepEqual(resumed.issues.map(issue => issue.start), WANTED_STARTS)
+})
+
+// The limit belongs to the Engine (spec section 4), so a Chunk list packed for
+// one Engine is the wrong size for a narrower one. The Settings gear stays
+// reachable at the failure, so a reader can pick that narrower Engine before
+// `Retry remaining`. Resending the Chunks in hand would answer `text_too_long`
+// every time, which no button can get out of.
+test("a narrower Engine picked at the failure packs the Draft again instead of resending Chunks it cannot read", () => {
+  const binary = chunkedStub("chunked-engine-change", 0, 3)
+  const run = runChunked(binary, DRAFT, { engine: "languagetool" })
+
+  assert.equal(run.card.code, ENGINE_UNAVAILABLE)
+  assert.equal(run.index, 2)
+  assert.equal(run.chunkEngine, "languagetool")
+  assert.equal(packCount("chunked-engine-change"), 1)
+
+  // The reader opens Settings at the failure and picks the local engine.
+  const retried = retryRemaining(binary, DRAFT, run, { engine: "openai" })
+
+  assert.equal(retried.card, null)
+  assert.equal(retried.chunkEngine, "openai")
+  assert.equal(packCount("chunked-engine-change"), 2)
+  assert.equal(retried.chunks.length, LOCAL_CHUNK_COUNT)
+  for (const chunk of retried.chunks)
+    assert.ok(chunk.end - chunk.start <= LOCAL_CHUNK_UNITS, "every Chunk fits the local engine")
+
+  // The whole Draft is checked once, so no Issue the first Engine found is
+  // reported twice and none of them is lost.
+  assert.equal(retried.index, LOCAL_CHUNK_COUNT)
+  assert.deepEqual(retried.issues.map(issue => issue.start), WANTED_STARTS)
+  for (const issue of retried.issues) assert.equal(DRAFT.slice(issue.start, issue.end), issue.original)
+})
+
+// The engine that did not change is the normal case, and it must still resume.
+test("Retry remaining on the same Engine resumes the Chunk list in hand", () => {
+  const binary = chunkedStub("chunked-same-engine", 0, 3)
+  const run = runChunked(binary, DRAFT, { engine: "languagetool" })
+  assert.equal(run.index, 2)
+
+  const resumed = retryRemaining(binary, DRAFT, run, { engine: "languagetool" })
+
+  assert.equal(resumed.card, null)
+  assert.equal(packCount("chunked-same-engine"), 1, "no second Chunk list was asked for")
+  assert.equal(resumed.chunks.length, CHUNK_COUNT)
+  assert.equal(resumed.index, CHUNK_COUNT)
   assert.deepEqual(resumed.issues.map(issue => issue.start), WANTED_STARTS)
 })
 

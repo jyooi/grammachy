@@ -7,7 +7,10 @@
 //! This test is what keeps them honest.
 //!
 //! The Check limit belongs to the Engine (spec section 4), so the shell copy
-//! is the table in `ui/limits.js` rather than one integer property.
+//! is the table in `ui/limits.js` rather than one integer property. That file
+//! is plain JavaScript, so this test runs it under node and compares answers.
+//! `Overlay.qml` cannot be instantiated outside the shell's plugin loader, so
+//! the two assertions about it stay source-scanning guards.
 
 use grammachy::args::EngineSlug;
 use grammachy::chunk::MAX_DRAFT_UTF16_UNITS;
@@ -36,14 +39,38 @@ fn int_property(source: &str, name: &str) -> usize {
     integer_after(rest_of(source, start), name)
 }
 
-/// The value of `var <name> = <n>` in a JavaScript file.
-fn js_number(source: &str, name: &str) -> usize {
-    let needle = format!("var {name} = ");
-    let start = source
-        .find(&needle)
-        .unwrap_or_else(|| panic!("ui/limits.js declares {name}"))
-        + needle.len();
-    integer_after(rest_of(source, start), name)
+/// The answer `Limits.checkLimit` gives each slug, read by running the module
+/// under node rather than by reading its text.
+///
+/// `ui/limits.js` is plain JavaScript that node loads the way `limits.test.js`
+/// does, so the contract it owns is the value it returns. `None` says node is
+/// not on this machine, which is a skip rather than a failure.
+fn node_check_limits(slugs: &[EngineSlug]) -> Option<Vec<usize>> {
+    let module = format!("{}/../ui/limits.js", env!("CARGO_MANIFEST_DIR"));
+    let program = format!(
+        "const Limits = require({});\
+         const slugs = {};\
+         process.stdout.write(JSON.stringify(slugs.map(function (slug) {{ return Limits.checkLimit(slug) }})))",
+        serde_json::to_string(&module).expect("the module path is a JSON string"),
+        serde_json::to_string(&slugs.iter().map(|slug| slug.as_str()).collect::<Vec<_>>())
+            .expect("the slugs are a JSON array"),
+    );
+
+    let output = match std::process::Command::new("node")
+        .arg("-e")
+        .arg(program)
+        .output()
+    {
+        Ok(output) => output,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return None,
+        Err(error) => panic!("node ran: {error}"),
+    };
+    assert!(
+        output.status.success(),
+        "node loaded ui/limits.js: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    Some(serde_json::from_slice(&output.stdout).expect("node answered a list of numbers"))
 }
 
 fn rest_of(source: &str, start: usize) -> &str {
@@ -62,39 +89,20 @@ fn integer_after(rest: &str, name: &str) -> usize {
 }
 
 /// The one shell-side table of Check limits has to answer what the CLI does.
+///
+/// This runs `Limits.checkLimit` rather than reading `ui/limits.js`, so a
+/// rename or a rewrite of the table is free and only a changed answer fails.
 #[test]
-fn the_limits_module_holds_the_cli_limit_of_every_engine() {
-    let source = read("ui/limits.js");
+fn the_limits_module_answers_the_cli_limit_of_every_engine() {
+    let Some(answers) = node_check_limits(&SLUGS) else {
+        eprintln!("skipped: node is not on PATH, so ui/limits.js cannot be run");
+        return;
+    };
 
-    assert_eq!(
-        js_number(&source, "LOCAL_CHECK_LIMIT_UNITS"),
-        EngineSlug::Openai.check_limit_utf16()
-    );
-    assert_eq!(
-        js_number(&source, "CHECK_LIMIT_UNITS"),
-        EngineSlug::Languagetool.check_limit_utf16()
-    );
-
-    // Every other slug reads the wider limit, which is the fallback branch of
-    // `checkLimit`, so only the local engine may differ from it.
-    for slug in SLUGS {
-        let expected = if slug == EngineSlug::Openai {
-            js_number(&source, "LOCAL_CHECK_LIMIT_UNITS")
-        } else {
-            js_number(&source, "CHECK_LIMIT_UNITS")
-        };
-        assert_eq!(slug.check_limit_utf16(), expected, "{}", slug.as_str());
+    assert_eq!(answers.len(), SLUGS.len());
+    for (slug, answer) in SLUGS.iter().zip(answers) {
+        assert_eq!(answer, slug.check_limit_utf16(), "{}", slug.as_str());
     }
-}
-
-/// `ui/limits.js` names the local engine by the slug the CLI accepts, because
-/// that is the string the engine setting stores.
-#[test]
-fn the_limits_module_names_the_local_engine_slug() {
-    assert!(read("ui/limits.js").contains(&format!(
-        "var LOCAL_ENGINE = \"{}\"",
-        EngineSlug::Openai.as_str()
-    )));
 }
 
 /// The overlay must read the limit off the engine setting rather than carry a
