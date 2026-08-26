@@ -152,6 +152,10 @@ Item {
   // into Cancel.
   property var models: []
   property string modelBusy: ""
+  // The `.part` length of the row in flight, moved by every poll answer.
+  // It lives outside `models` so that the list keeps its identity while a
+  // download runs, which is what lets the bar animate rather than rebuild.
+  property double modelBusyBytes: 0
   property string modelsDirectory: ""
   property double modelsFreeBytes: 0
   // The note one failed verb left, from `ui/models.js`, or null.
@@ -556,10 +560,19 @@ Item {
   // The rows of one answer merged into the list. `list` answers every row and
   // the other two verbs answer the one they acted on, so a merge is what keeps
   // the other rows through a download.
+  //
+  // The list is replaced only when it actually says something new. A Repeater
+  // rebuilds every delegate the moment its array is replaced, and the poll
+  // answers once a second, so replacing it each tick would restart the bar's
+  // animation, drop an open tooltip, and lose a press whose release came late.
+  // The one number the poll is there to move rides on `modelBusyBytes`, which
+  // the running row's bar and hint read instead of the list.
   function absorbModelReport(report) {
-    root.models = report.verb === "list"
+    var next = report.verb === "list"
       ? report.models
       : ModelsJs.merged(root.models, report.models)
+    root.modelBusyBytes = ModelsJs.partialOf(next, root.modelBusy)
+    if (!ModelsJs.sameRows(root.models, next, root.modelBusy)) root.models = next
     root.modelsDirectory = report.directory
     root.modelsFreeBytes = report.freeBytes
   }
@@ -1760,6 +1773,7 @@ Item {
 
         models: root.models
         modelBusy: root.modelBusy
+        modelBusyBytes: root.modelBusyBytes
         modelsBusy: root.modelsBusy
         modelConfirm: root.modelConfirm
         modelsDirectory: root.modelsDirectory
@@ -1837,6 +1851,7 @@ Item {
 
         models: root.models
         modelBusy: root.modelBusy
+        modelBusyBytes: root.modelBusyBytes
         modelsBusy: root.modelsBusy
         modelConfirm: root.modelConfirm
         modelsDirectory: root.modelsDirectory

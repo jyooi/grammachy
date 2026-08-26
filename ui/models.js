@@ -159,27 +159,84 @@ function bytes(count) {
   return (Math.round(value * 10) / 10).toFixed(1) + " " + UNITS[index]
 }
 
+// The `.part` length to draw for one row.
+//
+// The poll moves that one number once a second while a download runs, and the
+// row it belongs to reads it from a property of its own rather than from the
+// list. That is what lets the list keep its identity across a poll, so the bar
+// animates rather than being rebuilt. A `live` below zero, or no `live` at all,
+// means the list is the only answer there is.
+function partialBytesOf(row, live) {
+  var value = Number(live)
+  if (isFinite(value) && value >= 0) return value
+  return isPlainObject(row) ? Number(row.partialBytes) || 0 : 0
+}
+
 // How far a download has got, from 0 to 1. A row with no pinned size cannot be
 // measured, so it reads as nothing done rather than as done.
-function share(row) {
+function share(row, live) {
   var size = isPlainObject(row) ? Number(row.sizeBytes) || 0 : 0
   if (size <= 0) return 0
-  var done = Number(row.partialBytes) || 0
+  var done = partialBytesOf(row, live)
   if (stateOf(row) === READY) return 1
   return Math.max(0, Math.min(1, done / size))
+}
+
+// The `.part` length one named row reports, or 0 for a name the list does not
+// carry. This is what the overlay keeps the moving byte count in.
+function partialOf(models, name) {
+  var list = Array.isArray(models) ? models : []
+  var wanted = String(name || "")
+  if (wanted.length === 0) return 0
+  for (var i = 0; i < list.length; i++) {
+    var row = list[i]
+    if (isPlainObject(row) && String(row.name) === wanted) return Number(row.partialBytes) || 0
+  }
+  return 0
+}
+
+// Every field a row carries, which is the whole of what the list draws.
+var ROW_FIELDS = ["name", "fileName", "state", "partialBytes", "sizeBytes", "licence"]
+
+// Whether two lists of rows say the same thing.
+//
+// A QML Repeater does not diff a JavaScript array, it rebuilds every delegate
+// the moment the array is replaced. The poll answers once a second, so without
+// this the rows are destroyed and recreated once a second: the progress bar
+// restarts its animation rather than advancing, an open tooltip goes, and a
+// press whose release lands after a rebuild never becomes a click.
+//
+// `movingName` is the row a download is running on. Its `.part` length is the
+// one number the poll is there to move, and the bar reads it from its own
+// property, so a change to it alone is not a reason to rebuild the list.
+function sameRows(left, right, movingName) {
+  var a = Array.isArray(left) ? left : []
+  var b = Array.isArray(right) ? right : []
+  if (a.length !== b.length) return false
+  var moving = String(movingName || "")
+
+  for (var i = 0; i < a.length; i++) {
+    if (!isPlainObject(a[i]) || !isPlainObject(b[i])) return false
+    for (var f = 0; f < ROW_FIELDS.length; f++) {
+      var field = ROW_FIELDS[f]
+      if (field === "partialBytes" && moving.length > 0 && String(a[i].name) === moving) continue
+      if (a[i][field] !== b[i][field]) return false
+    }
+  }
+  return true
 }
 
 // The one line under a row's name, spec section 7. It names the licence and the
 // size always, because those are what the reader chooses between, and it names
 // the progress only while there is progress to name.
-function hint(row, busy) {
+function hint(row, busy, live) {
   var state = stateOf(row)
   var size = bytes(isPlainObject(row) ? row.sizeBytes : 0)
   var licence = isPlainObject(row) && row.licence ? String(row.licence) : "unknown licence"
 
   if (busy === true) {
-    var done = bytes(isPlainObject(row) ? row.partialBytes : 0)
-    return "Downloading " + done + " of " + size + ", " + Math.round(share(row) * 100) + "%"
+    var done = bytes(partialBytesOf(row, live))
+    return "Downloading " + done + " of " + size + ", " + Math.round(share(row, live) * 100) + "%"
   }
   if (state === READY) return "Ready, " + size + ", " + licence
   if (state === PARTIAL)
@@ -362,6 +419,9 @@ if (typeof module !== "undefined" && module.exports) {
     merged: merged,
     bytes: bytes,
     share: share,
+    partialBytesOf: partialBytesOf,
+    partialOf: partialOf,
+    sameRows: sameRows,
     hint: hint,
     resolvedName: resolvedName,
     resolves: resolves,

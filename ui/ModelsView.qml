@@ -25,6 +25,10 @@ ColumnLayout {
   property var models: []
   // The catalogue name a download is running on, or "" when none is.
   property string busy: ""
+  // The `.part` length of that row, moved by every poll answer. It arrives
+  // beside the list rather than inside it, so the rows keep their identity and
+  // the bar animates across each step rather than being rebuilt on it.
+  property double busyBytes: 0
   // Whether any verb is in flight, which is what every row but the one being
   // downloaded draws its disabled state from.
   property bool working: false
@@ -65,6 +69,8 @@ ColumnLayout {
 
       readonly property string name: String(row.modelData.name)
       readonly property bool running: root.busy === row.name
+      // Below zero means the list is the only answer there is.
+      readonly property double live: row.running ? root.busyBytes : -1
       readonly property bool blocked: Models.isBlocked(row.modelData, {
         busy: root.busy,
         working: root.working
@@ -119,7 +125,7 @@ ColumnLayout {
 
           Text {
             Layout.fillWidth: true
-            text: Models.hint(row.modelData, row.running)
+            text: Models.hint(row.modelData, row.running, row.live)
             color: Color.muted
             elide: Text.ElideRight
             font.family: Style.font.family
@@ -176,7 +182,7 @@ ColumnLayout {
         }
 
         Rectangle {
-          width: Math.round(parent.width * Models.share(row.modelData))
+          width: Math.round(parent.width * Models.share(row.modelData, row.live))
           height: parent.height
           radius: Style.cornerRadius > 0 ? height / 2 : 0
           color: Color.accent

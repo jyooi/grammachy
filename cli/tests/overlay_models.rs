@@ -90,6 +90,23 @@ fn a_running_download_is_polled_once_a_second() {
         "the poll runs the list verb: {body}"
     );
 
+    // A Repeater rebuilds every delegate the moment its array is replaced, so a
+    // poll that answers the same rows must leave the list alone. Otherwise the
+    // bar restarts its animation once a second rather than advancing across it.
+    let absorb = function_body(&source, "absorbModelReport");
+    assert!(
+        absorb.contains("ModelsJs.sameRows("),
+        "an unchanged answer does not replace the list: {absorb}"
+    );
+    assert!(
+        absorb.contains("root.modelBusyBytes = ModelsJs.partialOf("),
+        "the one number the poll moves rides beside the list: {absorb}"
+    );
+    assert!(
+        read("ui/ModelsView.qml").contains("root.busyBytes"),
+        "the running row's bar and hint read that number rather than the list"
+    );
+
     // It runs only while a download does.
     assert!(
         function_body(&source, "downloadModel").contains("modelPoll.start()"),

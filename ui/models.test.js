@@ -34,6 +34,8 @@ const {
   merged,
   bytes,
   share,
+  partialOf,
+  sameRows,
   hint,
   resolvedName,
   resolves,
@@ -205,6 +207,91 @@ test("the progress share is what the shell polls model list for", () => {
   assert.equal(share({ name: "x", state: "partial", partialBytes: 10, sizeBytes: 0 }), 0)
   // A part file larger than the pin is still a full bar rather than an overrun.
   assert.equal(share({ name: "x", state: "partial", partialBytes: 30, sizeBytes: 10 }), 1)
+})
+
+// ------------------------------------------------- what a poll answer changes
+
+// A QML Repeater rebuilds every delegate the moment its array is replaced, and
+// the poll answers once a second. So the list may only be replaced when it
+// really says something new: otherwise the progress bar restarts its animation
+// instead of advancing, an open tooltip goes, and a press whose release lands
+// after the rebuild never becomes a click.
+test("two reads of the same stdout say the same thing", () => {
+  const stdout = envelope("list", [GEMMA, QWEN, PHI])
+
+  const first = read(stdout).report.models
+  const second = read(stdout).report.models
+
+  // Fresh objects every time, so identity cannot be the test.
+  assert.notEqual(first, second)
+  assert.equal(sameRows(first, second), true)
+  assert.equal(sameRows(first, second, "qwen3-4b-instruct"), true)
+})
+
+test("a poll whose part file grew says something new", () => {
+  const before = read(envelope("list", [GEMMA, QWEN, PHI])).report.models
+  const after = read(envelope("list", [
+    GEMMA,
+    { ...QWEN, partialBytes: QWEN.partialBytes + 4096 },
+    PHI
+  ])).report.models
+
+  assert.equal(sameRows(before, after), false)
+})
+
+// That one number is the only thing the poll is there to move, and the bar
+// reads it from its own property, so it is not a reason to rebuild the list.
+test("the row in flight may move its part length without rebuilding the list", () => {
+  const before = read(envelope("list", [GEMMA, QWEN, PHI])).report.models
+  const after = read(envelope("list", [
+    GEMMA,
+    { ...QWEN, partialBytes: QWEN.partialBytes + 4096 },
+    PHI
+  ])).report.models
+
+  assert.equal(sameRows(before, after, "qwen3-4b-instruct"), true)
+  // Another row moving is still a rebuild, because no bar is reading it.
+  assert.equal(sameRows(before, after, "phi-4-mini-instruct"), false)
+})
+
+test("a row that finished, appeared, or went is always something new", () => {
+  const list = read(envelope("list", [GEMMA, QWEN, PHI])).report.models
+  const moving = "qwen3-4b-instruct"
+
+  const finished = read(envelope("list", [GEMMA, { ...QWEN, state: "ready" }, PHI])).report.models
+  assert.equal(sameRows(list, finished, moving), false)
+
+  const shorter = read(envelope("list", [GEMMA, QWEN])).report.models
+  assert.equal(sameRows(list, shorter, moving), false)
+
+  const renamed = read(envelope("list", [GEMMA, QWEN, { ...PHI, name: "other" }])).report.models
+  assert.equal(sameRows(list, renamed, moving), false)
+})
+
+// The moving byte count lives beside the list, so the overlay has to be able to
+// pick it out of one answer.
+test("the part length of the row in flight is read off the answer", () => {
+  const list = read(envelope("list", [GEMMA, QWEN, PHI])).report.models
+
+  assert.equal(partialOf(list, "qwen3-4b-instruct"), QWEN.partialBytes)
+  assert.equal(partialOf(list, "phi-4-mini-instruct"), 0)
+  assert.equal(partialOf(list, "no-such-model"), 0)
+  assert.equal(partialOf(list, ""), 0)
+  assert.equal(partialOf(null, "qwen3-4b-instruct"), 0)
+})
+
+// The bar and the hint of the running row read that live count rather than the
+// list, which is what keeps the list still while the number moves.
+test("a live byte count overrides the one the list carries", () => {
+  const half = QWEN.sizeBytes / 2
+
+  assert.equal(share(QWEN, half + QWEN.sizeBytes / 4), 0.75)
+  assert.equal(hint(QWEN, true, QWEN.sizeBytes / 4), "Downloading 595.4 MB of 2.3 GB, 25%")
+
+  // No live count, or a negative one, leaves the list as the only answer.
+  assert.equal(share(QWEN, -1), 0.5)
+  assert.equal(share(QWEN, undefined), 0.5)
+  assert.equal(hint(QWEN, true, -1), "Downloading 1.2 GB of 2.3 GB, 50%")
 })
 
 // ----------------------------------------------------------------- the hints

@@ -63,16 +63,39 @@ impl Sha256 {
         }
     }
 
+    /// Take these bytes a block at a time.
+    ///
+    /// The weights are gigabytes, so this walks whole 64-byte blocks rather
+    /// than single bytes: one bounds check and one branch per block instead of
+    /// per byte. The digest is the same either way.
     fn update(&mut self, data: &[u8]) {
-        for &byte in data {
-            self.buffer[self.filled] = byte;
-            self.filled += 1;
-            if self.filled == 64 {
-                self.compress();
-                self.bit_len += 512;
-                self.filled = 0;
+        let mut rest = data;
+
+        // Finish the block a previous call left part filled.
+        if self.filled > 0 {
+            let wanted = (64 - self.filled).min(rest.len());
+            self.buffer[self.filled..self.filled + wanted].copy_from_slice(&rest[..wanted]);
+            self.filled += wanted;
+            rest = &rest[wanted..];
+            if self.filled < 64 {
+                return;
             }
+            self.compress();
+            self.bit_len += 512;
+            self.filled = 0;
         }
+
+        let mut blocks = rest.chunks_exact(64);
+        for block in &mut blocks {
+            self.buffer.copy_from_slice(block);
+            self.compress();
+            self.bit_len += 512;
+        }
+
+        // Whatever is left over waits for the next call or for `finalize`.
+        let tail = blocks.remainder();
+        self.buffer[..tail.len()].copy_from_slice(tail);
+        self.filled = tail.len();
     }
 
     fn finalize(mut self) -> [u8; 32] {
@@ -212,6 +235,26 @@ mod tests {
             sha256_hex(&vec![b'a'; 1_000_000]),
             "cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0"
         );
+    }
+
+    /// `update` takes whole blocks at a time, so a call that ends part way
+    /// through one has to carry the remainder into the next call. A short read
+    /// is what does that to a real file, and the digest must not notice.
+    #[test]
+    fn a_vector_split_across_calls_hashes_the_same_as_one_call() {
+        const TWO_BLOCKS: &[u8] = b"abcdefghbcdefghicdefghijdefghijkefghijklfghijklmghijklmnhijklmnoijklmnopjklmnopqklmnopqrlmnopqrsmnopqrstnopqrstu";
+
+        // Every split, so no offset inside or across a block goes untried.
+        for split in 0..=TWO_BLOCKS.len() {
+            let mut hasher = Sha256::new();
+            hasher.update(&TWO_BLOCKS[..split]);
+            hasher.update(&TWO_BLOCKS[split..]);
+            assert_eq!(
+                hex_encode(&hasher.finalize()),
+                "cf5b16a778af8380036ce59e7b0492370b249b11e8f07a51afac45037afee9d1",
+                "split at {split}"
+            );
+        }
     }
 
     /// `sha256_path` reads in 64 KB chunks, so a file larger than one chunk is
