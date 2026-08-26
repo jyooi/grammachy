@@ -165,7 +165,8 @@ The capture tries the primary selection, then the Ctrl + C fallback, so this ite
 
 ## 8. Smoke item 4: a 6,000 unit selection
 
-One check takes 5,000 UTF-16 code units, so a longer selection earns the too-long card.
+The Check size limit belongs to the Engine, and the default `languagetool` engine takes 5,000 UTF-16 code units (spec section 4).
+A longer selection earns the too-long card.
 
 1. Make a file of about 6,000 characters and open it in a terminal pager or an editor:
 
