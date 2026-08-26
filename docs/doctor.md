@@ -2,7 +2,7 @@
 
 The install check of spec sections 4, 8, 10, and 12.
 It checks the binary, LanguageTool, llama.cpp, the model file, and the two transient units.
-It also checks the Java runtime and the local LLM endpoint.
+It also checks the Java runtime, the llama.cpp compute backend, and the local LLM endpoint.
 It prints one line per piece.
 A missing package carries the exact command that installs it.
 
@@ -32,13 +32,14 @@ Grammachy doctor
   ok       Grammachy CLI       grammachy 0.1.0 at /home/u/plugin/bin/grammachy
   ok       LanguageTool        /usr/bin/languagetool
   ok       Java runtime        /usr/lib/jvm/default/bin/java
-  missing  llama.cpp server    llama.cpp is not installed: /usr/bin/llama-server does not exist. Run: sudo pacman -S llama-cpp ggml-vulkan
+  missing  llama.cpp server    llama.cpp is not installed: /usr/bin/llama-server does not exist. Run: sudo pacman -S llama-cpp ggml-cpu ggml-vulkan
+  missing  llama.cpp backend   llama.cpp is missing the ggml-cpu and ggml-vulkan backends. It needs ggml-cpu to answer at all. Run: sudo pacman -S ggml-cpu ggml-vulkan
   missing  Model weights       No weights for gemma-4-e4b-it in /home/u/.local/share/grammachy/models. Run: grammachy setup
   ok       Local LLM endpoint  127.0.0.1:8080
   ok       LanguageTool unit   grammachy-languagetool is not running. The next Check starts it.
   ok       llama.cpp unit      grammachy-llama is not running. The next Check starts it.
 
-Hardware tier discrete-gpu, so llama.cpp wants ggml-vulkan.
+Hardware tier discrete-gpu, so llama.cpp wants ggml-cpu and ggml-vulkan.
 Engine languagetool is ready.
   LanguageTool is installed. The next Check starts it on 127.0.0.1:8081, which takes a moment.
 
@@ -59,16 +60,16 @@ Spec section 8 puts the `diagnosis` line under the body of the `engine_unavailab
   "contractVersion": 1,
   "engine": "openai",
   "ready": false,
-  "diagnosis": "llama.cpp is not installed: /usr/bin/llama-server does not exist. Run: sudo pacman -S llama-cpp ggml-vulkan",
+  "diagnosis": "llama.cpp is not installed: /usr/bin/llama-server does not exist. Run: sudo pacman -S llama-cpp ggml-cpu ggml-vulkan",
   "hardwareTier": "discrete-gpu",
-  "backendPackage": "ggml-vulkan",
+  "backendPackages": ["ggml-cpu", "ggml-vulkan"],
   "checks": [
     {
       "id": "llama.cpp",
       "name": "llama.cpp server",
       "ok": false,
       "detail": "llama.cpp is not installed: /usr/bin/llama-server does not exist.",
-      "remedy": "sudo pacman -S llama-cpp ggml-vulkan",
+      "remedy": "sudo pacman -S llama-cpp ggml-cpu ggml-vulkan",
       "engines": ["openai"]
     }
   ]
@@ -82,16 +83,16 @@ Fields:
 - `ready`: whether every piece that engine needs is in place. It matches the exit code.
 - `diagnosis`: the one line the error card shows. It is the first missing piece of that engine, or a sentence saying the engine can run.
 - `hardwareTier`: `discrete-gpu`, `integrated-gpu`, or `cpu`.
-- `backendPackage`: the ggml package that tier wants beside `llama-cpp`.
+- `backendPackages`: the ggml packages that tier wants beside `llama-cpp`. Every tier wants `ggml-cpu`.
 - `checks`: one entry per piece, in the order the text report prints them.
 
 Check fields:
 
-- `id`: stable across releases, never shown to a user. The ids are `binary`, `languagetool`, `java`, `llama.cpp`, `model`, `endpoint`, `unit:languagetool`, and `unit:llama`.
+- `id`: stable across releases, never shown to a user. The ids are `binary`, `languagetool`, `java`, `llama.cpp`, `backend`, `model`, `endpoint`, `unit:languagetool`, and `unit:llama`.
 - `name`: the display name.
 - `ok`: whether the piece is in place.
 - `detail`: one sentence saying what was found, or what is missing.
-- `remedy`: the exact command that fixes it. The key is absent when there is nothing to run.
+- `remedy`: the exact command that fixes it. The key is absent when there is nothing to run. An `ok` check carries one only as advice, as the backend check does for `ggml-vulkan`.
 - `engines`: the slugs that need this piece. `harper` needs only `binary`, because it runs in process.
 
 ## The engine diagnosis
@@ -99,7 +100,7 @@ Check fields:
 | Slug | Pieces it needs |
 |---|---|
 | `languagetool` | `binary`, `languagetool`, `java`, `unit:languagetool` |
-| `openai` | `binary`, `llama.cpp`, `model`, `endpoint`, `unit:llama` |
+| `openai` | `binary`, `llama.cpp`, `backend`, `model`, `endpoint`, `unit:llama` |
 | `harper` | `binary` |
 | `openrouter` | none that `doctor` reads yet |
 
@@ -111,17 +112,36 @@ For `languagetool` and `openai` it also names the address its unit answers on.
 ## Hardware tiers
 
 Spec section 4: hardware tiers affect only the install step.
-The `llama-cpp` package carries no compute backend, so the tier decides the second package on its install line.
+The `llama-cpp` package carries no compute backend, so the tier decides the other packages on its install line.
 
 The tier is read from the graphics devices under `/sys/class/drm`:
 
-| Tier | Machine | Backend package |
+| Tier | Machine | Backend packages |
 |---|---|---|
-| `discrete-gpu` | A graphics card on its own PCIe bus | `ggml-vulkan` |
-| `integrated-gpu` | A graphics processor on the CPU package, which answers PCI bus `00` | `ggml-vulkan` |
+| `discrete-gpu` | A graphics card on its own PCIe bus | `ggml-cpu`, `ggml-vulkan` |
+| `integrated-gpu` | A graphics processor on the CPU package, which answers PCI bus `00` | `ggml-cpu`, `ggml-vulkan` |
 | `cpu` | Only a framebuffer or a virtual device, or no device at all | `ggml-cpu` |
 
 NPU use stays a documented manual FastFlowLM setup reached through the `openai` adapter, so no tier names it.
+
+## The compute backend
+
+The `backend` check is what spec section 4 asks for beyond `/usr/bin/llama-server`.
+A server with no backend starts and then answers nothing, which reads as a broken engine rather than as a missing package.
+
+The backend libraries live in `/usr/lib/ggml`.
+`ggml-cpu` installs one `libggml-cpu-<microarchitecture>.so` per microarchitecture.
+`ggml-vulkan` installs `libggml-vulkan.so`.
+
+Every tier wants `ggml-cpu`, because llama.cpp runs on the CPU the parts no other backend takes.
+A GPU tier wants `ggml-vulkan` beside it.
+The remedy names only the packages that are missing, and the line names only what is missing.
+A machine can carry `ggml-vulkan` and still lack `ggml-cpu`, so no line claims that the machine has no backend at all.
+
+`ggml-cpu` is the requirement and `ggml-vulkan` is the accelerator.
+A missing `ggml-cpu` fails the check, because the server then answers nothing.
+A GPU machine that has `ggml-cpu` alone passes the check and reads the `ggml-vulkan` line as advice.
+That machine runs the engine on the CPU, so failing it would hide the real cause, such as weights that are not downloaded yet.
 
 ## Testing
 

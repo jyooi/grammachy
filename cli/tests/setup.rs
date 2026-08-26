@@ -283,7 +283,7 @@ fn a_download_failure_still_writes_hotkeys_and_menu() {
 }
 
 #[test]
-fn the_hardware_tier_names_the_backend_package() {
+fn the_hardware_tier_names_the_backend_packages() {
     let home = Home::new("tier");
     let without = model::tier_of(&home.directory);
     std::fs::write(home.directory.join("renderD128"), b"").expect("a render node stands in");
@@ -291,5 +291,6 @@ fn the_hardware_tier_names_the_backend_package() {
 
     assert_eq!(without, model::Tier::Cpu);
     assert_eq!(with, model::Tier::Vulkan);
-    assert_eq!(with.backend_package(), "ggml-vulkan");
+    assert_eq!(without.backend_packages(), ["ggml-cpu"]);
+    assert_eq!(with.backend_packages(), ["ggml-cpu", "ggml-vulkan"]);
 }

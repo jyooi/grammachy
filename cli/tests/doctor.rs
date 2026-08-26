@@ -34,6 +34,10 @@ fn ready() -> Facts {
             driver: "amdgpu".to_string(),
             pci_address: Some("0000:65:00.0".to_string()),
         }],
+        ggml_backends: vec![
+            "libggml-cpu-zen4.so".to_string(),
+            "libggml-vulkan.so".to_string(),
+        ],
     }
 }
 
@@ -122,16 +126,20 @@ fn a_missing_java_runtime_prints_its_pacman_line() {
 }
 
 #[test]
-fn a_missing_llama_server_names_the_backend_package_of_the_tier() {
+fn a_missing_llama_server_names_every_backend_package_of_the_tier() {
     let mut facts = ready();
     facts.llama_server = None;
 
-    // A discrete GPU, so the Vulkan backend.
+    // A discrete GPU, so the CPU backend the server needs and Vulkan beside it.
     let text = text_of(&facts, EngineSlug::Openai);
     assert_eq!(missing_lines(&text).len(), 1, "{text}");
     assert!(
-        text.contains("sudo pacman -S llama-cpp ggml-vulkan"),
+        text.contains("sudo pacman -S llama-cpp ggml-cpu ggml-vulkan"),
         "{text}"
+    );
+    assert!(
+        text.contains("Hardware tier discrete-gpu, so llama.cpp wants ggml-cpu and ggml-vulkan."),
+        "the footer agrees with the remedy: {text}"
     );
 
     // The same machine with no graphics processor asks for the CPU backend.
@@ -139,6 +147,185 @@ fn a_missing_llama_server_names_the_backend_package_of_the_tier() {
     let text = text_of(&facts, EngineSlug::Openai);
     assert!(text.contains("sudo pacman -S llama-cpp ggml-cpu"), "{text}");
     assert!(!text.contains("ggml-vulkan"), "{text}");
+}
+
+/// Running the whole remedy has to leave the machine ready, so the packages the
+/// llama.cpp line names are exactly the ones the backend check then wants.
+#[test]
+fn installing_the_whole_llama_remedy_satisfies_the_backend_check() {
+    let mut facts = ready();
+    facts.llama_server = None;
+    facts.ggml_backends = Vec::new();
+
+    let report = Report::new(&facts, EngineSlug::Openai);
+    let remedy = report
+        .checks
+        .iter()
+        .find(|check| check.id == "llama.cpp")
+        .and_then(|check| check.remedy.clone())
+        .expect("a missing server carries its install line");
+
+    // The user runs it: the server and every named backend arrive.
+    facts.llama_server = Some(PathBuf::from("/usr/bin/llama-server"));
+    facts.ggml_backends = remedy
+        .split_whitespace()
+        .filter(|word| word.starts_with("ggml-"))
+        .map(|package| match package {
+            "ggml-cpu" => "libggml-cpu-zen4.so".to_string(),
+            other => format!("lib{other}.so"),
+        })
+        .collect();
+
+    let after = Report::new(&facts, EngineSlug::Openai);
+    assert!(after.ready, "{}", after.diagnosis);
+    assert!(
+        !after.checks.iter().any(|check| check.remedy.is_some()),
+        "nothing is left to run: {}",
+        doctor::run(&facts, EngineSlug::Openai, false).text
+    );
+}
+
+/// Spec section 4: `llama-cpp` carries no compute backend, so an installed
+/// server beside an empty `/usr/lib/ggml` is a broken engine, not a ready one.
+#[test]
+fn an_installed_server_with_no_backend_is_still_a_missing_piece() {
+    let mut facts = ready();
+    facts.ggml_backends = Vec::new();
+
+    let text = text_of(&facts, EngineSlug::Openai);
+
+    // The server itself is there, so the llama.cpp line is not the missing one.
+    assert!(text.contains("/usr/bin/llama-server"), "{text}");
+    assert_eq!(missing_lines(&text).len(), 1, "{text}");
+    assert!(
+        text.contains("sudo pacman -S ggml-cpu ggml-vulkan"),
+        "{text}"
+    );
+}
+
+/// The CPU tier has no Vulkan device, so it owes nothing to `ggml-vulkan`.
+#[test]
+fn the_cpu_tier_asks_for_the_cpu_backend_alone() {
+    let mut facts = ready();
+    facts.cards = Vec::new();
+    facts.ggml_backends = Vec::new();
+
+    let text = text_of(&facts, EngineSlug::Openai);
+
+    assert!(text.contains("sudo pacman -S ggml-cpu"), "{text}");
+    assert!(!text.contains("pacman -S ggml-cpu ggml-vulkan"), "{text}");
+}
+
+/// A GPU machine that has only the CPU backend runs, on the CPU, so the Vulkan
+/// line is advice and never a fault. Failing it would hide the real cause.
+#[test]
+fn a_gpu_machine_with_only_the_cpu_backend_is_ready_and_told_about_vulkan() {
+    let mut facts = ready();
+    facts.ggml_backends = vec!["libggml-cpu-zen4.so".to_string()];
+
+    let output = doctor::run(&facts, EngineSlug::Openai, false);
+
+    assert_eq!(output.exit_code, 0, "{}", output.text);
+    assert!(missing_lines(&output.text).is_empty(), "{}", output.text);
+    assert!(
+        output.text.contains("llama.cpp runs on the CPU"),
+        "{}",
+        output.text
+    );
+    assert!(
+        output.text.contains("sudo pacman -S ggml-vulkan"),
+        "{}",
+        output.text
+    );
+    assert!(
+        Report::new(&facts, EngineSlug::Openai).ready,
+        "the engine runs, only on the CPU"
+    );
+}
+
+/// The advisory Vulkan line must never take the diagnosis away from the piece
+/// that actually stops the engine.
+#[test]
+fn a_missing_accelerator_never_hides_the_real_cause() {
+    let mut facts = ready();
+    facts.ggml_backends = vec!["libggml-cpu-zen4.so".to_string()];
+    facts.model_file = None;
+
+    let report = Report::new(&facts, EngineSlug::Openai);
+
+    assert!(!report.ready);
+    assert_eq!(
+        report.diagnosis,
+        "No weights for gemma-4-e4b-it in /home/u/.local/share/grammachy/models. Run: grammachy setup"
+    );
+}
+
+/// A GPU machine with the accelerator and no CPU backend is a genuine failure.
+///
+/// The old install line was `sudo pacman -S llama-cpp ggml-vulkan`, and
+/// `ggml-vulkan` depends on no CPU backend, so this is what a machine that
+/// followed it looks like. The line must name the gap without denying the
+/// accelerator that is there.
+#[test]
+fn a_missing_cpu_backend_is_a_fault_even_beside_vulkan() {
+    let mut facts = ready();
+    facts.ggml_backends = vec!["libggml-vulkan.so".to_string()];
+
+    let output = doctor::run(&facts, EngineSlug::Openai, false);
+    let report = Report::new(&facts, EngineSlug::Openai);
+    let check = report
+        .checks
+        .iter()
+        .find(|check| check.id == "backend")
+        .expect("the backend check is there");
+
+    assert_eq!(output.exit_code, 1, "{}", output.text);
+    assert_eq!(missing_lines(&output.text).len(), 1, "{}", output.text);
+    assert!(!check.ok);
+    assert_eq!(check.remedy.as_deref(), Some("sudo pacman -S ggml-cpu"));
+    assert!(check.detail.contains("ggml-cpu"), "{}", check.detail);
+    assert!(
+        !check.detail.contains("no compute backend"),
+        "ggml-vulkan is installed, so the line may not deny it: {}",
+        check.detail
+    );
+    assert!(
+        !check.detail.contains("ggml-vulkan"),
+        "the line names the gap only: {}",
+        check.detail
+    );
+    assert_eq!(
+        report.diagnosis,
+        "llama.cpp is missing the ggml-cpu backend, which it needs to answer at all. Run: sudo pacman -S ggml-cpu"
+    );
+}
+
+/// Spec section 8: the `engine_unavailable` card shows one line, and a missing
+/// backend has to be a line a user can act on.
+#[test]
+fn the_diagnosis_names_the_missing_backend() {
+    let mut facts = ready();
+    facts.ggml_backends = Vec::new();
+
+    let report = Report::new(&facts, EngineSlug::Openai);
+
+    assert!(!report.ready);
+    assert_eq!(
+        report.diagnosis,
+        "llama.cpp is missing the ggml-cpu and ggml-vulkan backends. It needs ggml-cpu to answer at all. Run: sudo pacman -S ggml-cpu ggml-vulkan"
+    );
+}
+
+/// The default engine owes nothing to llama.cpp, backend included.
+#[test]
+fn a_missing_backend_never_fails_another_engine() {
+    let mut facts = ready();
+    facts.ggml_backends = Vec::new();
+
+    for engine in [EngineSlug::Languagetool, EngineSlug::Harper] {
+        let report = Report::new(&facts, engine);
+        assert!(report.ready, "{engine:?} owes nothing to llama.cpp");
+    }
 }
 
 #[test]
@@ -324,7 +511,7 @@ fn every_engine_slug_gets_its_own_failing_diagnosis() {
     );
     assert_eq!(
         Report::new(&facts, EngineSlug::Openai).diagnosis,
-        "llama.cpp is not installed: /usr/bin/llama-server does not exist. Run: sudo pacman -S llama-cpp ggml-vulkan"
+        "llama.cpp is not installed: /usr/bin/llama-server does not exist. Run: sudo pacman -S llama-cpp ggml-cpu ggml-vulkan"
     );
     // Harper needs nothing but the binary, so it stays ready.
     let harper = Report::new(&facts, EngineSlug::Harper);
@@ -340,7 +527,10 @@ fn the_envelope_carries_the_contract_version_and_the_tier() {
     assert_eq!(value["engine"], "openai");
     assert_eq!(value["ready"], true);
     assert_eq!(value["hardwareTier"], "discrete-gpu");
-    assert_eq!(value["backendPackage"], "ggml-vulkan");
+    assert_eq!(
+        value["backendPackages"],
+        serde_json::json!(["ggml-cpu", "ggml-vulkan"])
+    );
     assert!(value["diagnosis"].as_str().is_some());
 
     let checks = value["checks"].as_array().expect("checks is an array");
@@ -355,6 +545,7 @@ fn the_envelope_carries_the_contract_version_and_the_tier() {
             "languagetool",
             "java",
             "llama.cpp",
+            "backend",
             "model",
             "endpoint",
             "unit:languagetool",
@@ -382,7 +573,10 @@ fn a_missing_piece_carries_its_remedy_in_the_envelope() {
 
     assert_eq!(value["ready"], false);
     assert_eq!(check["ok"], false);
-    assert_eq!(check["remedy"], "sudo pacman -S llama-cpp ggml-vulkan");
+    assert_eq!(
+        check["remedy"],
+        "sudo pacman -S llama-cpp ggml-cpu ggml-vulkan"
+    );
     assert_eq!(check["engines"], serde_json::json!(["openai"]));
 }
 

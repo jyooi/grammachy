@@ -5,8 +5,12 @@
 //! documents live in strings, and the one test that goes through the file
 //! layer writes a temporary file and points the binary at it.
 
-use grammachy::args::{CheckArgs, CheckOptions, EngineSlug, NativeLanguage, TargetEnglish};
-use grammachy::settings::{StoredSettings, DEFAULT_OPENAI_BASE_URL, DEFAULT_OPENAI_MODEL};
+use grammachy::args::{
+    CheckArgs, CheckOptions, EngineSlug, NativeLanguage, TargetEnglish, Thinking,
+};
+use grammachy::settings::{
+    StoredSettings, DEFAULT_LOCAL_THINKING, DEFAULT_OPENAI_BASE_URL, DEFAULT_OPENAI_MODEL,
+};
 
 /// A `shell.json` whose bar layout carries the plugin entry.
 fn document(entry_body: &str) -> String {
@@ -35,6 +39,7 @@ fn all_flags() -> CheckArgs {
         native: Some(NativeLanguage::Fr),
         target: Some(TargetEnglish::EnUs),
         engine: Some(EngineSlug::Harper),
+        thinking: Some(Thinking::Off),
     }
 }
 
@@ -43,6 +48,7 @@ fn no_flags() -> CheckArgs {
         native: None,
         target: None,
         engine: None,
+        thinking: None,
     }
 }
 
@@ -56,6 +62,9 @@ fn defaults_apply_with_no_flags_and_no_file() {
     assert_eq!(options.openai_base_url, DEFAULT_OPENAI_BASE_URL);
     assert_eq!(options.openai_model, DEFAULT_OPENAI_MODEL);
     assert_eq!(options.openai_api_key, "");
+    // Spec section 4: thinking is on by default for the local engine.
+    assert!(options.local_thinking);
+    assert_eq!(options.local_thinking, DEFAULT_LOCAL_THINKING);
     assert_eq!(options, CheckOptions::default());
 }
 
@@ -67,11 +76,13 @@ fn the_file_wins_over_the_defaults_for_every_key() {
            "engine": "openai",
            "openaiBaseUrl": "http://localhost:9090",
            "openaiModel": "some-other-model",
-           "openaiApiKey": "sk-local""#,
+           "openaiApiKey": "sk-local",
+           "localThinking": false"#,
     );
 
     let options = CheckOptions::resolve(&no_flags(), &entry);
 
+    assert!(!options.local_thinking);
     assert_eq!(options.native, NativeLanguage::Ja);
     assert_eq!(options.target, TargetEnglish::EnUs);
     assert_eq!(options.engine, EngineSlug::Openai);
@@ -82,13 +93,60 @@ fn the_file_wins_over_the_defaults_for_every_key() {
 
 #[test]
 fn a_flag_wins_over_the_file_for_every_flagged_key() {
-    let entry = stored(r#""nativeLanguage": "ja", "targetEnglish": "en-US", "engine": "openai""#);
+    let entry = stored(
+        r#""nativeLanguage": "ja", "targetEnglish": "en-US", "engine": "openai",
+           "localThinking": true"#,
+    );
 
     let options = CheckOptions::resolve(&all_flags(), &entry);
 
     assert_eq!(options.native, NativeLanguage::Fr);
     assert_eq!(options.target, TargetEnglish::EnUs);
     assert_eq!(options.engine, EngineSlug::Harper);
+    assert!(!options.local_thinking);
+}
+
+/// Spec section 4: `--thinking` wins over the Setting in both directions, so
+/// a stored `false` never keeps `--thinking on` from running a Check with it.
+#[test]
+fn the_thinking_flag_wins_over_the_stored_setting_in_both_directions() {
+    let cases = [
+        (r#""localThinking": false"#, Thinking::On, true),
+        (r#""localThinking": true"#, Thinking::Off, false),
+    ];
+
+    for (entry_body, flag, expected) in cases {
+        let args = CheckArgs {
+            thinking: Some(flag),
+            ..no_flags()
+        };
+        let options = CheckOptions::resolve(&args, &stored(entry_body));
+
+        assert_eq!(
+            options.local_thinking, expected,
+            "{entry_body} with {flag:?}"
+        );
+    }
+}
+
+/// A stored `false` is a value, not a missing key, so it must not read as the
+/// default the way an unknown value does.
+#[test]
+fn thinking_off_is_read_from_the_file_and_on_is_the_default() {
+    assert_eq!(
+        stored(r#""localThinking": false"#).local_thinking,
+        Some(false)
+    );
+    assert_eq!(
+        stored(r#""localThinking": true"#).local_thinking,
+        Some(true)
+    );
+    assert_eq!(stored("").local_thinking, None);
+    // Any other JSON type is unknown, which reads as the default.
+    assert_eq!(stored(r#""localThinking": "off""#).local_thinking, None);
+    assert!(
+        CheckOptions::resolve(&no_flags(), &stored(r#""localThinking": "off""#)).local_thinking
+    );
 }
 
 #[test]
@@ -97,6 +155,7 @@ fn a_flag_wins_over_the_defaults_when_the_file_is_silent() {
 
     assert_eq!(options.native, NativeLanguage::Fr);
     assert_eq!(options.engine, EngineSlug::Harper);
+    assert!(!options.local_thinking);
 }
 
 #[test]
@@ -125,7 +184,8 @@ fn an_unknown_stored_value_reads_as_the_default() {
            "targetEnglish": "en-GB",
            "engine": "gpt",
            "openaiBaseUrl": "",
-           "openaiModel": "   ""#,
+           "openaiModel": "   ",
+           "localThinking": "yes""#,
     );
 
     let options = CheckOptions::resolve(&no_flags(), &entry);
@@ -135,7 +195,8 @@ fn an_unknown_stored_value_reads_as_the_default() {
 
 #[test]
 fn a_stored_value_of_the_wrong_json_type_reads_as_the_default() {
-    let entry = stored(r#""nativeLanguage": 7, "engine": true, "openaiModel": ["a"]"#);
+    let entry =
+        stored(r#""nativeLanguage": 7, "engine": true, "openaiModel": ["a"], "localThinking": 1"#);
 
     assert_eq!(
         CheckOptions::resolve(&no_flags(), &entry),

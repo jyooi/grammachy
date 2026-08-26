@@ -1481,6 +1481,7 @@ Item {
         engineSetting: root.setting("engine")
         openaiBaseUrl: root.setting("openaiBaseUrl")
         openaiModel: root.setting("openaiModel")
+        localThinking: root.setting("localThinking") === true
 
         onSettingsToggled: root.settingsOpen = !root.settingsOpen
         onSettingChanged: function(name, value) { root.persistSetting(name, value) }
@@ -1542,6 +1543,7 @@ Item {
         autoReplace: root.autoReplace
         openaiBaseUrl: root.setting("openaiBaseUrl")
         openaiModel: root.setting("openaiModel")
+        localThinking: root.setting("localThinking") === true
 
         onSettingsToggled: root.settingsOpen = !root.settingsOpen
         onSettingChanged: function(name, value) { root.persistSetting(name, value) }

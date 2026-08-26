@@ -322,6 +322,8 @@ struct RecordedCheck {
 ///
 /// The stored `shell.json` still applies, because the OpenAI base URL lives
 /// there and a benchmark must talk to the server the user's Checks talk to.
+/// `localThinking` follows the same rule: a row has to measure the mode the
+/// machine runs, so a stored `false` is what the request carries.
 fn base_options(stored: &StoredSettings) -> CheckOptions {
     let defaults = CheckOptions::default();
     CheckOptions {
@@ -334,6 +336,7 @@ fn base_options(stored: &StoredSettings) -> CheckOptions {
             .openai_api_key
             .clone()
             .unwrap_or(defaults.openai_api_key),
+        local_thinking: stored.local_thinking.unwrap_or(defaults.local_thinking),
         ..defaults
     }
 }

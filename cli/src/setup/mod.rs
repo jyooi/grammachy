@@ -209,7 +209,7 @@ impl Setup {
             ));
         }
 
-        let backend = model::tier().backend_package();
+        let backend = model::tier().backend_packages().join(" and ");
         let outcome = model::ensure(model_name, &self.models_directory, &self.download)?;
         Ok(match outcome {
             model::Outcome::Present(path) => Step::new(

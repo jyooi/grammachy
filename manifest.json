@@ -27,7 +27,8 @@
       "autoReplace": false,
       "openaiBaseUrl": "http://127.0.0.1:8080",
       "openaiModel": "gemma-4-e4b-it",
-      "openaiApiKey": ""
+      "openaiApiKey": "",
+      "localThinking": true
     },
     "schema": [
       {
@@ -89,6 +90,12 @@
         "type": "string",
         "label": "Local LLM API key",
         "defaultValue": ""
+      },
+      {
+        "key": "localThinking",
+        "type": "boolean",
+        "label": "Local LLM thinking",
+        "defaultValue": true
       }
     ]
   }

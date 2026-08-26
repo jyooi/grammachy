@@ -91,7 +91,12 @@ pub fn issues_from(text: &str, response: &ChatResponse) -> Result<Vec<Issue>, St
 pub fn issues_from_content(text: &str, content: &str) -> Vec<Issue> {
     let Some(suggestions) = parse_array(content) else {
         // The schema makes this unreachable on llama.cpp, and a server that
-        // ignores the schema is a server that found nothing usable.
+        // ignores the schema is a server that found nothing usable. The
+        // envelope cannot tell that apart from a clean text, so say it here:
+        // stdout still carries exactly one envelope (spec section 5.1).
+        eprintln!(
+            "grammachy: the model answer carried no readable suggestion array, so this Check found nothing."
+        );
         return Vec::new();
     };
 
@@ -112,7 +117,42 @@ pub fn issues_from_content(text: &str, content: &str) -> Vec<Issue> {
 }
 
 /// The array inside the content, tolerating prose or a fence around it.
+///
+/// A think comes off first. `--reasoning-format none` leaves the think in
+/// `message.content`, and a think quotes the text with its brackets, so the
+/// scan below would start inside the think and slice a fragment (HUF-224).
+/// The adapter pins `deepseek` on the unit it starts, but `openaiBaseUrl` may
+/// name a server it did not start, which is why the guard lives here too.
+///
+/// Only what follows the think is ever scanned. A model drafts a candidate
+/// array while it reasons and then declines it, so reading the think would
+/// report an Issue the model rejected. No array after the think means no
+/// suggestion, and an unterminated think means the answer never arrived.
 fn parse_array(content: &str) -> Option<Vec<Suggestion>> {
+    let answer = after_think(content)?;
+    scan_array(answer)
+}
+
+/// What follows the leading think block, or nothing when the think never ends.
+fn after_think(content: &str) -> Option<&str> {
+    const OPEN: &str = "<think>";
+    const CLOSE: &str = "</think>";
+
+    let trimmed = content.trim_start();
+    if let Some(rest) = trimmed.strip_prefix(OPEN) {
+        let close = rest.find(CLOSE)?;
+        return Some(&rest[close + CLOSE.len()..]);
+    }
+    // Several chat templates prefill the opening tag into the prompt, so the
+    // content starts inside the think and only the closing tag comes back.
+    match trimmed.find(CLOSE) {
+        Some(close) => Some(&trimmed[close + CLOSE.len()..]),
+        None => Some(content),
+    }
+}
+
+/// The first `[` to the last `]`, parsed as the suggestion array.
+fn scan_array(content: &str) -> Option<Vec<Suggestion>> {
     let start = content.find('[')?;
     let end = content.rfind(']')?;
     if end < start {
@@ -282,5 +322,96 @@ mod tests {
     #[test]
     fn an_answer_with_no_array_is_no_issues() {
         assert!(issues_from_content("He go home.", "I found nothing.").is_empty());
+    }
+
+    /// A server started with `--reasoning-format none` leaves the think in
+    /// `message.content`. The think quotes the text, brackets and all, so the
+    /// scan has to start after the closing tag (HUF-224).
+    #[test]
+    fn a_think_block_that_quotes_a_bracket_does_not_swallow_the_array() {
+        let text = "She bought three book from the store.";
+        let content = concat!(
+            r#"<think>maybe "books" [plural] fits</think>"#,
+            r#"[{"original":"book","fix":"books","reason":"plural","category":"grammar"}]"#
+        );
+
+        let issues = issues_from_content(text, content);
+
+        assert_eq!(issues.len(), 1, "{issues:?}");
+        assert_eq!(issues[0].original, "book");
+        assert_eq!(issues[0].fix, "books");
+        assert_eq!(
+            utf16_slice(text, issues[0].start, issues[0].end).unwrap(),
+            "book"
+        );
+    }
+
+    /// Some chat templates prefill the opening tag, so only the close returns.
+    #[test]
+    fn a_think_that_opened_in_the_prompt_is_still_stripped() {
+        let text = "She bought three book from the store.";
+        let content = concat!(
+            r#"the noun [book] is countable</think>"#,
+            r#"[{"original":"book","fix":"books","reason":"plural","category":"grammar"}]"#
+        );
+
+        let issues = issues_from_content(text, content);
+
+        assert_eq!(issues.len(), 1, "{issues:?}");
+        assert_eq!(issues[0].fix, "books");
+    }
+
+    /// A model drafts an array while it reasons and then declines it. The
+    /// answer is what follows the think, so the draft is never an Issue.
+    #[test]
+    fn an_array_drafted_inside_the_think_is_never_the_answer() {
+        let text = "She bought three book from the store.";
+        let content = concat!(
+            r#"<think>The schema wants "#,
+            r#"[{"original":"book","fix":"books","reason":"plural","category":"grammar"}], "#,
+            r#"but the sentence is fine.</think>No corrections needed."#
+        );
+
+        assert!(
+            issues_from_content(text, content).is_empty(),
+            "the model declined, so the draft is not an Issue"
+        );
+    }
+
+    /// A truncated think never reached the array, so reading it as the answer
+    /// would invent Issues out of the reasoning. No Issues is the honest answer.
+    #[test]
+    fn an_unterminated_think_answers_no_issues_rather_than_its_own_reasoning() {
+        let text = "She bought three book from the store.";
+        let content = r#"<think>maybe ["books"] fits here, and also"#;
+
+        assert!(issues_from_content(text, content).is_empty());
+    }
+
+    /// The think guard may not cost the prose and fence tolerance that was
+    /// there before it.
+    #[test]
+    fn prose_and_a_fence_around_the_array_still_parse() {
+        let text = "She bought three book from the store.";
+        let fenced = concat!(
+            "Here is what I found:\n```json\n",
+            r#"[{"original":"book","fix":"books","reason":"plural","category":"grammar"}]"#,
+            "\n```"
+        );
+
+        let issues = issues_from_content(text, fenced);
+
+        assert_eq!(issues.len(), 1, "{issues:?}");
+        assert_eq!(issues[0].fix, "books");
+    }
+
+    #[test]
+    fn a_genuinely_unreadable_answer_is_no_issues_and_no_panic() {
+        let text = "She bought three book from the store.";
+
+        assert!(issues_from_content(text, "[not json at all").is_empty());
+        assert!(issues_from_content(text, "] backwards [").is_empty());
+        assert!(issues_from_content(text, "<think></think>").is_empty());
+        assert!(issues_from_content(text, "").is_empty());
     }
 }

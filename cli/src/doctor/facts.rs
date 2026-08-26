@@ -14,6 +14,12 @@ use crate::engines::openai::{self, endpoint};
 /// Where `/sys` exposes the graphics devices of this machine.
 const DRM_CLASS: &str = "/sys/class/drm";
 
+/// Where the `ggml-cpu` and `ggml-vulkan` packages drop their backend
+/// libraries. `llama-cpp` carries no compute backend of its own, so a
+/// `llama-server` beside an empty directory here starts and then answers
+/// nothing (spec section 4).
+const GGML_BACKENDS: &str = "/usr/lib/ggml";
+
 /// DRM drivers that drive no real graphics processor.
 ///
 /// `simpledrm` is the framebuffer the kernel sets up before a driver loads,
@@ -74,7 +80,7 @@ fn pci_bus(address: &str) -> Option<&str> {
 /// What llama.cpp runs on, which is the one thing hardware decides.
 ///
 /// Spec section 4: hardware tiers affect only the install step, where `doctor`
-/// names the Vulkan or the CPU backend package for the machine.
+/// names the ggml backend packages this machine wants beside `llama-cpp`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HardwareTier {
     /// A graphics card on its own PCIe bus.
@@ -86,12 +92,29 @@ pub enum HardwareTier {
 }
 
 impl HardwareTier {
-    /// The ggml backend package that makes `llama-cpp` run on this tier.
-    pub fn backend_package(self) -> &'static str {
+    /// The backends this tier wants, in the order `doctor` names them.
+    ///
+    /// Every tier wants `ggml-cpu`, because llama.cpp runs on the CPU the
+    /// parts no other backend takes. A graphics processor wants `ggml-vulkan`
+    /// beside it, which is the accelerator rather than the requirement.
+    pub fn wanted_backends(self) -> Vec<Backend> {
         match self {
-            HardwareTier::DiscreteGpu | HardwareTier::IntegratedGpu => "ggml-vulkan",
-            HardwareTier::Cpu => "ggml-cpu",
+            HardwareTier::Cpu => vec![Backend::Cpu],
+            HardwareTier::DiscreteGpu | HardwareTier::IntegratedGpu => {
+                vec![Backend::Cpu, Backend::Vulkan]
+            }
         }
+    }
+
+    /// The pacman packages that carry those backends.
+    ///
+    /// This is the one rule the llama.cpp remedy, the backend remedy, the
+    /// human footer, and the envelope all read, so no two of them can drift.
+    pub fn backend_packages(self) -> Vec<&'static str> {
+        self.wanted_backends()
+            .into_iter()
+            .map(Backend::package)
+            .collect()
     }
 
     /// The value the JSON envelope carries.
@@ -144,6 +167,47 @@ pub struct Facts {
     pub llama_unit: UnitState,
     /// The graphics devices, which decide the tier.
     pub cards: Vec<DrmCard>,
+    /// The backend library file names under [`GGML_BACKENDS`], such as
+    /// `libggml-cpu-zen4.so` and `libggml-vulkan.so`.
+    pub ggml_backends: Vec<String>,
+}
+
+/// One compute backend `llama-server` can load.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Backend {
+    Cpu,
+    Vulkan,
+}
+
+impl Backend {
+    /// The package that installs it.
+    pub fn package(self) -> &'static str {
+        match self {
+            Backend::Cpu => "ggml-cpu",
+            Backend::Vulkan => "ggml-vulkan",
+        }
+    }
+
+    /// Whether `llama-server` needs this backend to answer at all.
+    ///
+    /// `ggml-cpu` is the requirement and `ggml-vulkan` is the accelerator: a
+    /// machine with the CPU backend alone runs the engine, only on the CPU.
+    pub fn required(self) -> bool {
+        matches!(self, Backend::Cpu)
+    }
+
+    /// Whether one library file name belongs to this backend.
+    fn owns(self, library: &str) -> bool {
+        match self {
+            Backend::Cpu => library.starts_with("libggml-cpu"),
+            Backend::Vulkan => library.starts_with("libggml-vulkan"),
+        }
+    }
+}
+
+/// Whether one backend is installed, from the library file names alone.
+pub fn has_backend(libraries: &[String], backend: Backend) -> bool {
+    libraries.iter().any(|library| backend.owns(library))
 }
 
 impl Facts {
@@ -171,12 +235,26 @@ impl Facts {
             languagetool_unit: unit_state(languagetool::unit::UNIT_NAME),
             llama_unit: unit_state(openai::unit::UNIT_NAME),
             cards: drm_cards(Path::new(DRM_CLASS)),
+            ggml_backends: ggml_backends(Path::new(GGML_BACKENDS)),
         }
     }
 
     /// The tier these facts put the machine in.
     pub fn tier(&self) -> HardwareTier {
         tier_of(&self.cards)
+    }
+
+    /// The backends the tier of this machine wants.
+    pub fn wanted_backends(&self) -> Vec<Backend> {
+        self.tier().wanted_backends()
+    }
+
+    /// The wanted backends this machine does not have.
+    pub fn missing_backends(&self) -> Vec<Backend> {
+        self.wanted_backends()
+            .into_iter()
+            .filter(|backend| !has_backend(&self.ggml_backends, *backend))
+            .collect()
     }
 }
 
@@ -201,6 +279,23 @@ fn unit_state(unit: &str) -> UnitState {
         },
         Err(_) => UnitState::Unknown,
     }
+}
+
+/// The backend library file names under one `ggml` directory.
+///
+/// A missing directory reads as no backend at all, which is what a machine
+/// with `llama-cpp` and neither ggml package looks like.
+fn ggml_backends(directory: &Path) -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir(directory) else {
+        return Vec::new();
+    };
+    let mut libraries: Vec<String> = entries
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.file_name().to_string_lossy().to_string())
+        .filter(|name| name.starts_with("libggml-") && name.contains(".so"))
+        .collect();
+    libraries.sort();
+    libraries
 }
 
 /// The graphics devices under one `/sys/class/drm` directory.
@@ -262,7 +357,10 @@ mod tests {
         let cards = [card("amdgpu", Some("0000:65:00.0"))];
 
         assert_eq!(tier_of(&cards), HardwareTier::DiscreteGpu);
-        assert_eq!(tier_of(&cards).backend_package(), "ggml-vulkan");
+        assert_eq!(
+            tier_of(&cards).backend_packages(),
+            ["ggml-cpu", "ggml-vulkan"]
+        );
     }
 
     #[test]
@@ -271,7 +369,10 @@ mod tests {
         let cards = [card("i915", Some("0000:00:02.0"))];
 
         assert_eq!(tier_of(&cards), HardwareTier::IntegratedGpu);
-        assert_eq!(tier_of(&cards).backend_package(), "ggml-vulkan");
+        assert_eq!(
+            tier_of(&cards).backend_packages(),
+            ["ggml-cpu", "ggml-vulkan"]
+        );
     }
 
     #[test]
@@ -280,13 +381,13 @@ mod tests {
         let cards = [card("simpledrm", None)];
 
         assert_eq!(tier_of(&cards), HardwareTier::Cpu);
-        assert_eq!(tier_of(&cards).backend_package(), "ggml-cpu");
+        assert_eq!(tier_of(&cards).backend_packages(), ["ggml-cpu"]);
     }
 
     #[test]
     fn no_card_at_all_is_the_cpu_tier() {
         assert_eq!(tier_of(&[]), HardwareTier::Cpu);
-        assert_eq!(HardwareTier::Cpu.backend_package(), "ggml-cpu");
+        assert_eq!(HardwareTier::Cpu.backend_packages(), ["ggml-cpu"]);
     }
 
     #[test]
@@ -331,5 +432,40 @@ mod tests {
     #[test]
     fn a_missing_drm_directory_reads_as_no_card() {
         assert!(drm_cards(Path::new("/sys/class/no-such-drm-class")).is_empty());
+    }
+
+    #[test]
+    fn a_missing_ggml_directory_reads_as_no_backend() {
+        let libraries = ggml_backends(Path::new("/usr/lib/no-such-ggml"));
+
+        assert!(libraries.is_empty());
+        assert!(!has_backend(&libraries, Backend::Cpu));
+        assert!(!has_backend(&libraries, Backend::Vulkan));
+    }
+
+    #[test]
+    fn a_cpu_backend_is_read_from_any_of_its_microarchitecture_libraries() {
+        // ggml-cpu ships one library per microarchitecture, never a bare name.
+        let libraries = ["libggml-cpu-zen4.so".to_string()];
+
+        assert!(has_backend(&libraries, Backend::Cpu));
+        assert!(!has_backend(&libraries, Backend::Vulkan));
+    }
+
+    #[test]
+    fn the_vulkan_backend_is_one_library() {
+        let libraries = ["libggml-vulkan.so".to_string()];
+
+        assert!(has_backend(&libraries, Backend::Vulkan));
+        assert!(!has_backend(&libraries, Backend::Cpu));
+    }
+
+    #[test]
+    fn every_backend_names_its_package() {
+        assert_eq!(Backend::Cpu.package(), "ggml-cpu");
+        assert_eq!(Backend::Vulkan.package(), "ggml-vulkan");
+        // ggml-cpu is what llama-server needs. ggml-vulkan only makes it fast.
+        assert!(Backend::Cpu.required());
+        assert!(!Backend::Vulkan.required());
     }
 }

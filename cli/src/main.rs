@@ -133,6 +133,7 @@ fn run() -> Option<Output> {
                     native: None,
                     target: None,
                     engine: args.engine,
+                    thinking: None,
                 },
                 &StoredSettings::load(),
             );
@@ -169,6 +170,7 @@ fn engine_of(flag: Option<EngineSlug>) -> EngineSlug {
             native: None,
             target: None,
             engine: flag,
+            thinking: None,
         },
         &StoredSettings::load(),
     )

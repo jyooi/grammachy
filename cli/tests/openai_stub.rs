@@ -215,6 +215,33 @@ fn a_good_answer_becomes_issues() {
     assert_eq!(issues[0].fix, "books");
 }
 
+/// Spec section 4: the thinking Setting travels on the request, not on the
+/// unit, so a change of it reaches the very next Check with no restart.
+#[test]
+fn the_thinking_setting_is_carried_on_every_request() {
+    for thinking in [true, false] {
+        let stub = Stub::serving(Answer::Json(ANSWER));
+        let starts = Starts::default();
+        let options = CheckOptions {
+            local_thinking: thinking,
+            ..options(&stub.base_url())
+        };
+
+        adapter(Duration::from_secs(2), true, &starts)
+            .check(TEXT, &options)
+            .expect("the stub answers");
+
+        let request = stub.requests().join("");
+        assert!(
+            request.contains(&format!(
+                r#""chat_template_kwargs":{{"enable_thinking":{thinking}}}"#
+            )),
+            "thinking {thinking} is on the wire:\n{request}"
+        );
+        assert!(request.contains(r#""max_tokens":2048"#), "{request}");
+    }
+}
+
 #[test]
 fn a_port_that_already_answers_starts_no_unit() {
     let stub = Stub::serving(Answer::Json(ANSWER));

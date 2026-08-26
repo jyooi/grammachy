@@ -176,6 +176,7 @@ Measured on the 890M: gemma-4-E4B-it writes 25 tokens per second; thinking raise
   Section 7 of this spec fixes that 30 s value for the cloud engine.
   The heavy 2,000-unit case with thinking finishes near 50 s on the 890M.
 - `doctor` checks `ggml-cpu` plus one backend package (`ggml-vulkan` or nothing more on the CPU tier), not only `/usr/bin/llama-server`.
+  A missing `ggml-cpu` fails the check, and a missing `ggml-vulkan` on a GPU tier is a note, because the server still runs on the CPU.
 
 ## 7. Cloud engine `openrouter`
 
@@ -186,6 +187,8 @@ Contract: [HUF-206](https://linear.app/huffman/issue/HUF-206); key placement: [H
   A Check leaves the machine only with this engine, and only to openrouter.ai.
 - Request additions: `usage.include`, `reasoning.enabled=false` (`effort: minimal` for `google/` ids, which reject off), header `X-Title: Grammachy`, Bearer key.
   No `temperature` for ids that reject it.
+  No `chat_template_kwargs`, because the local thinking key of section 6 is a llama.cpp chat-template argument.
+  A cloud row bounds its thinking through `reasoning` alone.
   Timeout 30 s, kept equal in Rust and `ui/errors.js` by test.
   Cost stays inside Rust as `cost: Option<f64>` on the engine result; the 5.1 envelope is unchanged.
 - Settings: `openrouterModel` (text, placeholder of section 5.1) and file-only `cloudConsent`; dropdown label "Cloud LLM (OpenRouter)"; empty model id is `bad_arguments`.

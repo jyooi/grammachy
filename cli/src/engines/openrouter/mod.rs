@@ -108,6 +108,11 @@ pub fn request_body(text: &str, options: &CheckOptions) -> Value {
             "reasoning".to_string(),
             reasoning(&options.openrouter_model),
         );
+        // `chat_template_kwargs` is a llama.cpp chat-template argument and
+        // means nothing to a cloud provider. A cloud row bounds its thinking
+        // through `reasoning` alone (spec `docs/spec/evals.md` section 6), so
+        // the local key never travels with a Check that leaves the machine.
+        fields.remove("chat_template_kwargs");
         if !honours_temperature(&options.openrouter_model) {
             fields.remove("temperature");
         }
@@ -297,6 +302,31 @@ mod tests {
         assert_eq!(body["reasoning"]["enabled"], false);
         assert_eq!(body["temperature"], 0);
         assert_eq!(body["response_format"]["type"], "json_schema");
+    }
+
+    #[test]
+    fn the_local_thinking_key_never_leaves_the_machine() {
+        // The local body carries it in both modes, so its absence in the
+        // cloud body is this adapter's doing rather than an option default.
+        let mut thinking = options("deepseek/deepseek-v4-flash-0731");
+        thinking.local_thinking = true;
+        let mut quiet = options("deepseek/deepseek-v4-flash-0731");
+        quiet.local_thinking = false;
+
+        for local in [&thinking, &quiet] {
+            assert!(prompt::request_body("He go home.", local)
+                .get("chat_template_kwargs")
+                .is_some());
+        }
+
+        for cloud in [&thinking, &quiet] {
+            let body = request_body("He go home.", cloud);
+            assert!(
+                body.get("chat_template_kwargs").is_none(),
+                "the cloud body must not carry the llama.cpp key: {body}"
+            );
+            assert_eq!(body["reasoning"], json!({ "enabled": false }));
+        }
     }
 
     #[test]

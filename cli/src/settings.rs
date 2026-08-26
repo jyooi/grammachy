@@ -27,6 +27,9 @@ pub const DEFAULT_OPENAI_MODEL: &str = "gemma-4-e4b-it";
 /// (HUF-206).
 pub const DEFAULT_OPENROUTER_MODEL: &str = "deepseek/deepseek-v4-flash";
 
+/// Spec section 4: thinking is on by default for the local engine, everywhere.
+pub const DEFAULT_LOCAL_THINKING: bool = true;
+
 /// Points the CLI at another `shell.json`, so tests never read or write the
 /// real one. Not a user-facing setting.
 pub const PATH_ENV: &str = "GRAMMACHY_SHELL_JSON";
@@ -42,6 +45,7 @@ pub struct StoredSettings {
     pub openai_model: Option<String>,
     pub openai_api_key: Option<String>,
     pub openrouter_model: Option<String>,
+    pub local_thinking: Option<bool>,
 }
 
 impl StoredSettings {
@@ -81,6 +85,7 @@ impl StoredSettings {
             // meaningful stored value, so it is kept as it stands.
             openai_api_key: string(entry, "openaiApiKey").map(str::to_string),
             openrouter_model: non_empty(entry, "openrouterModel"),
+            local_thinking: boolean(entry, "localThinking"),
         }
     }
 }
@@ -123,6 +128,12 @@ fn is_ours(entry: &Value) -> bool {
 /// A string value, or `None` for a missing key or any other JSON type.
 fn string<'a>(entry: &'a Value, key: &str) -> Option<&'a str> {
     entry.get(key).and_then(Value::as_str)
+}
+
+/// A boolean value, or `None` for a missing key or any other JSON type, which
+/// then reads as the built-in default the way an unknown value does.
+fn boolean(entry: &Value, key: &str) -> Option<bool> {
+    entry.get(key).and_then(Value::as_bool)
 }
 
 /// A stored text field that carries something, so a blank field reads as the
