@@ -288,7 +288,7 @@ mod tests {
 
     /// The limit of the default engine, which every case here packs to unless
     /// it names the local engine's smaller one.
-    const LIMIT: usize = 5_000;
+    const LIMIT: usize = EngineSlug::Languagetool.check_limit_utf16();
 
     fn text_of(text: &str, chunk: Chunk) -> String {
         let units: Vec<u16> = text.encode_utf16().collect();

@@ -174,7 +174,7 @@ BorderSurface {
       // A first-N Check saw part of the Selection, which the reader has to
       // know before they trust the counts above.
       noteText: root.truncated
-        ? "First " + root.grouped(root.limitUnits) + " of " + root.units(root.fullText.length) + " checked"
+        ? Format.truncatedNote(root.sourceText.length, root.fullText.length)
         : ""
       showsAutoReplace: true
       autoReplace: root.autoReplace

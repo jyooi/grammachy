@@ -77,6 +77,19 @@ fn rest_of(source: &str, start: usize) -> &str {
     &source[start..]
 }
 
+/// The first `lines` lines of the binding `<name>:` in a QML file.
+fn binding_lines(source: &str, name: &str, lines: usize) -> String {
+    let needle = format!("{name}:");
+    let start = source
+        .find(&needle)
+        .unwrap_or_else(|| panic!("the QML declares {name}"));
+    source[start..]
+        .lines()
+        .take(lines)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 fn integer_after(rest: &str, name: &str) -> usize {
     let digits: String = rest
         .trim_start()
@@ -144,5 +157,26 @@ fn the_compose_card_default_cap_equals_the_cli_draft_limit() {
     assert_eq!(
         int_property(&source, "draftCapUnits"),
         MAX_DRAFT_UTF16_UNITS
+    );
+}
+
+/// The first-N note counts what one Check read, so it must be worded from the
+/// text that Check ran on rather than from the live limit.
+///
+/// The limit belongs to the Engine (spec section 4) and the gear sits on the
+/// hero while the answer is on screen, so a note read off the limit renames
+/// itself to a number no Check ever used the moment the Engine changes. The
+/// wording itself is `Format.truncatedNote`, which `ui/format.test.js` runs.
+#[test]
+fn the_first_n_note_is_worded_from_the_checked_text() {
+    let note = binding_lines(&read("ui/QuickCard.qml"), "noteText", 3);
+
+    assert!(
+        note.contains("Format.truncatedNote(root.sourceText.length"),
+        "the note counts the text the Check ran on: {note}"
+    );
+    assert!(
+        !note.contains("limitUnits"),
+        "the note must not follow the live limit: {note}"
     );
 }
