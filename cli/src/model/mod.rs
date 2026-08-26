@@ -321,6 +321,11 @@ pub fn curl(url: &str, path: &Path) -> Result<Transfer, String> {
         .arg("--location")
         .arg("--retry")
         .arg("3")
+        // No progress meter. Nothing drains stderr until the transfer is over,
+        // so a meter that writes for an hour would fill the pipe and stop curl
+        // dead. `--show-error` keeps the one line a failure needs.
+        .arg("--silent")
+        .arg("--show-error")
         // Carry on where an interrupted run stopped. curl answers 33 when the
         // server cannot resume, which the caller turns into a plain message.
         .arg("--continue-at")

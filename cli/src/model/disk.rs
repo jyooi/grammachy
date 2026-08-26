@@ -48,7 +48,7 @@ fn statvfs_available(path: &Path) -> Option<u64> {
         stats.assume_init()
     };
 
-    let block = u64::from(stats.f_frsize as u32).max(1);
+    let block = (stats.f_frsize as u64).max(1);
     Some(block.saturating_mul(stats.f_bavail as u64))
 }
 
