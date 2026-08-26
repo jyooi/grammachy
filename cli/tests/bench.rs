@@ -14,6 +14,8 @@ use std::thread;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
+use grammachy::settings::DEFAULT_OPENAI_MODEL;
+
 struct Run {
     status: i32,
     stdout: String,
@@ -625,6 +627,59 @@ fn a_cloud_answer_without_a_cost_ends_every_cloud_row() {
         "{}",
         run.stdout
     );
+}
+
+/// The Engines `openai` row runs the model the Settings name, so a `--model`
+/// row that names the same model is the same Check run twice. The record file
+/// promises one entry per engine, model, and item, so only one row writes it.
+#[test]
+fn a_model_row_that_repeats_the_engines_row_records_its_items_once() {
+    let settings = settings_file(
+        "record-default-model.json",
+        &format!(
+            r#""openaiBaseUrl": "http://{}""#,
+            stub_server(answer_body(None))
+        ),
+    );
+    let directory = scratch_dir().join("record-default-model");
+    let _ = std::fs::remove_dir_all(&directory);
+
+    let run = bench(
+        &settings,
+        &[
+            "--engine",
+            "openai",
+            "--model",
+            DEFAULT_OPENAI_MODEL,
+            "--record",
+            directory.to_str().expect("the scratch path is UTF-8"),
+        ],
+    );
+
+    assert_eq!(run.status, 0, "{}", run.stderr);
+    let text =
+        std::fs::read_to_string(directory.join("checks.json")).expect("checks.json is written");
+    let checks: Vec<RecordedCheck> =
+        serde_json::from_str(&text).expect("the file is a list of Checks");
+
+    let mut seen: Vec<(String, String, String)> = Vec::new();
+    for check in &checks {
+        let key = (check.engine.clone(), check.model.clone(), check.id.clone());
+        assert!(!seen.contains(&key), "{key:?} is recorded twice");
+        seen.push(key);
+    }
+
+    // The pair is still recorded, once per fixture item.
+    let recorded: Vec<String> = checks
+        .iter()
+        .filter(|check| check.engine == "openai" && check.model == DEFAULT_OPENAI_MODEL)
+        .map(|check| check.id.clone())
+        .collect();
+    assert_eq!(recorded, fixture_ids());
+
+    // The Engines table still prints its own measured row.
+    let engines = row(&run.stdout, "openai");
+    assert!(engines.contains(" of 30 ("), "{engines}");
 }
 
 /// A run that reaches the record write has already paid for its numbers, so a

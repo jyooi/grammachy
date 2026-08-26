@@ -92,7 +92,14 @@ pub fn run(args: &BenchArgs, stored: &StoredSettings) -> Result<Run, String> {
 
     let engines = ENGINES
         .iter()
-        .map(|slug| engine_row(*slug, &base, &sentences, &mut spend, &mut checks))
+        .map(|slug| {
+            let record = if recorded_by_a_model_row(&plan, *slug, &base) {
+                None
+            } else {
+                Some(&mut checks)
+            };
+            engine_row(*slug, &base, &sentences, &mut spend, record)
+        })
         .collect();
     let models = plan
         .rows
@@ -370,12 +377,24 @@ fn command_line(args: &BenchArgs) -> String {
     line
 }
 
+/// Whether a Models row already records the same Checks as one Engines row.
+///
+/// The Engines `openai` row runs the model the Settings name, so a `--model`
+/// row that names that model is the same Check run twice. The record file
+/// promises one entry per engine, model, and item, so only one row writes it.
+fn recorded_by_a_model_row(plan: &Plan, slug: EngineSlug, base: &CheckOptions) -> bool {
+    let model = row_model(slug, base);
+    plan.rows
+        .iter()
+        .any(|(row_slug, row_model)| *row_slug == slug && *row_model == model)
+}
+
 fn engine_row(
     slug: EngineSlug,
     base: &CheckOptions,
     sentences: &[Sentence],
     spend: &mut Spend,
-    checks: &mut Vec<RecordedCheck>,
+    checks: Option<&mut Vec<RecordedCheck>>,
 ) -> EngineRow {
     let options = CheckOptions {
         engine: slug,
@@ -422,7 +441,7 @@ fn model_row(
         model: model.to_string(),
         engine: slug.as_str().to_string(),
         weights,
-        outcome: measure(slug, &options, sentences, spend, checks),
+        outcome: measure(slug, &options, sentences, spend, Some(checks)),
     }
 }
 
@@ -438,7 +457,7 @@ fn measure(
     options: &CheckOptions,
     sentences: &[Sentence],
     spend: &mut Spend,
-    checks: &mut Vec<RecordedCheck>,
+    mut checks: Option<&mut Vec<RecordedCheck>>,
 ) -> Outcome {
     let Some(adapter) = engine::resolve(slug) else {
         return Outcome::Skipped(format!("This build has no {} adapter.", slug.as_str()));
@@ -488,19 +507,21 @@ fn measure(
         };
         spend.add(cost);
 
-        checks.push(RecordedCheck {
-            engine: slug.as_str().to_string(),
-            model: model.clone(),
-            id: sentence.id.clone(),
-            valid,
-            latency_ms,
-            cost,
-            prompt_tokens: usage.and_then(|usage| usage.prompt_tokens),
-            completion_tokens: usage.and_then(|usage| usage.completion_tokens),
-            prompt_ms: usage.and_then(|usage| usage.prompt_ms),
-            generation_ms: usage.and_then(|usage| usage.generation_ms),
-            issues: issues.clone(),
-        });
+        if let Some(checks) = checks.as_deref_mut() {
+            checks.push(RecordedCheck {
+                engine: slug.as_str().to_string(),
+                model: model.clone(),
+                id: sentence.id.clone(),
+                valid,
+                latency_ms,
+                cost,
+                prompt_tokens: usage.and_then(|usage| usage.prompt_tokens),
+                completion_tokens: usage.and_then(|usage| usage.completion_tokens),
+                prompt_ms: usage.and_then(|usage| usage.prompt_ms),
+                generation_ms: usage.and_then(|usage| usage.generation_ms),
+                issues: issues.clone(),
+            });
+        }
         if slug.is_cloud() && valid && cost.is_none() {
             return spend.exhaust(unpriced(&sentence.id));
         }
