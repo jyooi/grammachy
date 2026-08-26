@@ -93,6 +93,9 @@ pub struct Report {
     /// The engine a release is measured against (spec section 7).
     pub default_engine: String,
     pub max_cost: Option<f64>,
+    /// What the run paid the cloud engine, the rows the cap or an unpriced
+    /// answer ended included.
+    pub cloud_spend_usd: f64,
     pub engines: Vec<EngineRow>,
     pub models: Vec<ModelRow>,
 }
@@ -194,7 +197,7 @@ impl Report {
         if let Some(cap) = self.max_cost {
             out.push_str(&format!(
                 "Cloud spend of this run: {:.4} USD of the {cap} USD cap.\n",
-                self.cloud_spend()
+                self.cloud_spend_usd
             ));
         }
         out.push('\n');
@@ -299,15 +302,6 @@ impl Report {
             .find(|row| row.engine == self.default_engine)
             .and_then(|row| row.outcome.tally())
             .map(|tally| tally.false_positives)
-    }
-
-    fn cloud_spend(&self) -> f64 {
-        self.models
-            .iter()
-            .filter(|row| row.is_cloud())
-            .filter_map(|row| row.outcome.tally())
-            .map(|tally| tally.cost_usd)
-            .sum()
     }
 
     fn recommendation_lines(&self, verdicts: &[String]) -> String {
@@ -474,7 +468,7 @@ const MEASUREMENT_NOTE: &str = "\
 - Style creep: unpaired Issues on interference sentences, per 100 interference sentences.
 - Valid: Checks that returned a result. An invalid Check counts as zero Issues, so a miss, and stays out of precision, exact fix, and latency.
 - p50 and p95 latency: nearest rank over the valid Checks of the fixture, correct sentences included, measured in process around one Check.
-- Cost per 1,000 Checks: the sum of `usage.cost` over the row divided by its Checks, times 1,000. Local rows cost nothing per Check.
+- Cost per 1,000 Checks: the sum of `usage.cost` over the row divided by the number of Checks that reported a cost, times 1,000. A row that leaves any valid Check unpriced prints `n/a` instead. Local rows cost nothing per Check.
 - Every sentence is checked with the Native language the fixture records for it, which is what the shell passes on a real Check.
 ";
 
@@ -535,6 +529,7 @@ mod tests {
             languages: vec!["zh".to_string(), "es".to_string()],
             default_engine: "languagetool".to_string(),
             max_cost: None,
+            cloud_spend_usd: 0.0,
             engines: vec![
                 EngineRow {
                     engine: "languagetool".to_string(),
@@ -646,6 +641,7 @@ mod tests {
     fn the_best_eligible_local_row_is_recommended_and_cloud_rows_compete_apart() {
         let mut report = report();
         report.max_cost = Some(10.0);
+        report.cloud_spend_usd = 0.0016;
         report.models = vec![
             model(
                 "gemma-4-e4b-it",
@@ -698,6 +694,26 @@ mod tests {
             "{rendered}"
         );
         assert!(rendered.contains("| `qwen3.5-4b` | 29 of 30 (96.7%) | 29 of 30 (96.7%) | 29 of 30 (96.7%) | 96.7% | 25 of 30 (83.3%) | 0 of 10 | 6.7 | 40 of 40 (100.0%) |"), "{rendered}");
+    }
+
+    #[test]
+    fn the_cloud_spend_line_holds_what_a_row_the_cap_ended_already_paid() {
+        let mut report = report();
+        report.max_cost = Some(0.05);
+        report.cloud_spend_usd = 0.049;
+        report.models = vec![model(
+            "deepseek/deepseek-v4-flash-0731",
+            "openrouter",
+            weights::HOSTED,
+            Outcome::Skipped("cost cap 0.05 USD reached after 20 sentences".to_string()),
+        )];
+
+        let rendered = report.render();
+
+        assert!(
+            rendered.contains("Cloud spend of this run: 0.0490 USD of the 0.05 USD cap."),
+            "a row the cap ended carries no tally, and its spend still happened: {rendered}"
+        );
     }
 
     #[test]

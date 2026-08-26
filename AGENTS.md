@@ -56,7 +56,10 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   `cli/src/bench/weights.rs` is the product rule for which models may be recommended (`docs/spec/evals.md` section 5).
   `openrouter` is the cloud engine in `cli/src/engines/openrouter/`, and it reuses the `openai` request, prompt, and mapping.
   A cloud row needs `--max-cost <usd>`, the cap on the whole run, and the flag is refused when no cloud row runs.
+  `Spend` in `cli/src/bench/mod.rs` owns both ways a cloud row ends and what the report prints as the run's spend, because a row the cap ended carries no tally.
+  A cloud answer with no `usage.cost` ends its row and every later cloud row, because a run that cannot measure its spend cannot hold the cap.
   `--record <dir>` writes `checks.json`, one entry per engine, model, and item, which the judge of a later ticket reads.
+  `Plan::of` creates that file before the first row, so a directory the run cannot write never discards a report it already paid for.
   That file is gitignored, because it is the only place model output text lands.
   `cli/src/bench/fixture.rs` is the one loader and `cli/src/bench/metrics.rs` is the one metrics module.
   Both sets share the item shape `{ id, native, text, edits[], expected_text }` of the evals spec.

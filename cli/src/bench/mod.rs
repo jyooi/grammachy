@@ -24,8 +24,12 @@
 //!
 //! `--max-cost` caps what a run may spend through `openrouter`, summed from
 //! `usage.cost`. A row that would pass the cap ends as skipped, and so does
-//! every cloud row after it. `--record <dir>` writes every Check's answer to
-//! `checks.json`, the input of the judge script (HUF-205).
+//! every cloud row after it. A cloud answer that carries no `usage.cost` ends
+//! its row the same way, because a run that cannot measure its spend cannot
+//! hold the cap. `--record <dir>` writes every Check's answer to `checks.json`,
+//! the input of the judge script (HUF-205). The run creates that file before
+//! the first row, so a directory it cannot write never discards a report it
+//! already paid for.
 
 pub mod fixture;
 pub mod machine;
@@ -34,7 +38,7 @@ pub mod metrics;
 pub mod report;
 pub mod weights;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Instant;
 
@@ -61,6 +65,9 @@ const ENGINES: [EngineSlug; 3] = [
     EngineSlug::Openai,
 ];
 
+/// The file `--record` writes inside the directory it is given.
+const RECORD_FILE: &str = "checks.json";
+
 /// Build the report of one run, or say why the arguments do not describe a run.
 pub fn run(args: &BenchArgs, stored: &StoredSettings) -> Result<String, String> {
     let plan = Plan::of(args)?;
@@ -79,8 +86,8 @@ pub fn run(args: &BenchArgs, stored: &StoredSettings) -> Result<String, String> 
         .map(|(slug, model)| model_row(*slug, model, &base, &sentences, &mut spend, &mut checks))
         .collect();
 
-    if let Some(directory) = &args.record {
-        record(directory, &checks)?;
+    if let Some(path) = &plan.record {
+        record(path, &checks)?;
     }
 
     let (interference, clean) = counts(&sentences);
@@ -93,6 +100,7 @@ pub fn run(args: &BenchArgs, stored: &StoredSettings) -> Result<String, String> 
         languages: languages(&sentences),
         default_engine: CheckOptions::default().engine.as_str().to_string(),
         max_cost: args.max_cost,
+        cloud_spend_usd: spend.spent_usd(),
         engines,
         models,
     }
@@ -103,6 +111,8 @@ pub fn run(args: &BenchArgs, stored: &StoredSettings) -> Result<String, String> 
 #[derive(Debug, PartialEq)]
 struct Plan {
     rows: Vec<(EngineSlug, String)>,
+    /// The record file, already created and proved writable.
+    record: Option<PathBuf>,
 }
 
 impl Plan {
@@ -159,17 +169,40 @@ impl Plan {
             _ => {}
         }
 
-        Ok(Plan { rows })
+        let record = match &args.record {
+            Some(directory) => Some(open_record(directory)?),
+            None => None,
+        };
+
+        Ok(Plan { rows, record })
     }
+}
+
+/// Create the record file before the first row runs.
+///
+/// A run through the cloud engine spends real money, and its report is the
+/// whole point of the run. So a directory that cannot hold the record ends the
+/// run here, rather than after the last row has already been paid for.
+fn open_record(directory: &Path) -> Result<PathBuf, String> {
+    std::fs::create_dir_all(directory).map_err(|error| {
+        format!(
+            "--record: {} cannot be created: {error}",
+            directory.display()
+        )
+    })?;
+    let path = directory.join(RECORD_FILE);
+    std::fs::write(&path, "[]")
+        .map_err(|error| format!("--record: {} cannot be written: {error}", path.display()))?;
+    Ok(path)
 }
 
 /// What the run has spent so far through the cloud engine.
 struct Spend {
     cap: Option<f64>,
-    spent_usd: f64,
+    spent: f64,
     /// The last cost seen, the estimate of what the next Check will cost.
     last_usd: f64,
-    /// Set once a row hit the cap, so every later cloud row is skipped too.
+    /// Set once a row ended the cloud rows, so every later one is skipped too.
     exhausted: Option<String>,
 }
 
@@ -177,7 +210,7 @@ impl Spend {
     fn new(cap: Option<f64>) -> Spend {
         Spend {
             cap,
-            spent_usd: 0.0,
+            spent: 0.0,
             last_usd: 0.0,
             exhausted: None,
         }
@@ -185,16 +218,43 @@ impl Spend {
 
     /// Whether the next Check would pass the cap.
     fn would_exceed(&self) -> bool {
-        self.cap
-            .is_some_and(|cap| self.spent_usd + self.last_usd > cap)
+        self.cap.is_some_and(|cap| self.spent + self.last_usd > cap)
     }
 
     fn add(&mut self, cost: Option<f64>) {
         if let Some(cost) = cost {
-            self.spent_usd += cost;
+            self.spent += cost;
             self.last_usd = cost;
         }
     }
+
+    /// What the run has already paid the cloud engine.
+    ///
+    /// The report reads this rather than the row tallies, because a row the cap
+    /// or an unpriced answer ended carries no tally and was still billed.
+    fn spent_usd(&self) -> f64 {
+        self.spent
+    }
+
+    /// End the cloud rows of this run and say why.
+    ///
+    /// Every later cloud row carries the same sentence, because the reason a
+    /// row stopped is a fact about the run rather than about one model.
+    fn exhaust(&mut self, why: String) -> Outcome {
+        self.exhausted = Some(why.clone());
+        Outcome::Skipped(why)
+    }
+}
+
+/// The one sentence a row skipped for an unpriced answer carries.
+///
+/// `--max-cost` is a hard bound on what a run may spend. An answer with no
+/// `usage.cost` leaves the spend unmeasurable, so the row ends there rather
+/// than billing on blind.
+fn unpriced(id: &str) -> String {
+    format!(
+        "the answer for fixture sentence {id} carried no usage.cost, so this run cannot measure its spend"
+    )
 }
 
 /// One Check as `--record` writes it.
@@ -366,8 +426,7 @@ fn measure(
                 "cost cap {} USD reached after {index} sentences",
                 spend.cap.unwrap_or_default()
             );
-            spend.exhausted = Some(why.clone());
-            return Outcome::Skipped(why);
+            return spend.exhaust(why);
         }
 
         let options = CheckOptions {
@@ -393,12 +452,6 @@ fn measure(
                 (Vec::new(), None, None, false)
             }
         };
-        if slug.is_cloud() && valid && cost.is_none() {
-            eprintln!(
-                "grammachy bench: {model} on {} answered without usage.cost",
-                sentence.id
-            );
-        }
         spend.add(cost);
 
         checks.push(RecordedCheck {
@@ -414,6 +467,9 @@ fn measure(
             generation_ms: usage.and_then(|usage| usage.generation_ms),
             issues: issues.clone(),
         });
+        if slug.is_cloud() && valid && cost.is_none() {
+            return spend.exhaust(unpriced(&sentence.id));
+        }
         recorded.push(Recorded {
             id: sentence.id.clone(),
             native: sentence.native.clone(),
@@ -466,17 +522,10 @@ fn reason(id: &str, failure: EngineFailure) -> String {
     format!("{message} (at fixture sentence {id})")
 }
 
-/// Write every Check of the run to `<directory>/checks.json`.
-fn record(directory: &Path, checks: &[RecordedCheck]) -> Result<(), String> {
-    std::fs::create_dir_all(directory).map_err(|error| {
-        format!(
-            "--record: {} cannot be created: {error}",
-            directory.display()
-        )
-    })?;
-    let path = directory.join("checks.json");
+/// Write every Check of the run to the record file the plan opened.
+fn record(path: &Path, checks: &[RecordedCheck]) -> Result<(), String> {
     let text = serde_json::to_string_pretty(checks).expect("checks serialise");
-    std::fs::write(&path, text)
+    std::fs::write(path, text)
         .map_err(|error| format!("--record: {} cannot be written: {error}", path.display()))
 }
 
@@ -637,6 +686,71 @@ mod tests {
         let mut open = Spend::new(None);
         open.add(Some(100.0));
         assert!(!open.would_exceed());
+    }
+
+    #[test]
+    fn an_unpriced_cloud_answer_ends_the_cloud_rows_and_keeps_what_they_spent() {
+        let mut spend = Spend::new(Some(10.0));
+        spend.add(Some(0.03));
+        spend.add(None);
+
+        assert!(
+            !spend.would_exceed(),
+            "an unpriced answer cannot move the cap, which is why the row must end"
+        );
+        let outcome = spend.exhaust(unpriced("zh-01"));
+
+        let Outcome::Skipped(why) = outcome else {
+            panic!("an unpriced answer ends the row");
+        };
+        assert_eq!(
+            why,
+            "the answer for fixture sentence zh-01 carried no usage.cost, so this run cannot measure its spend"
+        );
+        assert_eq!(spend.exhausted.as_deref(), Some(why.as_str()));
+        assert!((spend.spent_usd() - 0.03).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_record_directory_that_cannot_hold_the_file_is_refused_before_any_row_runs() {
+        let taken = std::env::temp_dir().join(format!(
+            "grammachy-bench-record-{}-{}",
+            std::process::id(),
+            "file"
+        ));
+        std::fs::write(&taken, "not a directory").expect("the scratch file is written");
+
+        let message = Plan::of(&BenchArgs {
+            record: Some(taken.clone()),
+            ..args(None, &[])
+        })
+        .expect_err("a file cannot hold the record");
+
+        let _ = std::fs::remove_file(&taken);
+        assert!(message.starts_with("--record: "), "{message}");
+    }
+
+    #[test]
+    fn a_record_directory_is_created_and_proved_writable_up_front() {
+        let directory = std::env::temp_dir().join(format!(
+            "grammachy-bench-record-{}-{}",
+            std::process::id(),
+            "dir"
+        ));
+        let _ = std::fs::remove_dir_all(&directory);
+
+        let plan = Plan::of(&BenchArgs {
+            record: Some(directory.clone()),
+            ..args(None, &[])
+        })
+        .expect("the directory is made");
+
+        assert_eq!(plan.record, Some(directory.join(RECORD_FILE)));
+        assert_eq!(
+            std::fs::read_to_string(directory.join(RECORD_FILE)).expect("the file exists"),
+            "[]"
+        );
+        let _ = std::fs::remove_dir_all(&directory);
     }
 
     #[test]
