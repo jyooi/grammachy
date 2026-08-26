@@ -117,13 +117,24 @@ fn bench(settings: &Path, arguments: &[&str]) -> Run {
     }
 }
 
-/// The row of one engine or model, whatever its numbers are.
+/// The first row of one engine or model: the Engines row, or the Quality row
+/// of a model.
 fn row<'a>(report: &'a str, name: &str) -> &'a str {
+    nth_row(report, name, 0)
+}
+
+/// The Cost row of one model, the second table it appears in.
+fn cost_row<'a>(report: &'a str, name: &str) -> &'a str {
+    nth_row(report, name, 1)
+}
+
+fn nth_row<'a>(report: &'a str, name: &str, index: usize) -> &'a str {
     let head = format!("| `{name}` |");
     report
         .lines()
-        .find(|line| line.starts_with(&head))
-        .unwrap_or_else(|| panic!("the report holds a row for {name}:\n{report}"))
+        .filter(|line| line.starts_with(&head))
+        .nth(index)
+        .unwrap_or_else(|| panic!("the report holds row {index} for {name}:\n{report}"))
 }
 
 #[test]
@@ -199,9 +210,13 @@ fn a_named_model_is_evaluated_against_the_endpoint_of_the_settings() {
     // The stub answers the plural mistake of zh-02 for every sentence, so the
     // row carries one catch and a false positive on every correct sentence.
     let model = row(&run.stdout, "qwen2.5-7b-instruct");
-    assert!(model.contains("| 1 of 30 (3%) |"), "{model}");
+    assert!(model.contains("| 1 of 30 (3.3%) |"), "{model}");
     assert!(model.contains("| 0 of 10 |"), "{model}");
-    assert!(model.contains("| Apache-2.0 | eligible |"), "{model}");
+    let cost = cost_row(&run.stdout, "qwen2.5-7b-instruct");
+    assert!(
+        cost.contains("| 0.00 (local) | Apache-2.0 | recommended |"),
+        "{cost}"
+    );
     assert!(
         run.stdout
             .contains("grammachy bench --engine openai --model qwen2.5-7b-instruct"),
@@ -230,15 +245,19 @@ fn a_model_with_non_commercial_weights_is_shown_but_never_recommended() {
     );
 
     assert_eq!(run.status, 0);
-    let restricted = row(&run.stdout, "qwen2.5-3b-instruct");
+    let restricted = cost_row(&run.stdout, "qwen2.5-3b-instruct");
     assert!(
         restricted.contains("| Qwen Research License | never, the weights are non-commercial |"),
         "{restricted}"
     );
     // It is still a full row: the table shows it for reference.
-    assert!(restricted.contains("| 1 of 30 (3%) |"), "{restricted}");
     assert!(
-        row(&run.stdout, "qwen2.5-7b-instruct").contains("| eligible |"),
+        row(&run.stdout, "qwen2.5-3b-instruct").contains("| 1 of 30 (3.3%) |"),
+        "{}",
+        run.stdout
+    );
+    assert!(
+        cost_row(&run.stdout, "qwen2.5-7b-instruct").contains("| recommended |"),
         "{}",
         run.stdout
     );
@@ -261,7 +280,7 @@ fn a_model_on_an_engine_that_takes_none_is_a_bad_arguments_envelope() {
         envelope["error"]["message"]
             .as_str()
             .expect("the envelope carries a message")
-            .contains("Only the openai engine"),
+            .contains("Only the openai and openrouter engines"),
         "{envelope}"
     );
 }
@@ -283,7 +302,7 @@ fn an_unreachable_model_still_carries_its_license_and_recommendation() {
         "an unreachable model is skipped, not an error"
     );
     assert_eq!(
-        row(&run.stdout, "qwen2.5-3b-instruct"),
+        cost_row(&run.stdout, "qwen2.5-3b-instruct"),
         "| `qwen2.5-3b-instruct` | skipped | skipped | skipped | skipped | Qwen Research License | never, the weights are non-commercial |"
     );
     assert!(

@@ -28,16 +28,23 @@ struct Sentence {
     id: String,
     native: String,
     text: String,
-    expected_span: Option<Span>,
-    /// Null for the correct sentences of the fixture.
+    /// Empty for the correct sentences of the fixture.
     #[serde(default)]
-    expected_fix: Option<String>,
+    edits: Vec<Edit>,
 }
 
 #[derive(Debug, Deserialize)]
-struct Span {
+struct Edit {
     start: usize,
     end: usize,
+    fix: String,
+}
+
+impl Sentence {
+    /// The one expected edit of an interference sentence.
+    fn expected(&self) -> Option<&Edit> {
+        self.edits.first()
+    }
 }
 
 fn fixture() -> Vec<Sentence> {
@@ -82,7 +89,7 @@ fn check(text: &str, native: &str) -> Value {
 }
 
 /// A sentence is caught when one Issue touches the span the fixture expects.
-fn caught(issues: &[Value], expected: &Span) -> bool {
+fn caught(issues: &[Value], expected: &Edit) -> bool {
     issues.iter().any(|issue| {
         let start = issue["start"].as_u64().unwrap_or_default() as usize;
         let end = issue["end"].as_u64().unwrap_or_default() as usize;
@@ -135,7 +142,7 @@ fn the_fixture_prints_the_harper_catch_rate() {
             .check(&sentence.text, &options)
             .unwrap_or_else(|failure| panic!("{} answered {failure:?}", sentence.id));
 
-        match &sentence.expected_span {
+        match sentence.expected() {
             None => {
                 tally.clean += 1;
                 if !issues.is_empty() {
@@ -149,10 +156,7 @@ fn the_fixture_prints_the_harper_catch_rate() {
                     .any(|issue| issue.start < expected.end && expected.start < issue.end);
                 if hit {
                     tally.caught += 1;
-                    if issues
-                        .iter()
-                        .any(|issue| Some(issue.fix.as_str()) == sentence.expected_fix.as_deref())
-                    {
+                    if issues.iter().any(|issue| issue.fix == expected.fix) {
                         tally.exact_fixes += 1;
                     }
                 } else {
@@ -193,7 +197,7 @@ fn the_fixture_prints_the_catch_rate() {
             .cloned()
             .unwrap_or_else(|| panic!("{} answered {envelope}", sentence.id));
 
-        match &sentence.expected_span {
+        match sentence.expected() {
             // A correct sentence: any Issue at all is a false positive.
             None => {
                 clean += 1;
@@ -207,7 +211,7 @@ fn the_fixture_prints_the_catch_rate() {
                     caught_count += 1;
                     let exact = issues
                         .iter()
-                        .any(|issue| issue["fix"].as_str() == sentence.expected_fix.as_deref());
+                        .any(|issue| issue["fix"].as_str() == Some(expected.fix.as_str()));
                     if exact {
                         exact_fixes += 1;
                     }

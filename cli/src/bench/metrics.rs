@@ -1,34 +1,70 @@
-//! The arithmetic of one benchmark row, spec section 13.1.
+//! The arithmetic of one benchmark row, spec section 13.1 and HUF-205.
 //!
 //! Every number in the tables comes from this module, computed from the
 //! per-sentence results the run recorded. Nothing here talks to an engine, so
 //! the arithmetic is testable without a server.
 //!
-//! The three definitions are the ones HUF-171 measured with:
+//! The definitions, each computed from the Issues of one Check and the edits of
+//! one fixture item so two implementations agree to the digit:
 //!
-//! - **caught**: at least one Issue of the answer overlaps the span the fixture
-//!   expects. A right span with a wrong Fix still counts, because the Panel
-//!   shows the user the span and lets them Skip the Fix.
+//! - **caught**: at least one Issue overlaps an expected edit. A right span with
+//!   a wrong Fix still counts, because the Panel shows the span and lets the
+//!   user Skip the Fix. This is the regression gate of spec 13.1, untouched.
 //! - **false positive**: a correct sentence that earned at least one Issue.
-//!   One sentence counts once, however many Issues it earned.
-//! - **p50 latency**: the median over every sentence of the fixture, correct
-//!   ones included, because the user pays that cost on every Check.
+//! - **pair**: an Issue pairs with the first unpaired edit it overlaps, provided
+//!   the Issue extends no more than three words past the edit on either side.
+//!   Precision, recall, and F0.5 are micro-averaged over the whole set.
+//! - **exact fix**: applying every Fix of the Check yields `expected_text`,
+//!   after collapsing runs of whitespace.
+//! - **style creep**: unpaired Issues on interference sentences, per 100 such
+//!   sentences.
+//! - **valid**: the Check returned a result envelope. An invalid Check counts
+//!   as zero Issues, so a miss, and stays out of precision, exact fix, and
+//!   latency.
+//! - **p50 and p95**: nearest rank over the valid latencies, no interpolation.
+
+use std::collections::BTreeMap;
 
 use crate::bench::fixture::Span;
+use crate::envelope::Issue;
+use crate::text::{byte_index_of_utf16, utf16_slice};
+
+/// How far an Issue may reach past the edit it pairs with, in words.
+const PAIR_SLACK_WORDS: usize = 3;
 
 /// What one sentence cost and what the engine answered for it.
 #[derive(Debug, Clone)]
 pub struct Recorded {
     pub id: String,
-    /// The span the fixture expects, or `None` for a correct sentence.
-    pub expected: Option<Span>,
-    /// The span of every Issue the engine answered, in UTF-16 code units.
-    pub spans: Vec<Span>,
+    pub native: String,
+    pub text: String,
+    /// The spans the fixture expects, empty for a correct sentence.
+    pub edits: Vec<Span>,
+    pub expected_text: String,
+    /// The Issues the engine answered, empty when the Check was invalid.
+    pub issues: Vec<Issue>,
+    /// Whether the Check returned a result envelope.
+    pub valid: bool,
     pub latency_ms: u64,
+    /// `usage.cost` in USD when the engine reported one.
+    pub cost: Option<f64>,
+}
+
+impl Recorded {
+    pub fn is_interference(&self) -> bool {
+        !self.edits.is_empty()
+    }
+}
+
+/// Recall restricted to one native language.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct LanguageRecall {
+    pub pairs: usize,
+    pub edits: usize,
 }
 
 /// Every number of one table row.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct Tally {
     /// Interference sentences seen.
     pub interference: usize,
@@ -36,9 +72,24 @@ pub struct Tally {
     /// Correct sentences seen.
     pub clean: usize,
     pub false_positives: usize,
+    /// Issues of every valid Check, correct sentences included.
+    pub issues: usize,
+    pub pairs: usize,
+    /// Expected edits of every sentence, invalid Checks included.
+    pub edits: usize,
+    pub exact: usize,
+    /// Unpaired Issues on interference sentences.
+    pub creep_issues: usize,
+    pub checks: usize,
+    pub valid: usize,
     pub p50_ms: u64,
+    pub p95_ms: u64,
+    /// The sum of every reported cost, and how many Checks reported one.
+    pub cost_usd: f64,
+    pub priced: usize,
     /// The ids of the interference sentences no Issue touched.
     pub misses: Vec<String>,
+    pub by_language: BTreeMap<String, LanguageRecall>,
 }
 
 impl Tally {
@@ -47,135 +98,352 @@ impl Tally {
         let mut tally = Tally::default();
 
         for sentence in recorded {
-            match sentence.expected {
-                None => {
-                    tally.clean += 1;
-                    if !sentence.spans.is_empty() {
-                        tally.false_positives += 1;
-                    }
+            tally.checks += 1;
+            tally.edits += sentence.edits.len();
+            if sentence.valid {
+                tally.valid += 1;
+                tally.issues += sentence.issues.len();
+            }
+            if let Some(cost) = sentence.cost {
+                tally.cost_usd += cost;
+                tally.priced += 1;
+            }
+
+            let pairs = pair(&sentence.text, &sentence.issues, &sentence.edits);
+            tally.pairs += pairs;
+            if sentence.is_interference() {
+                tally
+                    .by_language
+                    .entry(sentence.native.clone())
+                    .or_default()
+                    .add(pairs, sentence.edits.len());
+            }
+
+            if !sentence.is_interference() {
+                tally.clean += 1;
+                if !sentence.issues.is_empty() {
+                    tally.false_positives += 1;
                 }
-                Some(expected) => {
-                    tally.interference += 1;
-                    if sentence.spans.iter().any(|span| span.overlaps(expected)) {
-                        tally.caught += 1;
-                    } else {
-                        tally.misses.push(sentence.id.clone());
-                    }
-                }
+                continue;
+            }
+
+            tally.interference += 1;
+            let touched = sentence.issues.iter().any(|issue| {
+                sentence
+                    .edits
+                    .iter()
+                    .any(|edit| span_of(issue).overlaps(*edit))
+            });
+            if touched {
+                tally.caught += 1;
+            } else {
+                tally.misses.push(sentence.id.clone());
+            }
+            tally.creep_issues += sentence.issues.len() - pairs;
+            if sentence.valid && is_exact(&sentence.text, &sentence.issues, &sentence.expected_text)
+            {
+                tally.exact += 1;
             }
         }
 
-        tally.p50_ms = p50_ms(recorded);
+        let mut latencies: Vec<u64> = recorded
+            .iter()
+            .filter(|sentence| sentence.valid)
+            .map(|sentence| sentence.latency_ms)
+            .collect();
+        latencies.sort_unstable();
+        tally.p50_ms = nearest_rank(&latencies, 0.5);
+        tally.p95_ms = nearest_rank(&latencies, 0.95);
         tally
     }
 
-    /// The catch rate as a percentage, or zero when nothing was measured.
     pub fn catch_rate_percent(&self) -> f64 {
+        percent(self.caught, self.interference)
+    }
+
+    pub fn precision_percent(&self) -> f64 {
+        percent(self.pairs, self.issues)
+    }
+
+    pub fn recall_percent(&self) -> f64 {
+        percent(self.pairs, self.edits)
+    }
+
+    pub fn f05_percent(&self) -> f64 {
+        let p = self.precision_percent() / 100.0;
+        let r = self.recall_percent() / 100.0;
+        if p + r == 0.0 {
+            return 0.0;
+        }
+        100.0 * 1.25 * p * r / (0.25 * p + r)
+    }
+
+    pub fn exact_rate_percent(&self) -> f64 {
+        percent(self.exact, self.interference)
+    }
+
+    /// Unpaired Issues per 100 interference sentences.
+    pub fn creep_per_100(&self) -> f64 {
         if self.interference == 0 {
             return 0.0;
         }
-        100.0 * self.caught as f64 / self.interference as f64
+        100.0 * self.creep_issues as f64 / self.interference as f64
     }
 
-    /// The catch rate as one table cell, such as `10 of 30 (33%)`.
+    pub fn validity_percent(&self) -> f64 {
+        percent(self.valid, self.checks)
+    }
+
+    /// The catch rate as one table cell, such as `10 of 30 (33.3%)`.
     pub fn catch_rate_cell(&self) -> String {
-        format!(
-            "{} of {} ({:.0}%)",
-            self.caught,
-            self.interference,
-            self.catch_rate_percent()
-        )
+        count_cell(self.caught, self.interference)
+    }
+
+    pub fn precision_cell(&self) -> String {
+        count_cell(self.pairs, self.issues)
+    }
+
+    pub fn recall_cell(&self) -> String {
+        count_cell(self.pairs, self.edits)
+    }
+
+    pub fn f05_cell(&self) -> String {
+        format!("{:.1}%", self.f05_percent())
+    }
+
+    pub fn exact_cell(&self) -> String {
+        count_cell(self.exact, self.interference)
     }
 
     /// The false positives as one table cell, such as `0 of 10`.
     pub fn false_positive_cell(&self) -> String {
         format!("{} of {}", self.false_positives, self.clean)
     }
+
+    pub fn creep_cell(&self) -> String {
+        format!("{:.1}", self.creep_per_100())
+    }
+
+    pub fn validity_cell(&self) -> String {
+        count_cell(self.valid, self.checks)
+    }
+
+    /// Cost per 1,000 Checks in USD, or `None` when a priced row lacks a cost.
+    pub fn cost_per_1000(&self) -> Option<f64> {
+        if self.priced == 0 || self.priced < self.checks {
+            return None;
+        }
+        Some(self.cost_usd / self.checks as f64 * 1_000.0)
+    }
+
+    /// One cell of the "Recall by native language" table.
+    pub fn language_cell(&self, language: &str) -> String {
+        let recall = self.by_language.get(language).copied().unwrap_or_default();
+        if recall.edits < 10 {
+            format!("{} of {}", recall.pairs, recall.edits)
+        } else {
+            count_cell(recall.pairs, recall.edits)
+        }
+    }
 }
 
-/// The median latency in milliseconds.
-///
-/// An even count averages the two middle values, so adding one slow sentence to
-/// an even fixture cannot move the median by a whole sentence.
-fn p50_ms(recorded: &[Recorded]) -> u64 {
-    if recorded.is_empty() {
+impl LanguageRecall {
+    fn add(&mut self, pairs: usize, edits: usize) {
+        self.pairs += pairs;
+        self.edits += edits;
+    }
+}
+
+fn percent(part: usize, whole: usize) -> f64 {
+    if whole == 0 {
+        return 0.0;
+    }
+    100.0 * part as f64 / whole as f64
+}
+
+fn count_cell(part: usize, whole: usize) -> String {
+    format!("{part} of {whole} ({:.1}%)", percent(part, whole))
+}
+
+fn span_of(issue: &Issue) -> Span {
+    Span {
+        start: issue.start,
+        end: issue.end,
+    }
+}
+
+/// Nearest-rank percentile: element `ceil(p x n)` of the sorted list.
+fn nearest_rank(sorted: &[u64], p: f64) -> u64 {
+    if sorted.is_empty() {
         return 0;
     }
+    let rank = (p * sorted.len() as f64).ceil() as usize;
+    sorted[rank.clamp(1, sorted.len()) - 1]
+}
 
-    let mut latencies: Vec<u64> = recorded
-        .iter()
-        .map(|sentence| sentence.latency_ms)
-        .collect();
-    latencies.sort_unstable();
+/// How many Issues pair with an edit.
+///
+/// Both lists are walked by `start`. An Issue takes the first unpaired edit it
+/// overlaps, provided it reaches no more than three words past the edit on
+/// either side. Each Issue and each edit pairs at most once.
+pub fn pair(text: &str, issues: &[Issue], edits: &[Span]) -> usize {
+    let mut edits: Vec<Span> = edits.to_vec();
+    edits.sort_by_key(|edit| (edit.start, edit.end));
+    let mut taken = vec![false; edits.len()];
+    let mut issues: Vec<Span> = issues.iter().map(span_of).collect();
+    issues.sort_by_key(|issue| (issue.start, issue.end));
 
-    let middle = latencies.len() / 2;
-    if latencies.len() % 2 == 1 {
-        latencies[middle]
-    } else {
-        (latencies[middle - 1] + latencies[middle]) / 2
+    let mut pairs = 0;
+    for issue in issues {
+        let found = edits.iter().enumerate().find(|(index, edit)| {
+            !taken[*index] && issue.overlaps(**edit) && within_slack(text, issue, **edit)
+        });
+        if let Some((index, _)) = found {
+            taken[index] = true;
+            pairs += 1;
+        }
     }
+    pairs
+}
+
+/// Whether the Issue extends at most three words past the edit on each side.
+fn within_slack(text: &str, issue: Span, edit: Span) -> bool {
+    let left = words_between(text, issue.start, edit.start);
+    let right = words_between(text, edit.end, issue.end);
+    left <= PAIR_SLACK_WORDS && right <= PAIR_SLACK_WORDS
+}
+
+/// The whitespace-delimited words of `text` between two UTF-16 offsets, zero
+/// when the range is empty or reversed.
+fn words_between(text: &str, from: usize, to: usize) -> usize {
+    if from >= to {
+        return 0;
+    }
+    utf16_slice(text, from, to)
+        .map(|slice| slice.split_whitespace().count())
+        .unwrap_or(0)
+}
+
+/// Apply every Fix of the Check and compare with the expected text.
+pub fn is_exact(text: &str, issues: &[Issue], expected: &str) -> bool {
+    let Some(corrected) = apply(text, issues) else {
+        return false;
+    };
+    collapse(&corrected) == collapse(expected)
+}
+
+/// The Corrected text of the product: every Fix applied, later spans first so
+/// earlier offsets stay valid. `None` when a span does not index the text.
+fn apply(text: &str, issues: &[Issue]) -> Option<String> {
+    let mut sorted: Vec<&Issue> = issues.iter().collect();
+    sorted.sort_by_key(|issue| (issue.start, issue.end));
+    let mut corrected = text.to_string();
+    for issue in sorted.iter().rev() {
+        let from = byte_index_of_utf16(text, issue.start)?;
+        let to = byte_index_of_utf16(text, issue.end)?;
+        corrected.replace_range(from..to, &issue.fix);
+    }
+    Some(corrected)
+}
+
+fn collapse(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::envelope::Category;
 
     fn span(start: usize, end: usize) -> Span {
         Span { start, end }
     }
 
-    /// One interference sentence with the Issues an engine answered.
-    fn interference(
-        id: &str,
-        expected: (usize, usize),
-        spans: &[(usize, usize)],
-        ms: u64,
-    ) -> Recorded {
-        Recorded {
-            id: id.to_string(),
-            expected: Some(span(expected.0, expected.1)),
-            spans: spans.iter().map(|&(a, b)| span(a, b)).collect(),
-            latency_ms: ms,
+    fn issue(text: &str, start: usize, end: usize, fix: &str) -> Issue {
+        Issue {
+            start,
+            end,
+            original: utf16_slice(text, start, end).unwrap_or("").to_string(),
+            fix: fix.to_string(),
+            reason: "test".to_string(),
+            category: Category::Grammar,
+            rule_id: None,
         }
     }
 
-    /// One correct sentence with the Issues an engine answered.
-    fn clean(id: &str, spans: &[(usize, usize)], ms: u64) -> Recorded {
+    fn recorded(
+        id: &str,
+        text: &str,
+        edits: &[(usize, usize, &str)],
+        issues: &[(usize, usize, &str)],
+        ms: u64,
+    ) -> Recorded {
+        let mut expected = text.to_string();
+        for (start, end, fix) in edits.iter().rev() {
+            let from = byte_index_of_utf16(text, *start).unwrap();
+            let to = byte_index_of_utf16(text, *end).unwrap();
+            expected.replace_range(from..to, fix);
+        }
         Recorded {
             id: id.to_string(),
-            expected: None,
-            spans: spans.iter().map(|&(a, b)| span(a, b)).collect(),
+            native: id.split('-').next().unwrap_or("none").to_string(),
+            text: text.to_string(),
+            edits: edits.iter().map(|(a, b, _)| span(*a, *b)).collect(),
+            expected_text: collapse(&expected),
+            issues: issues
+                .iter()
+                .map(|(a, b, fix)| issue(text, *a, *b, fix))
+                .collect(),
+            valid: true,
             latency_ms: ms,
+            cost: None,
         }
     }
+
+    const BOOK: &str = "She bought three book from the store.";
 
     #[test]
     fn an_issue_that_touches_the_expected_span_is_a_catch() {
         let recorded = vec![
             // Exactly the expected span.
-            interference("zh-02", (17, 21), &[(17, 21)], 10),
+            recorded(
+                "zh-02",
+                BOOK,
+                &[(17, 21, "books")],
+                &[(17, 21, "books")],
+                10,
+            ),
             // Wider than the expected span, which still localizes the mistake.
-            interference("ms-04", (14, 19), &[(3, 22)], 10),
-            // Touching by one code unit at the end.
-            interference("fr-05", (10, 14), &[(13, 30)], 10),
+            recorded(
+                "zh-03",
+                BOOK,
+                &[(17, 21, "books")],
+                &[(11, 21, "three books")],
+                10,
+            ),
             // Beside the expected span, which is a miss.
-            interference("es-07", (4, 9), &[(20, 25)], 10),
+            recorded("es-07", BOOK, &[(17, 21, "books")], &[(27, 30, "a")], 10),
             // No Issue at all, which is a miss.
-            interference("zh-07", (0, 5), &[], 10),
+            recorded("zh-07", BOOK, &[(17, 21, "books")], &[], 10),
         ];
 
         let tally = Tally::of(&recorded);
 
-        assert_eq!(tally.interference, 5);
-        assert_eq!(tally.caught, 3);
+        assert_eq!(tally.interference, 4);
+        assert_eq!(tally.caught, 2);
         assert_eq!(tally.misses, ["es-07", "zh-07"]);
-        assert_eq!(tally.catch_rate_cell(), "3 of 5 (60%)");
-        assert!((tally.catch_rate_percent() - 60.0).abs() < 1e-9);
+        assert_eq!(tally.catch_rate_cell(), "2 of 4 (50.0%)");
     }
 
     #[test]
     fn a_span_that_ends_where_the_expected_span_starts_is_a_miss() {
-        let tally = Tally::of(&[interference("zh-01", (12, 14), &[(0, 12)], 5)]);
+        let tally = Tally::of(&[recorded(
+            "zh-01",
+            BOOK,
+            &[(17, 21, "books")],
+            &[(11, 17, "3 ")],
+            5,
+        )]);
 
         assert_eq!(tally.caught, 0);
     }
@@ -183,9 +451,15 @@ mod tests {
     #[test]
     fn one_correct_sentence_counts_as_one_false_positive_however_many_issues() {
         let recorded = vec![
-            clean("ok-01", &[], 4),
-            clean("ok-02", &[(0, 3)], 4),
-            clean("ok-03", &[(0, 3), (9, 12), (20, 24)], 4),
+            recorded("ok-01", BOOK, &[], &[], 4),
+            recorded("ok-02", BOOK, &[], &[(0, 3, "He")], 4),
+            recorded(
+                "ok-03",
+                BOOK,
+                &[],
+                &[(0, 3, "He"), (11, 16, "four"), (27, 30, "a")],
+                4,
+            ),
         ];
 
         let tally = Tally::of(&recorded);
@@ -193,42 +467,197 @@ mod tests {
         assert_eq!(tally.clean, 3);
         assert_eq!(tally.false_positives, 2);
         assert_eq!(tally.false_positive_cell(), "2 of 3");
+        // Every Issue on a correct sentence is unpaired, so precision sees them.
+        assert_eq!(tally.issues, 4);
+        assert_eq!(tally.pairs, 0);
     }
 
     #[test]
-    fn a_correct_sentence_never_reaches_the_catch_rate() {
+    fn pairing_takes_the_first_unpaired_overlapping_edit_once() {
+        let text = "I very like this song and she go home.";
+        let edits = [span(2, 11), span(26, 32)];
+        // Two Issues on the same edit pair once; the second Issue is creep.
+        let issues = [
+            issue(text, 2, 6, "really"),
+            issue(text, 2, 11, "really like"),
+        ];
+
+        assert_eq!(pair(text, &issues, &edits), 1);
+
+        let both = [
+            issue(text, 2, 11, "really like"),
+            issue(text, 30, 32, "goes"),
+        ];
+        assert_eq!(pair(text, &both, &edits), 2);
+    }
+
+    #[test]
+    fn an_issue_more_than_three_words_wider_than_the_edit_does_not_pair() {
+        let text = "Yesterday I go to the library with my friend.";
+        let edit = [span(12, 14)];
+        // "Yesterday I go to the library": three words to the right of "go".
+        assert_eq!(pair(text, &[issue(text, 0, 29, "x")], &edit), 1);
+        // Four words to the right.
+        assert_eq!(pair(text, &[issue(text, 0, 34, "x")], &edit), 0);
+        // The whole sentence, which the Panel cannot use.
+        assert_eq!(pair(text, &[issue(text, 0, 45, "x")], &edit), 0);
+    }
+
+    #[test]
+    fn precision_recall_and_f05_are_micro_averaged() {
         let recorded = vec![
-            interference("zh-02", (17, 21), &[(17, 21)], 10),
-            clean("ok-01", &[(0, 4)], 10),
+            recorded(
+                "zh-02",
+                BOOK,
+                &[(17, 21, "books")],
+                &[(17, 21, "books"), (27, 30, "a")],
+                10,
+            ),
+            recorded("zh-07", BOOK, &[(17, 21, "books")], &[], 10),
         ];
 
         let tally = Tally::of(&recorded);
 
-        assert_eq!(tally.catch_rate_cell(), "1 of 1 (100%)");
-        assert_eq!(tally.false_positive_cell(), "1 of 1");
+        assert_eq!(tally.pairs, 1);
+        assert_eq!(tally.issues, 2);
+        assert_eq!(tally.edits, 2);
+        assert_eq!(tally.precision_cell(), "1 of 2 (50.0%)");
+        assert_eq!(tally.recall_cell(), "1 of 2 (50.0%)");
+        assert_eq!(tally.f05_cell(), "50.0%");
+        assert_eq!(tally.creep_issues, 1);
+        assert_eq!(tally.creep_cell(), "50.0");
     }
 
     #[test]
-    fn the_median_is_the_middle_of_an_odd_count() {
+    fn an_exact_fix_needs_the_whole_corrected_text_to_match() {
         let recorded = vec![
-            clean("a", &[], 90),
-            clean("b", &[], 10),
-            clean("c", &[], 20),
+            recorded(
+                "zh-02",
+                BOOK,
+                &[(17, 21, "books")],
+                &[(17, 21, "books")],
+                10,
+            ),
+            // Right span, wrong fix: caught but not exact.
+            recorded(
+                "zh-03",
+                BOOK,
+                &[(17, 21, "books")],
+                &[(17, 21, "book's")],
+                10,
+            ),
+            // A wider span with the right words is still exact.
+            recorded(
+                "zh-04",
+                BOOK,
+                &[(17, 21, "books")],
+                &[(11, 21, "three books")],
+                10,
+            ),
         ];
 
-        assert_eq!(Tally::of(&recorded).p50_ms, 20);
+        let tally = Tally::of(&recorded);
+
+        assert_eq!(tally.caught, 3);
+        assert_eq!(tally.exact, 2);
+        assert_eq!(tally.exact_cell(), "2 of 3 (66.7%)");
     }
 
     #[test]
-    fn the_median_of_an_even_count_averages_the_two_middle_values() {
+    fn a_deletion_is_exact_after_collapsing_whitespace() {
+        let text = "Although it was raining, but we still went hiking.";
+        assert!(is_exact(
+            text,
+            &[issue(text, 25, 28, "")],
+            "Although it was raining, we still went hiking."
+        ));
+        assert!(is_exact(
+            text,
+            &[issue(text, 24, 28, "")],
+            "Although it was raining, we still went hiking."
+        ));
+    }
+
+    #[test]
+    fn an_invalid_check_is_a_miss_and_stays_out_of_precision_and_latency() {
+        let mut invalid = recorded("zh-02", BOOK, &[(17, 21, "books")], &[], 900);
+        invalid.valid = false;
         let recorded = vec![
-            clean("a", &[], 10),
-            clean("b", &[], 20),
-            clean("c", &[], 30),
-            clean("d", &[], 1_000),
+            recorded(
+                "zh-03",
+                BOOK,
+                &[(17, 21, "books")],
+                &[(17, 21, "books")],
+                10,
+            ),
+            invalid,
         ];
 
-        assert_eq!(Tally::of(&recorded).p50_ms, 25);
+        let tally = Tally::of(&recorded);
+
+        assert_eq!(tally.checks, 2);
+        assert_eq!(tally.valid, 1);
+        assert_eq!(tally.validity_cell(), "1 of 2 (50.0%)");
+        assert_eq!(tally.misses, ["zh-02"]);
+        assert_eq!(tally.recall_cell(), "1 of 2 (50.0%)");
+        assert_eq!(tally.precision_cell(), "1 of 1 (100.0%)");
+        assert_eq!(tally.p50_ms, 10);
+        assert_eq!(tally.p95_ms, 10);
+    }
+
+    #[test]
+    fn latency_is_the_nearest_rank_without_interpolation() {
+        let recorded: Vec<Recorded> = [90, 10, 20, 1_000]
+            .iter()
+            .enumerate()
+            .map(|(index, ms)| recorded(&format!("ok-{index}"), BOOK, &[], &[], *ms))
+            .collect();
+
+        let tally = Tally::of(&recorded);
+
+        // ceil(0.5 x 4) = 2nd of [10, 20, 90, 1000]; ceil(0.95 x 4) = 4th.
+        assert_eq!(tally.p50_ms, 20);
+        assert_eq!(tally.p95_ms, 1_000);
+    }
+
+    #[test]
+    fn cost_per_thousand_needs_every_check_priced() {
+        let mut priced = recorded("ok-01", BOOK, &[], &[], 1);
+        priced.cost = Some(0.00002);
+        let mut also = recorded("ok-02", BOOK, &[], &[], 1);
+        also.cost = Some(0.00004);
+        let unpriced = recorded("ok-03", BOOK, &[], &[], 1);
+
+        let full = Tally::of(&[priced.clone(), also.clone()]);
+        assert!((full.cost_per_1000().unwrap() - 0.03).abs() < 1e-9);
+
+        let partial = Tally::of(&[priced, also, unpriced]);
+        assert_eq!(partial.cost_per_1000(), None);
+
+        assert_eq!(
+            Tally::of(&[recorded("ok-04", BOOK, &[], &[], 1)]).cost_per_1000(),
+            None
+        );
+    }
+
+    #[test]
+    fn recall_by_language_prints_a_count_under_ten_edits() {
+        let recorded = vec![
+            recorded(
+                "zh-02",
+                BOOK,
+                &[(17, 21, "books")],
+                &[(17, 21, "books")],
+                10,
+            ),
+            recorded("es-01", BOOK, &[(17, 21, "books")], &[], 10),
+        ];
+
+        let tally = Tally::of(&recorded);
+
+        assert_eq!(tally.language_cell("zh"), "1 of 1");
+        assert_eq!(tally.language_cell("es"), "0 of 1");
+        assert_eq!(tally.language_cell("fr"), "0 of 0");
     }
 
     #[test]
@@ -237,6 +666,7 @@ mod tests {
 
         assert_eq!(tally.p50_ms, 0);
         assert_eq!(tally.catch_rate_percent(), 0.0);
-        assert_eq!(tally.catch_rate_cell(), "0 of 0 (0%)");
+        assert_eq!(tally.f05_percent(), 0.0);
+        assert_eq!(tally.catch_rate_cell(), "0 of 0 (0.0%)");
     }
 }
