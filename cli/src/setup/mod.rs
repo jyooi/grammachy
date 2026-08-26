@@ -12,7 +12,6 @@
 pub mod bindings;
 pub mod block;
 pub mod menu;
-pub mod model;
 
 use std::path::PathBuf;
 
@@ -20,6 +19,7 @@ use serde::Serialize;
 
 use crate::args::EngineSlug;
 use crate::envelope::{CheckError, ErrorBody, ErrorCode, CONTRACT_VERSION};
+use crate::model;
 
 /// What one step of a run did.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

@@ -126,9 +126,13 @@ fn contract_codes() -> Vec<String> {
 #[test]
 fn the_overlay_knows_every_code_the_cli_can_emit() {
     let source = read("ui/errors.js");
+    // Three codes of the enum are not Check codes: `setup_failed` belongs to
+    // `grammachy setup`, and `cancelled` and `download_failed` belong to
+    // `grammachy model`. `cli/tests/overlay_models.rs` holds those two to
+    // `ui/models.js`, which is the card that shows them.
     let codes: Vec<String> = contract_codes()
         .into_iter()
-        .filter(|code| code != "setup_failed")
+        .filter(|code| !["setup_failed", "cancelled", "download_failed"].contains(&code.as_str()))
         .collect();
     assert_eq!(codes.len(), 6, "spec section 5.1 fixes six codes");
 

@@ -9,6 +9,7 @@ pub mod engine;
 pub mod engines;
 pub mod envelope;
 pub mod issues;
+pub mod model;
 pub mod settings;
 pub mod setup;
 pub mod text;

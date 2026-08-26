@@ -10,8 +10,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use grammachy::args::EngineSlug;
-use grammachy::setup::{model, SetupEnvelope, State, Step};
+use grammachy::model::{self, Transfer};
 use grammachy::setup::{Setup, SetupReport};
+use grammachy::setup::{SetupEnvelope, State, Step};
 
 /// The files a fresh Omarchy install carries, as this repository keeps them.
 const BINDINGS_FIXTURE: &str = include_str!("fixtures/config/bindings.lua");
@@ -67,7 +68,9 @@ impl Home {
             }),
             download: Box::new(move |_url, path| {
                 downloads.fetch_add(1, Ordering::SeqCst);
-                std::fs::write(path, b"fake weights").map_err(|error| error.to_string())
+                std::fs::write(path, b"fake weights")
+                    .map(|()| Transfer::Finished)
+                    .map_err(|error| error.to_string())
             }),
         }
     }

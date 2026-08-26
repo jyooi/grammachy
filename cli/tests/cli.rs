@@ -416,3 +416,90 @@ fn setup_writes_the_block_and_the_entry_and_remove_takes_them_out() {
         before
     );
 }
+
+/// One `grammachy model` run against a scratch models directory. The unit stop
+/// is forbidden, so no run here reaches the llama.cpp unit the live shell uses.
+fn run_model(args: &[&str], models_directory: &Path) -> Run {
+    let output = no_engine(&mut Command::new(env!("CARGO_BIN_EXE_grammachy")))
+        .env("GRAMMACHY_MODELS_DIR", models_directory)
+        .env("GRAMMACHY_LLAMA_STOP", "never")
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .expect("the binary runs");
+
+    Run {
+        status: output.status.code().expect("the binary was not signalled"),
+        stdout: String::from_utf8(output.stdout).expect("stdout is UTF-8"),
+    }
+}
+
+fn models_home(name: &str) -> PathBuf {
+    let directory = scratch_dir().join(format!("models-{name}"));
+    let _ = std::fs::remove_dir_all(&directory);
+    std::fs::create_dir_all(&directory).expect("the models directory is created");
+    directory
+}
+
+/// Spec section 5.3: one JSON envelope on stdout, exit 0, one row per
+/// catalogue model.
+#[test]
+fn model_list_prints_one_envelope_with_every_catalogue_row() {
+    let directory = models_home("list");
+    std::fs::write(directory.join("gemma-4-E4B-it-Q4_K_M.gguf"), b"whole")
+        .expect("the ready file is written");
+
+    let result = run_model(&["model", "list"], &directory);
+    let value = envelope(&result);
+
+    assert_eq!(result.status, 0);
+    assert_eq!(value["contractVersion"], 1);
+    assert_eq!(value["verb"], "list");
+    assert_eq!(value["directory"], directory.display().to_string());
+    assert!(value["freeBytes"].as_u64().is_some());
+    assert_eq!(value["models"].as_array().unwrap().len(), 3);
+    assert_eq!(value["models"][0]["state"], "ready");
+    assert_eq!(value["models"][1]["state"], "absent");
+}
+
+#[test]
+fn model_remove_deletes_the_file_and_answers_absent() {
+    let directory = models_home("remove");
+    let weights = directory.join("Phi-4-mini-instruct-Q4_K_M.gguf");
+    std::fs::write(&weights, b"whole").expect("the ready file is written");
+
+    let result = run_model(&["model", "remove", "phi-4-mini-instruct"], &directory);
+    let value = envelope(&result);
+
+    assert_eq!(result.status, 0);
+    assert_eq!(value["verb"], "remove");
+    assert_eq!(value["models"].as_array().unwrap().len(), 1);
+    assert_eq!(value["models"][0]["name"], "phi-4-mini-instruct");
+    assert_eq!(value["models"][0]["state"], "absent");
+    assert!(!weights.exists());
+}
+
+/// A name the catalogue does not carry never reaches the network: it is one
+/// error envelope and exit 1.
+#[test]
+fn model_download_of_an_unknown_name_is_bad_arguments() {
+    let directory = models_home("unknown");
+
+    let result = run_model(&["model", "download", "no-such-model"], &directory);
+    let value = envelope(&result);
+
+    assert_eq!(result.status, 1);
+    assert_eq!(value["contractVersion"], 1);
+    assert_eq!(value["error"]["code"], "bad_arguments");
+    assert_eq!(std::fs::read_dir(&directory).unwrap().count(), 0);
+}
+
+#[test]
+fn model_needs_a_verb() {
+    let result = run_model(&["model"], &models_home("no-verb"));
+
+    assert_eq!(result.status, 1);
+    assert_eq!(envelope(&result)["error"]["code"], "bad_arguments");
+}
