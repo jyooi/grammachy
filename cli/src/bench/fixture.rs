@@ -1,12 +1,12 @@
-//! The interference fixture the benchmark runs, spec section 13.1.
+//! The interference fixture the benchmark runs, `docs/spec/evals.md` section 1.
 //!
 //! The file is `tests/fixtures/interference-30.json`, the test set of HUF-171
 //! in the item shape HUF-205 settled: every item carries the edits that turn
 //! its text into `expected_text`, and a correct sentence carries no edit. It is
 //! compiled into the binary, so a released `grammachy bench` needs no
 //! repository checkout. The fixture grows only through real user sentences
-//! (spec section 13.1), so the two counts below are read from the file rather
-//! than fixed here.
+//! (`docs/spec/evals.md` section 1), so the two counts below are read from the
+//! file rather than fixed here.
 
 use serde::Deserialize;
 

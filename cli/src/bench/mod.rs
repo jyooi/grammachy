@@ -1,4 +1,4 @@
-//! `grammachy bench`, spec section 13.1.
+//! `grammachy bench`, `docs/spec/evals.md` section 4.
 //!
 //! One run sends the interference fixture through every engine this machine can
 //! reach and prints one Markdown document: an Engines table, the Models tables,
@@ -32,6 +32,18 @@
 //! discards a report it already paid for. The last row writes a pending file
 //! and renames it, so the record of an earlier run stays whole until this run
 //! has a whole one of its own.
+//!
+//! A run is watchable and does not wait on the network (section 4.1). Every
+//! sentence prints one line on stderr naming its row, its item, and its time.
+//! Cloud rows run one thread each, beside each other and beside the local
+//! rows, because a cloud row waits on a provider while a local row uses the
+//! machine. Local rows stay on this thread and in order, because they share
+//! one llama.cpp server and one in-process Harper. Every row is placed back at
+//! its own index, so the tables print in plan order whatever order they end in.
+//!
+//! `--max-cost` is read under one lock before each cloud Check, so a run may
+//! pass the cap by at most one Check for each cloud row in flight. The report
+//! prints what the run actually paid rather than the cap.
 
 pub mod fixture;
 pub mod machine;
@@ -43,18 +55,20 @@ pub mod weights;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::Instant;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 
 use crate::args::{BenchArgs, CheckOptions, EngineSlug};
-use crate::engine::{self, EngineFailure};
-use crate::engines::{languagetool, openai};
+use crate::engine::{self, Engine, EngineFailure};
+use crate::engines::{languagetool, openai, openrouter};
 use crate::envelope::Issue;
 use crate::settings::StoredSettings;
 
 use fixture::Sentence;
 use machine::Machine;
+use memory::{Reading, Source};
 use metrics::{Recorded, Tally};
 use report::{EngineRow, Measurement, ModelRow, Outcome, Report};
 
@@ -88,19 +102,58 @@ pub fn run(args: &BenchArgs, stored: &StoredSettings) -> Result<Run, String> {
     let plan = Plan::of(args)?;
     let base = base_options(stored);
     let sentences = fixture::sentences();
-    let mut spend = Spend::new(args.max_cost);
-    let mut checks: Vec<RecordedCheck> = Vec::new();
+    let spend = Mutex::new(Spend::new(args.max_cost));
 
-    let engines = ENGINES
-        .iter()
-        .map(|slug| engine_row(*slug, &base, &sentences, &mut spend, &mut checks))
-        .collect();
-    let models = plan
-        .rows
-        .iter()
-        .map(|(slug, model)| model_row(*slug, model, &base, &sentences, &mut spend, &mut checks))
-        .collect();
+    let (engines, models) = std::thread::scope(|scope| {
+        // The cloud rows start first, so they wait on their provider while
+        // this thread runs the rows that need the machine.
+        let cloud: Vec<(usize, _)> = plan
+            .rows
+            .iter()
+            .enumerate()
+            .filter(|(_, (slug, _))| slug.is_cloud())
+            .map(|(index, (slug, model))| {
+                let (slug, base, sentences, spend) = (*slug, &base, &sentences, &spend);
+                let handle = scope.spawn(move || model_row(slug, model, base, sentences, spend));
+                (index, handle)
+            })
+            .collect();
 
+        let engines: Vec<(EngineRow, Vec<RecordedCheck>)> = ENGINES
+            .iter()
+            .map(|slug| engine_row(*slug, &base, &sentences, &spend))
+            .collect();
+
+        let mut models: Vec<Option<(ModelRow, Vec<RecordedCheck>)>> =
+            plan.rows.iter().map(|_| None).collect();
+        for (index, (slug, model)) in plan.rows.iter().enumerate() {
+            if !slug.is_cloud() {
+                models[index] = Some(model_row(*slug, model, &base, &sentences, &spend));
+            }
+        }
+        for (index, handle) in cloud {
+            models[index] = Some(handle.join().expect("a benchmark row does not panic"));
+        }
+
+        let models: Vec<(ModelRow, Vec<RecordedCheck>)> = models
+            .into_iter()
+            .map(|row| row.expect("every planned row ran"))
+            .collect();
+        (engines, models)
+    });
+
+    // The record file keeps plan order however the rows finished, so two runs
+    // of one command produce a file that can be compared line by line.
+    let checks: Vec<RecordedCheck> = engines
+        .iter()
+        .map(|(_, checks)| checks)
+        .chain(models.iter().map(|(_, checks)| checks))
+        .flat_map(|checks| checks.iter().cloned())
+        .collect();
+    let engines: Vec<EngineRow> = engines.into_iter().map(|(row, _)| row).collect();
+    let models: Vec<ModelRow> = models.into_iter().map(|(row, _)| row).collect();
+
+    let spend = spend.into_inner().expect("the spend is not poisoned");
     let record_failure = plan
         .record
         .as_ref()
@@ -388,18 +441,20 @@ fn engine_row(
     slug: EngineSlug,
     base: &CheckOptions,
     sentences: &[Sentence],
-    spend: &mut Spend,
-    checks: &mut Vec<RecordedCheck>,
-) -> EngineRow {
+    spend: &Mutex<Spend>,
+) -> (EngineRow, Vec<RecordedCheck>) {
     let options = CheckOptions {
         engine: slug,
         ..base.clone()
     };
-    EngineRow {
-        engine: slug.as_str().to_string(),
-        memory_kind: memory_kind(slug),
-        outcome: measure(slug, &options, sentences, spend, checks),
-    }
+    let (outcome, checks) = measure(slug, &options, sentences, spend);
+    (
+        EngineRow {
+            engine: slug.as_str().to_string(),
+            outcome,
+        },
+        checks,
+    )
 }
 
 fn model_row(
@@ -407,9 +462,8 @@ fn model_row(
     model: &str,
     base: &CheckOptions,
     sentences: &[Sentence],
-    spend: &mut Spend,
-    checks: &mut Vec<RecordedCheck>,
-) -> ModelRow {
+    spend: &Mutex<Spend>,
+) -> (ModelRow, Vec<RecordedCheck>) {
     let options = match slug {
         EngineSlug::Openrouter => CheckOptions {
             engine: slug,
@@ -432,12 +486,16 @@ fn model_row(
     } else {
         weights::of(model)
     };
-    ModelRow {
-        model: model.to_string(),
-        engine: slug.as_str().to_string(),
-        weights,
-        outcome: measure(slug, &options, sentences, spend, checks),
-    }
+    let (outcome, checks) = measure(slug, &options, sentences, spend);
+    (
+        ModelRow {
+            model: model.to_string(),
+            engine: slug.as_str().to_string(),
+            weights,
+            outcome,
+        },
+        checks,
+    )
 }
 
 /// Run the whole fixture through one engine and read its resident memory.
@@ -451,30 +509,35 @@ fn measure(
     slug: EngineSlug,
     options: &CheckOptions,
     sentences: &[Sentence],
-    spend: &mut Spend,
-    checks: &mut Vec<RecordedCheck>,
-) -> Outcome {
-    let Some(adapter) = engine::resolve(slug) else {
-        return Outcome::Skipped(format!("This build has no {} adapter.", slug.as_str()));
+    spend: &Mutex<Spend>,
+) -> (Outcome, Vec<RecordedCheck>) {
+    let mut checks: Vec<RecordedCheck> = Vec::with_capacity(sentences.len());
+    let Some(adapter) = adapter(slug) else {
+        let why = format!("This build has no {} adapter.", slug.as_str());
+        return (Outcome::Skipped(why), checks);
     };
-    if slug.is_cloud() {
-        if let Some(why) = &spend.exhausted {
-            return Outcome::Skipped(why.clone());
-        }
-    }
 
     let started_row = Instant::now();
     let before = memory::peak_resident_bytes();
     let mut recorded = Vec::with_capacity(sentences.len());
     let model = row_model(slug, options);
+    let label = row_label(slug, &model);
 
     for (index, sentence) in sentences.iter().enumerate() {
-        if slug.is_cloud() && spend.would_exceed() {
-            let why = format!(
-                "cost cap {} USD reached after {index} sentences",
-                spend.cap.unwrap_or_default()
-            );
-            return spend.exhaust(why);
+        // The cap and the reason another row ended are read together, so a row
+        // in flight stops as soon as any cloud row has ended the run's spend.
+        if slug.is_cloud() {
+            let mut spend = spend.lock().expect("the spend is not poisoned");
+            if let Some(why) = &spend.exhausted {
+                return (Outcome::Skipped(why.clone()), checks);
+            }
+            if spend.would_exceed() {
+                let why = format!(
+                    "cost cap {} USD reached after {index} sentences",
+                    spend.cap.unwrap_or_default()
+                );
+                return (spend.exhaust(why), checks);
+            }
         }
 
         let options = CheckOptions {
@@ -483,24 +546,31 @@ fn measure(
         };
         let started = Instant::now();
         let answer = adapter.answer(&sentence.text, &options);
-        let latency_ms = started.elapsed().as_millis() as u64;
+        let check = started.elapsed();
+        let latency_ms = check.as_millis() as u64;
+        progress(
+            &label,
+            &sentence.id,
+            index,
+            sentences.len(),
+            check,
+            started_row.elapsed(),
+        );
 
         let (issues, cost, usage, valid) = match answer {
             Ok(answer) => (answer.issues, answer.cost, answer.usage, true),
             Err(failure) if index == 0 && ends_the_row(&failure) => {
-                return Outcome::Skipped(reason(&sentence.id, failure));
+                return (Outcome::Skipped(reason(&sentence.id, failure)), checks);
             }
             Err(failure) => {
                 eprintln!(
-                    "grammachy bench: {} on {}: {}",
-                    model,
+                    "grammachy bench: {label} on {}: {}",
                     sentence.id,
                     reason(&sentence.id, failure)
                 );
                 (Vec::new(), None, None, false)
             }
         };
-        spend.add(cost);
 
         checks.push(RecordedCheck {
             engine: slug.as_str().to_string(),
@@ -515,9 +585,15 @@ fn measure(
             generation_ms: usage.and_then(|usage| usage.generation_ms),
             issues: issues.clone(),
         });
-        if slug.is_cloud() && valid && cost.is_none() {
-            return spend.exhaust(unpriced(&sentence.id));
+
+        if slug.is_cloud() {
+            let mut spend = spend.lock().expect("the spend is not poisoned");
+            spend.add(cost);
+            if valid && cost.is_none() {
+                return (spend.exhaust(unpriced(&sentence.id)), checks);
+            }
         }
+
         recorded.push(Recorded {
             id: sentence.id.clone(),
             native: sentence.native.clone(),
@@ -532,11 +608,55 @@ fn measure(
         });
     }
 
-    Outcome::Measured(Box::new(Measurement {
+    let measurement = Measurement {
         tally: Tally::of(&recorded),
-        memory_bytes: memory_bytes(slug, before),
+        memory: memory_reading(slug, before),
         wall_ms: started_row.elapsed().as_millis() as u64,
-    }))
+    };
+    (Outcome::Measured(Box::new(measurement)), checks)
+}
+
+/// The adapter one row runs on.
+///
+/// A cloud row retries one transient answer, the rule of section 4.1: a rate
+/// limit or a provider fault must not cost the row a Check. Nothing else is
+/// changed, so every row still runs the adapter the product runs.
+fn adapter(slug: EngineSlug) -> Option<Box<dyn Engine>> {
+    if slug != EngineSlug::Openrouter {
+        return engine::resolve(slug);
+    }
+    Some(Box::new(openrouter::Openrouter::new(openrouter::Config {
+        retry_after: Some(openrouter::RETRY_DELAY),
+        ..openrouter::Config::from_env()
+    })))
+}
+
+/// One stderr line per sentence, so a run of tens of minutes is watchable.
+///
+/// It names the row, the item, and both times a watcher needs: the Check that
+/// just ended and the row so far. Rows run beside each other, so every line
+/// names its own row rather than relying on the order they arrive in.
+fn progress(label: &str, id: &str, index: usize, total: usize, check: Duration, row: Duration) {
+    eprintln!(
+        "grammachy bench: {label} {id} ({}/{total}) {}, row {}",
+        index + 1,
+        seconds(check),
+        seconds(row),
+    );
+}
+
+/// A duration as one progress cell, such as `1.2 s`.
+fn seconds(elapsed: Duration) -> String {
+    format!("{:.1} s", elapsed.as_secs_f64())
+}
+
+/// The name one row carries on stderr: the engine, plus its model when the
+/// engine takes one.
+fn row_label(slug: EngineSlug, model: &str) -> String {
+    if model == slug.as_str() {
+        return model.to_string();
+    }
+    format!("{} {model}", slug.as_str())
 }
 
 /// The name the record file carries for one row.
@@ -580,7 +700,7 @@ fn record(path: &Path, checks: &[RecordedCheck]) -> Result<(), String> {
         .map_err(|error| format!("--record: {} cannot be written: {error}", path.display()))
 }
 
-/// One entry per engine, model, and item, the promise of spec section 13.1.
+/// One entry per engine, model, and item, the promise of evals section 4.3.
 ///
 /// The Engines `openai` row runs the model the Settings name, so a `--model`
 /// row that names that model is the same fixture run twice. A repeated key
@@ -608,31 +728,27 @@ fn one_per_item(checks: &[RecordedCheck]) -> Vec<&RecordedCheck> {
     kept
 }
 
-/// What resident memory means for one engine, named under the table.
-fn memory_kind(slug: EngineSlug) -> &'static str {
+/// The resident memory of one engine after its run, and where it was read.
+///
+/// LanguageTool is a JVM on the CPU, so RSS is the whole of what it holds. The
+/// llama.cpp server may hold its weights on a graphics device instead, where
+/// RSS cannot see them, so [`memory::server_reading`] asks the device first.
+fn memory_reading(slug: EngineSlug, before: Option<u64>) -> Reading {
     match slug {
         EngineSlug::Harper => {
-            "the growth of this process's own peak RSS, because it runs in process"
-        }
-        EngineSlug::Languagetool | EngineSlug::Openai => "the RSS of its server process",
-        EngineSlug::Openrouter => "not measured, because the model runs on the provider's machine",
-    }
-}
-
-/// The resident memory of one engine after its run.
-fn memory_bytes(slug: EngineSlug, before: Option<u64>) -> Option<u64> {
-    match slug {
-        EngineSlug::Harper => {
-            let after = memory::peak_resident_bytes()?;
-            Some(after.saturating_sub(before?))
+            let growth = memory::peak_resident_bytes()
+                .zip(before)
+                .map(|(after, before)| after.saturating_sub(before));
+            Reading::new(growth, Source::Growth)
         }
         EngineSlug::Languagetool => {
-            memory::resident_bytes(memory::unit_main_pid(languagetool::unit::UNIT_NAME)?)
+            let pid = memory::unit_main_pid(languagetool::unit::UNIT_NAME);
+            Reading::new(pid.and_then(memory::resident_bytes), Source::ServerRss)
         }
         EngineSlug::Openai => {
-            memory::resident_bytes(memory::unit_main_pid(openai::unit::UNIT_NAME)?)
+            memory::server_reading(memory::unit_main_pid(openai::unit::UNIT_NAME))
         }
-        EngineSlug::Openrouter => None,
+        EngineSlug::Openrouter => Reading::new(None, Source::Provider),
     }
 }
 

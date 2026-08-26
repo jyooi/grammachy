@@ -77,6 +77,15 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   `Plan::of` proves the directory holds that file before the first row, so a directory the run cannot write never discards a report it already paid for.
   The run writes `checks.json.pending` and renames it, so the record of an earlier run stays whole until this run has one of its own.
   That file is gitignored, because it is the only place model output text lands.
+  Every sentence prints one stderr progress line naming its row, its item, and both its times, because a silent forty-minute command is unacceptable.
+  Cloud rows each run their own thread beside each other and beside the local rows; local rows stay on the main thread, because they share one llama.cpp server and one in-process Harper.
+  Every row is placed back at its plan index, so the tables and `checks.json` print in plan order whatever order the rows end in.
+  `Spend` sits behind one `Mutex`, so a run may pass `--max-cost` by at most one Check for each cloud row in flight.
+  The one retry of an HTTP 429 or a 5xx lives in the `openrouter` adapter behind `Config::retry_after`, which is `None` everywhere but `bench::adapter`.
+  The shell must never retry for the user: its card carries the Retry button (`docs/spec/evals.md` section 4.1).
+  `cli/src/bench/memory.rs` decides what Resident memory means per row and the report names that source under each table.
+  A llama.cpp row on a graphics device holds its weights where RSS cannot see them, so `server_reading` reads the DRM fdinfo of the server process first and falls back to RSS.
+  llama.cpp `/metrics` is not that source: it is off by default and carries no memory gauge.
   `cli/src/bench/fixture.rs` is the one loader and `cli/src/bench/metrics.rs` is the one metrics module.
   Both sets share the item shape `{ id, native, text, edits[], expected_text }` of the evals spec.
   Every metric of that spec has a unit test in `metrics.rs` that runs from recorded answers, so no test needs a live model.

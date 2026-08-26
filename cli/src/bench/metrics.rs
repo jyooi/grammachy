@@ -1,4 +1,4 @@
-//! The arithmetic of one benchmark row, spec section 13.1 and HUF-205.
+//! The arithmetic of one benchmark row, `docs/spec/evals.md` section 5.
 //!
 //! Every number in the tables comes from this module, computed from the
 //! per-sentence results the run recorded. Nothing here talks to an engine, so
@@ -9,7 +9,7 @@
 //!
 //! - **caught**: at least one Issue overlaps an expected edit. A right span with
 //!   a wrong Fix still counts, because the Panel shows the span and lets the
-//!   user Skip the Fix. This is the regression gate of spec 13.1, untouched.
+//!   user Skip the Fix. This is the regression gate of v1 13.1, untouched.
 //! - **false positive**: a correct sentence that earned at least one Issue.
 //! - **pair**: an Issue pairs with the first unpaired edit it overlaps, provided
 //!   the Issue extends no more than three words past the edit on either side.

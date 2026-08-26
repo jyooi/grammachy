@@ -1,4 +1,4 @@
-//! What a model's weights may be used for, spec section 13.1.
+//! What a model's weights may be used for, `docs/spec/evals.md` section 5.
 //!
 //! The Models table carries a weights license column, and the recommended model
 //! of the Settings defaults and the README is re-decided from that table on

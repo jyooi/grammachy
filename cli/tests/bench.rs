@@ -12,6 +12,7 @@ use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::{Duration, Instant};
 
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -138,6 +139,236 @@ fn stub_server(answer: String) -> String {
     stub(answer, usize::MAX).address
 }
 
+/// A ticket per request across every stub of one case.
+///
+/// Two rows that run beside each other take tickets in turn, and two rows that
+/// run one after the other take every ticket of the first before the second.
+/// That is a fact about order alone, so no case has to time anything.
+#[derive(Clone)]
+struct Tickets(Arc<AtomicUsize>);
+
+impl Tickets {
+    fn new() -> Tickets {
+        Tickets(Arc::new(AtomicUsize::new(0)))
+    }
+
+    fn take(&self) -> usize {
+        self.0.fetch_add(1, Ordering::SeqCst)
+    }
+}
+
+/// Which kind of row one stub answers.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Role {
+    Local,
+    Cloud,
+}
+
+/// The rendezvous that proves a cloud row and a local row were in flight at
+/// once, without any case having to time anything.
+///
+/// The first cloud request holds its answer until a local row has reached its
+/// own stub, and the first local request records whether a cloud request was
+/// in flight when it arrived. A runner that finished every local row before
+/// starting a cloud one leaves nothing in flight at that moment, so
+/// `overlapped` stays false and the case fails. Both waits are bounded, so a
+/// runner that never overlaps ends the case rather than hanging it.
+struct Gate {
+    cloud_in_flight: AtomicUsize,
+    /// Local arrivals so far. Only the first consults the gate, so the rest of
+    /// a forty-sentence row costs nothing once the question is answered.
+    local_arrivals: AtomicUsize,
+    /// Local arrivals that have finished consulting the gate. The cloud hold
+    /// waits on this rather than on `local_arrivals`, so it cannot end before
+    /// the first local request has looked.
+    local_seen: AtomicUsize,
+    overlapped: AtomicUsize,
+}
+
+impl Gate {
+    fn new() -> Arc<Gate> {
+        Arc::new(Gate {
+            cloud_in_flight: AtomicUsize::new(0),
+            local_arrivals: AtomicUsize::new(0),
+            local_seen: AtomicUsize::new(0),
+            overlapped: AtomicUsize::new(0),
+        })
+    }
+
+    /// Whether a cloud request was in flight when a local one arrived.
+    fn overlapped(&self) -> bool {
+        self.overlapped.load(Ordering::SeqCst) > 0
+    }
+
+    fn arrive(&self, role: Role) {
+        match role {
+            Role::Cloud => {
+                let first = self.cloud_in_flight.fetch_add(1, Ordering::SeqCst) == 0;
+                if first {
+                    // Hold the row open, so a local row still to come meets
+                    // it. The wait is long, because a debug Harper builds its
+                    // dictionary before the first local server is asked
+                    // anything, and only a run with no overlap at all pays it.
+                    wait_until(Duration::from_secs(60), || {
+                        self.local_seen.load(Ordering::SeqCst) > 0
+                    });
+                }
+            }
+            Role::Local => {
+                if self.local_arrivals.fetch_add(1, Ordering::SeqCst) == 0 {
+                    let busy = wait_until(Duration::from_secs(5), || {
+                        self.cloud_in_flight.load(Ordering::SeqCst) > 0
+                    });
+                    if busy {
+                        self.overlapped.store(1, Ordering::SeqCst);
+                    }
+                }
+                self.local_seen.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+    }
+
+    fn leave(&self, role: Role) {
+        if role == Role::Cloud {
+            self.cloud_in_flight.fetch_sub(1, Ordering::SeqCst);
+        }
+    }
+}
+
+/// Poll until the condition holds or the wait runs out, and say which happened.
+fn wait_until(limit: Duration, ready: impl Fn() -> bool) -> bool {
+    let deadline = Instant::now() + limit;
+    while Instant::now() < deadline {
+        if ready() {
+            return true;
+        }
+        thread::sleep(Duration::from_millis(5));
+    }
+    ready()
+}
+
+/// A stub that answers every connection on a thread of its own, so two rows
+/// really are served at once. The single-threaded [`stub`] would hide that.
+struct Concurrent {
+    address: String,
+    /// The ticket of every request, beside the model id its body named.
+    seen: Arc<Mutex<Vec<(usize, String)>>>,
+}
+
+impl Concurrent {
+    fn url(&self) -> String {
+        format!("http://{}", self.address)
+    }
+
+    /// The tickets of the requests that named one model, in the order taken.
+    fn tickets_for(&self, model: &str) -> Vec<usize> {
+        self.seen
+            .lock()
+            .expect("the log is not poisoned")
+            .iter()
+            .filter(|(_, named)| named == model)
+            .map(|(ticket, _)| *ticket)
+            .collect()
+    }
+}
+
+fn concurrent_stub(answer: String, tickets: &Tickets, gate: &Arc<Gate>, role: Role) -> Concurrent {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("a loopback port is free");
+    let address = listener
+        .local_addr()
+        .expect("the port is known")
+        .to_string();
+    let seen: Arc<Mutex<Vec<(usize, String)>>> = Arc::new(Mutex::new(Vec::new()));
+    let recorder = Arc::clone(&seen);
+    let tickets = tickets.clone();
+    let gate = Arc::clone(gate);
+
+    thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { break };
+            let (recorder, tickets, gate, answer) = (
+                Arc::clone(&recorder),
+                tickets.clone(),
+                Arc::clone(&gate),
+                answer.clone(),
+            );
+            thread::spawn(move || {
+                let body = read_body(&mut stream);
+                recorder
+                    .lock()
+                    .expect("the log is not poisoned")
+                    .push((tickets.take(), model_of(&body)));
+                gate.arrive(role);
+                let _ = write!(
+                    stream,
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{answer}",
+                    answer.len()
+                );
+                let _ = stream.flush();
+                gate.leave(role);
+            });
+        }
+    });
+
+    Concurrent { address, seen }
+}
+
+/// The `model` field of one chat completion request.
+fn model_of(body: &str) -> String {
+    serde_json::from_str::<Value>(body)
+        .ok()
+        .and_then(|value| value["model"].as_str().map(str::to_string))
+        .unwrap_or_default()
+}
+
+/// Whether two rows took their tickets in turn rather than one after the other.
+fn interleaved(first: &[usize], second: &[usize]) -> bool {
+    let (Some(a_first), Some(a_last)) = (first.first(), first.last()) else {
+        return false;
+    };
+    let (Some(b_first), Some(b_last)) = (second.first(), second.last()) else {
+        return false;
+    };
+    a_first < b_last && b_first < a_last
+}
+
+/// A stub that rate limits the first Check and answers every later one.
+///
+/// That is the transient answer of spec section 4.1: the row must pay a pause
+/// and keep its Check rather than count it invalid.
+fn rate_limiting_stub(answer: String) -> Stub {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("a loopback port is free");
+    let address = listener
+        .local_addr()
+        .expect("the port is known")
+        .to_string();
+    let served = Arc::new(AtomicUsize::new(0));
+    let counter = Arc::clone(&served);
+
+    thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { break };
+            read_request(&mut stream);
+            if counter.fetch_add(1, Ordering::SeqCst) == 0 {
+                let _ = write!(
+                    stream,
+                    "HTTP/1.1 429 Too Many Requests\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                );
+                let _ = stream.flush();
+                continue;
+            }
+            let _ = write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{answer}",
+                answer.len()
+            );
+            let _ = stream.flush();
+        }
+    });
+
+    Stub { address, served }
+}
+
 /// One entry of the record file, the shape the judge of HUF-205 reads.
 #[derive(Debug, Deserialize)]
 struct RecordedCheck {
@@ -196,6 +427,28 @@ fn read_request(stream: &mut TcpStream) -> String {
 
     let head = String::from_utf8_lossy(&head).to_ascii_lowercase();
     let length: usize = head
+        .lines()
+        .find_map(|line| line.strip_prefix("content-length:"))
+        .and_then(|value| value.trim().parse().ok())
+        .unwrap_or(0);
+    let mut body = vec![0u8; length];
+    let _ = stream.read_exact(&mut body);
+    String::from_utf8_lossy(&body).to_string()
+}
+
+/// Read one whole request and answer its body.
+fn read_body(stream: &mut TcpStream) -> String {
+    let mut head = Vec::new();
+    let mut byte = [0u8; 1];
+    while stream.read(&mut byte).unwrap_or(0) == 1 {
+        head.push(byte[0]);
+        if head.ends_with(b"\r\n\r\n") {
+            break;
+        }
+    }
+
+    let headers = String::from_utf8_lossy(&head).to_ascii_lowercase();
+    let length: usize = headers
         .lines()
         .find_map(|line| line.strip_prefix("content-length:"))
         .and_then(|value| value.trim().parse().ok())
@@ -975,5 +1228,154 @@ fn the_committed_benchmark_file_of_this_version_is_the_output_of_the_command() {
     assert!(
         default_engine.contains(" of 30 ("),
         "the default engine is measured, not skipped: {default_engine}"
+    );
+}
+
+/// Spec section 4.1: a silent forty-minute command is unacceptable, so every
+/// sentence says on stderr which row it belongs to and how long it took.
+#[test]
+fn every_sentence_prints_one_progress_line_naming_its_row_item_and_time() {
+    let settings = settings_file("progress.json", r#""engine": "harper""#);
+
+    let run = bench(&settings, &[]);
+
+    assert_eq!(run.status, 0, "{}", run.stderr);
+    let ids = fixture_ids();
+    let lines: Vec<&str> = run
+        .stderr
+        .lines()
+        .filter(|line| line.starts_with("grammachy bench: harper "))
+        .collect();
+
+    assert_eq!(
+        lines.len(),
+        ids.len(),
+        "one line per sentence:\n{}",
+        run.stderr
+    );
+    assert!(
+        lines[0].starts_with(&format!(
+            "grammachy bench: harper {} (1/{}) ",
+            ids[0],
+            ids.len()
+        )),
+        "the line names the row, the item, and its place in the fixture: {}",
+        lines[0]
+    );
+    for (line, id) in lines.iter().zip(&ids) {
+        assert!(line.contains(id), "{line} names its item");
+        assert!(line.contains(" s, row "), "{line} names both times");
+    }
+}
+
+/// Spec section 4.1: cloud rows run in parallel with each other and with the
+/// local rows, and the tables still print in the order the plan named.
+#[test]
+fn cloud_rows_run_beside_each_other_and_beside_the_local_rows() {
+    let tickets = Tickets::new();
+    let gate = Gate::new();
+    let local = concurrent_stub(answer_body(None), &tickets, &gate, Role::Local);
+    let cloud = concurrent_stub(
+        answer_body(Some(cloud_usage(Some(0.0001)))),
+        &tickets,
+        &gate,
+        Role::Cloud,
+    );
+    let settings = settings_file(
+        "parallel.json",
+        &format!(r#""openaiBaseUrl": "{}""#, local.url()),
+    );
+
+    let run = bench_cloud(
+        &settings,
+        &[
+            "--engine",
+            "openai",
+            "--model",
+            "qwen3.5-4b",
+            "--cloud-model",
+            "deepseek/deepseek-v4-flash-0731",
+            "--cloud-model",
+            "google/gemini-3.7-flash",
+            "--max-cost",
+            "10",
+        ],
+        &cloud.url(),
+    );
+
+    assert_eq!(run.status, 0, "{}", run.stderr);
+
+    let first_cloud = cloud.tickets_for("deepseek/deepseek-v4-flash-0731");
+    let second_cloud = cloud.tickets_for("google/gemini-3.7-flash");
+    assert_eq!(first_cloud.len(), fixture_ids().len());
+    assert_eq!(second_cloud.len(), fixture_ids().len());
+    assert!(
+        interleaved(&first_cloud, &second_cloud),
+        "the two cloud rows ran one after the other rather than beside each other"
+    );
+    assert!(
+        gate.overlapped(),
+        "no cloud Check was in flight when a local row reached its server"
+    );
+
+    // Whatever order they finished in, the tables print the plan's order:
+    // local rows first, then the cloud rows as the flags named them.
+    let planned = [
+        "qwen3.5-4b",
+        "deepseek/deepseek-v4-flash-0731",
+        "google/gemini-3.7-flash",
+    ];
+    for table in ["### Quality", "### Cost", "### Throughput"] {
+        let printed: Vec<&str> = run
+            .stdout
+            .split(table)
+            .nth(1)
+            .expect("the table is printed")
+            .lines()
+            .skip_while(|line| !line.starts_with("| `"))
+            .take_while(|line| line.starts_with("| `"))
+            .filter_map(|line| line.split('`').nth(1))
+            .collect();
+        assert_eq!(printed, planned, "{table} is out of plan order");
+    }
+}
+
+/// Spec section 4.1: a transient answer costs the row a pause, never a Check.
+#[test]
+fn a_rate_limited_cloud_check_is_retried_once_and_says_so() {
+    let settings = settings_file("cloud-retry.json", r#""engine": "harper""#);
+    let stub = rate_limiting_stub(answer_body(Some(cloud_usage(Some(0.0001)))));
+
+    let run = bench_cloud(
+        &settings,
+        &[
+            "--engine",
+            "openrouter",
+            "--model",
+            "deepseek/deepseek-v4-flash-0731",
+            "--max-cost",
+            "10",
+        ],
+        &format!("http://{}", stub.address),
+    );
+
+    assert_eq!(
+        run.status, 0,
+        "one rate limit must not fail the run: {}",
+        run.stderr
+    );
+    assert!(
+        run.stderr.contains(
+            "grammachy: OpenRouter answered HTTP 429 for deepseek/deepseek-v4-flash-0731; retrying once"
+        ),
+        "the retry is logged:\n{}",
+        run.stderr
+    );
+    // The retried Check answered, so the row is measured rather than skipped
+    // and every sentence of the fixture is valid.
+    let quality = row(&run.stdout, "deepseek/deepseek-v4-flash-0731");
+    assert!(
+        quality.contains("| 40 of 40 (100.0%) |"),
+        "no Check was lost to the rate limit: {quality}"
     );
 }

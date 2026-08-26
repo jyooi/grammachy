@@ -37,6 +37,13 @@ struct Stub {
 
 impl Stub {
     fn serving(reply: Reply) -> Stub {
+        Stub::serving_in_turn(vec![reply])
+    }
+
+    /// A stub that answers each request with the next reply, and repeats the
+    /// last one once the list runs out. That is how a case gives one transient
+    /// answer and then a good one.
+    fn serving_in_turn(replies: Vec<Reply>) -> Stub {
         let listener = TcpListener::bind("127.0.0.1:0").expect("a loopback port is free");
         let address = listener
             .local_addr()
@@ -53,6 +60,8 @@ impl Stub {
                     .lock()
                     .expect("the log is not poisoned")
                     .push(request);
+                let taken = recorder.lock().expect("the log is not poisoned").len();
+                let reply = replies[(taken - 1).min(replies.len() - 1)];
                 match reply {
                     Reply::Json(body) => {
                         let _ = write!(
@@ -122,6 +131,18 @@ fn adapter(url: &str, key: Option<PathBuf>, timeout: Duration) -> Openrouter {
         timeout,
         key_file: key,
         url: url.to_string(),
+        retry_after: None,
+    })
+}
+
+/// The adapter as `grammachy bench` builds it: one retry of a transient
+/// answer, after a pause short enough for a test to pay.
+fn retrying(url: &str, key: Option<PathBuf>) -> Openrouter {
+    Openrouter::new(Config {
+        timeout: Duration::from_secs(2),
+        key_file: key,
+        url: url.to_string(),
+        retry_after: Some(Duration::from_millis(20)),
     })
 }
 
@@ -266,6 +287,78 @@ fn http_statuses_map_onto_the_agreed_reasons() {
     .answer(TEXT, &options())
     .expect_err("server error");
     assert!(matches!(failure, EngineFailure::Failed(_)), "{failure:?}");
+}
+
+/// The retry rule of `docs/spec/evals.md` section 4.1, from recorded answers.
+#[test]
+fn a_rate_limit_or_a_provider_fault_is_asked_once_more() {
+    for first in [
+        "429 Too Many Requests",
+        "500 Internal Server Error",
+        "503 Service Unavailable",
+    ] {
+        let stub = Stub::serving_in_turn(vec![Reply::Status(first), Reply::Json(ANSWER)]);
+        let key = key_file("retry", "sk-or-test");
+
+        let answer = retrying(&stub.url(), Some(key))
+            .answer(TEXT, &options())
+            .expect("the second attempt answers");
+
+        assert_eq!(answer.issues.len(), 1, "{first}");
+        assert_eq!(stub.requests().len(), 2, "{first}: one retry, not two");
+    }
+}
+
+#[test]
+fn a_transient_answer_that_repeats_is_the_failure_of_the_second_attempt() {
+    let stub = Stub::serving(Reply::Status("429 Too Many Requests"));
+    let key = key_file("retry-twice", "sk-or-test");
+
+    let failure = retrying(&stub.url(), Some(key))
+        .answer(TEXT, &options())
+        .expect_err("both attempts are rate limited");
+
+    assert!(
+        matches!(&failure, EngineFailure::Unavailable(message) if message.contains("rate_limited")),
+        "{failure:?}"
+    );
+    assert_eq!(stub.requests().len(), 2, "one retry, then the failure");
+}
+
+#[test]
+fn a_failure_no_retry_can_help_is_never_asked_twice() {
+    // The key, the credit, the model, and the body answer the same next time,
+    // so a retry would only spend another Check.
+    for line in [
+        "401 Unauthorized",
+        "402 Payment Required",
+        "404 Not Found",
+        "400 Bad Request",
+    ] {
+        let stub = Stub::serving(Reply::Status(line));
+        let key = key_file("no-retry", "sk-or-test");
+
+        retrying(&stub.url(), Some(key))
+            .answer(TEXT, &options())
+            .expect_err(line);
+
+        assert_eq!(stub.requests().len(), 1, "{line} was asked twice");
+    }
+}
+
+#[test]
+fn the_product_path_answers_a_rate_limit_at_once() {
+    let stub = Stub::serving_in_turn(vec![
+        Reply::Status("429 Too Many Requests"),
+        Reply::Json(ANSWER),
+    ]);
+    let key = key_file("no-retry-default", "sk-or-test");
+
+    adapter(&stub.url(), Some(key), Duration::from_secs(2))
+        .answer(TEXT, &options())
+        .expect_err("the shell card carries the Retry button, not the adapter");
+
+    assert_eq!(stub.requests().len(), 1, "the shell never retries for you");
 }
 
 #[test]
