@@ -261,18 +261,42 @@ fn a_missing_accelerator_never_hides_the_real_cause() {
 }
 
 /// A GPU machine with the accelerator and no CPU backend is a genuine failure.
+///
+/// The old install line was `sudo pacman -S llama-cpp ggml-vulkan`, and
+/// `ggml-vulkan` depends on no CPU backend, so this is what a machine that
+/// followed it looks like. The line must name the gap without denying the
+/// accelerator that is there.
 #[test]
 fn a_missing_cpu_backend_is_a_fault_even_beside_vulkan() {
     let mut facts = ready();
     facts.ggml_backends = vec!["libggml-vulkan.so".to_string()];
 
     let output = doctor::run(&facts, EngineSlug::Openai, false);
+    let report = Report::new(&facts, EngineSlug::Openai);
+    let check = report
+        .checks
+        .iter()
+        .find(|check| check.id == "backend")
+        .expect("the backend check is there");
 
     assert_eq!(output.exit_code, 1, "{}", output.text);
     assert_eq!(missing_lines(&output.text).len(), 1, "{}", output.text);
+    assert!(!check.ok);
+    assert_eq!(check.remedy.as_deref(), Some("sudo pacman -S ggml-cpu"));
+    assert!(check.detail.contains("ggml-cpu"), "{}", check.detail);
+    assert!(
+        !check.detail.contains("no compute backend"),
+        "ggml-vulkan is installed, so the line may not deny it: {}",
+        check.detail
+    );
+    assert!(
+        !check.detail.contains("ggml-vulkan"),
+        "the line names the gap only: {}",
+        check.detail
+    );
     assert_eq!(
-        Report::new(&facts, EngineSlug::Openai).diagnosis,
-        "llama.cpp has no compute backend: ggml-cpu is not installed. Run: sudo pacman -S ggml-cpu"
+        report.diagnosis,
+        "llama.cpp is missing the ggml-cpu backend, which it needs to answer at all. Run: sudo pacman -S ggml-cpu"
     );
 }
 
@@ -288,7 +312,7 @@ fn the_diagnosis_names_the_missing_backend() {
     assert!(!report.ready);
     assert_eq!(
         report.diagnosis,
-        "llama.cpp has no compute backend: ggml-cpu and ggml-vulkan are not installed. Run: sudo pacman -S ggml-cpu ggml-vulkan"
+        "llama.cpp is missing the ggml-cpu and ggml-vulkan backends. It needs ggml-cpu to answer at all. Run: sudo pacman -S ggml-cpu ggml-vulkan"
     );
 }
 

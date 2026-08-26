@@ -33,7 +33,7 @@ Grammachy doctor
   ok       LanguageTool        /usr/bin/languagetool
   ok       Java runtime        /usr/lib/jvm/default/bin/java
   missing  llama.cpp server    llama.cpp is not installed: /usr/bin/llama-server does not exist. Run: sudo pacman -S llama-cpp ggml-cpu ggml-vulkan
-  missing  llama.cpp backend   llama.cpp has no compute backend: ggml-cpu and ggml-vulkan are not installed. Run: sudo pacman -S ggml-cpu ggml-vulkan
+  missing  llama.cpp backend   llama.cpp is missing the ggml-cpu and ggml-vulkan backends. It needs ggml-cpu to answer at all. Run: sudo pacman -S ggml-cpu ggml-vulkan
   missing  Model weights       No weights for gemma-4-e4b-it in /home/u/.local/share/grammachy/models. Run: grammachy setup
   ok       Local LLM endpoint  127.0.0.1:8080
   ok       LanguageTool unit   grammachy-languagetool is not running. The next Check starts it.
@@ -135,7 +135,8 @@ The backend libraries live in `/usr/lib/ggml`.
 
 Every tier wants `ggml-cpu`, because llama.cpp runs on the CPU the parts no other backend takes.
 A GPU tier wants `ggml-vulkan` beside it.
-The remedy names only the packages that are missing.
+The remedy names only the packages that are missing, and the line names only what is missing.
+A machine can carry `ggml-vulkan` and still lack `ggml-cpu`, so no line claims that the machine has no backend at all.
 
 `ggml-cpu` is the requirement and `ggml-vulkan` is the accelerator.
 A missing `ggml-cpu` fails the check, because the server then answers nothing.

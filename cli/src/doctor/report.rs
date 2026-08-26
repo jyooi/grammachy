@@ -256,6 +256,11 @@ fn llama_check(facts: &Facts, tier: HardwareTier) -> Check {
 /// machine that has the CPU backend alone runs the engine, only on the CPU, so
 /// that machine passes the check and reads the install line as advice. Failing
 /// it would hide the real cause, such as weights that are not downloaded yet.
+///
+/// Every line names what is missing and never what is present, because a
+/// machine can carry the accelerator and still lack the backend the server
+/// needs. That is the state the old install line of `llama-cpp ggml-vulkan`
+/// left behind.
 fn backend_check(facts: &Facts) -> Check {
     let missing = facts.missing_backends();
     let installed: Vec<&str> = facts
@@ -267,15 +272,29 @@ fn backend_check(facts: &Facts) -> Check {
 
     if missing.iter().any(|backend| backend.required()) {
         let packages: Vec<&str> = missing.iter().copied().map(Backend::package).collect();
+        let required: Vec<&str> = missing
+            .iter()
+            .copied()
+            .filter(|backend| backend.required())
+            .map(Backend::package)
+            .collect();
+        let detail = if packages.len() == 1 {
+            format!(
+                "llama.cpp is missing the {} backend, which it needs to answer at all.",
+                packages[0]
+            )
+        } else {
+            format!(
+                "llama.cpp is missing the {} backends. It needs {} to answer at all.",
+                packages.join(" and "),
+                required.join(" and ")
+            )
+        };
         return Check {
             id: "backend",
             name: "llama.cpp backend",
             ok: false,
-            detail: format!(
-                "llama.cpp has no compute backend: {} {} not installed.",
-                packages.join(" and "),
-                if packages.len() == 1 { "is" } else { "are" }
-            ),
+            detail,
             remedy: Some(format!("sudo pacman -S {}", packages.join(" "))),
             engines: vec!["openai"],
         };
