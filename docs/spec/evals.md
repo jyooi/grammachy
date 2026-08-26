@@ -170,7 +170,10 @@ Measured on the 890M: gemma-4-E4B-it writes 25 tokens per second; thinking raise
 - One prompt for every engine: compact JSON, and a `reason` of at most six words.
   On llama-server the request sends a raw `grammar` with no whitespace between tokens in place of the `json_schema` response format, so compactness is forced; cloud rows keep `json_schema` and the wording.
   About 30 tokens per Issue against 56 before.
-- The Check timeout stays 90 s for every engine and surface.
+- The Check timeout stays 90 s for the local engine, on every surface.
+  Compose is no exception, and thinking is no exception.
+  Every other engine keeps its own timeout from the v1 section 4 table, where `openrouter` is 30 s.
+  Section 7 of this spec fixes that 30 s value for the cloud engine.
   The heavy 2,000-unit case with thinking finishes near 50 s on the 890M.
 - `doctor` checks `ggml-cpu` plus one backend package (`ggml-vulkan` or nothing more on the CPU tier), not only `/usr/bin/llama-server`.
 

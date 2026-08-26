@@ -7,7 +7,7 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   Section 5.2 fixes the `grammachy chunk` JSON envelope.
   Section 10 is the packaging, section 11 the repository layout, section 13 the test plan.
   `docs/spec/evals.md` is the authority on the eval sets, the metrics, the `bench` runner, the `openrouter` cloud engine, and the recommendation rules.
-  It amends v1 sections 4, 5.2, 6, 7, and 13.1.
+  It amends v1 sections 1, 4, 5.2, 6, 7, and 13.1.
   `CONTEXT.md` holds the domain glossary; `docs/adr/` records the settled decisions.
 - The Rust CLI lives in `cli/` and is its own cargo package.
   Run `cargo test`, `cargo clippy --all-targets -- -D warnings`, and `cargo fmt --check` from `cli/`.
@@ -53,7 +53,7 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   One run is the whole benchmark file: `grammachy bench ... > docs/benchmarks/<version>.md`, nothing added by hand.
   `--engine openai --model <name>` fills the Models table and does not narrow the Engines table.
   An engine the machine cannot reach is a skipped row, never an error, so a machine without llama.cpp still produces a valid file.
-  `cli/src/bench/weights.rs` is the product rule for which models may be recommended (spec section 13.1).
+  `cli/src/bench/weights.rs` is the product rule for which models may be recommended (`docs/spec/evals.md` section 5).
 - `doctor` reports the install state and the one-line engine diagnosis the `engine_unavailable` card shows.
   `docs/doctor.md` documents its envelope, exit code, and hardware tiers.
   `cli/src/doctor/facts.rs` is the only place that reads the machine, so the report is a pure function of recorded `Facts` and no test reads real hardware.
