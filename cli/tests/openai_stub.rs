@@ -31,6 +31,9 @@ enum Answer {
     Status(&'static str),
     /// Read the request and never write, so the client runs out of time.
     Silence,
+    /// A `503` for this many requests, then a `200` with this JSON body. That
+    /// is llama.cpp: it binds the port before it has read the weights.
+    LoadingThenJson(usize, &'static str),
 }
 
 /// A stub server on a port the operating system picks, torn down with the test.
@@ -51,6 +54,7 @@ impl Stub {
         let recorder = Arc::clone(&seen);
 
         thread::spawn(move || {
+            let mut served = 0usize;
             for stream in listener.incoming() {
                 let Ok(mut stream) = stream else { break };
                 let request = read_request(&mut stream);
@@ -58,6 +62,7 @@ impl Stub {
                     .lock()
                     .expect("the log is not poisoned")
                     .push(request);
+                served += 1;
                 match answer {
                     Answer::Json(body) => {
                         let _ = write!(
@@ -74,6 +79,19 @@ impl Stub {
                     }
                     // Hold the connection open until the client gives up.
                     Answer::Silence => thread::sleep(Duration::from_secs(30)),
+                    Answer::LoadingThenJson(loading, _) if served <= loading => {
+                        let _ = write!(
+                            stream,
+                            "HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                        );
+                    }
+                    Answer::LoadingThenJson(_, body) => {
+                        let _ = write!(
+                            stream,
+                            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                            body.len()
+                        );
+                    }
                 }
             }
         });
@@ -349,6 +367,53 @@ fn a_server_error_is_an_engine_error() {
         matches!(failure, EngineFailure::Failed(ref message) if message.contains("500")),
         "expected engine_error, got {failure:?}"
     );
+}
+
+/// llama.cpp binds its port before it has read the weights and answers 503
+/// until it has. That is the server not being up yet, so it is what the startup
+/// budget waits out rather than an engine error the user is shown.
+#[test]
+fn a_server_still_loading_its_weights_is_waited_out_rather_than_failed() {
+    let stub = Stub::serving(Answer::LoadingThenJson(2, ANSWER));
+    let starts = Starts::default();
+    let adapter = Openai::with_starter(
+        Config {
+            timeout: Duration::from_secs(2),
+            start_unit: true,
+            startup_budget: Duration::from_secs(5),
+        },
+        Box::new(|_model: &str, _endpoint: &Endpoint| Ok(())),
+    );
+
+    let issues = adapter
+        .check(TEXT, &options(&stub.base_url()))
+        .expect("the server finishes loading and answers");
+
+    assert_eq!(issues.len(), 1);
+    // One request found it loading, the retry loop found it loading again, and
+    // the third one got the answer.
+    assert_eq!(stub.requests().len(), 3);
+    assert_eq!(starts.count(), 0, "no start was recorded on this adapter");
+}
+
+/// With no budget left, a server that is still loading is the
+/// `engine_unavailable` card, which is the one that explains a first Check.
+#[test]
+fn a_server_still_loading_with_no_budget_left_is_engine_unavailable() {
+    let stub = Stub::serving(Answer::Status("503 Service Unavailable"));
+    let starts = Starts::default();
+
+    let failure = adapter(Duration::from_secs(2), true, &starts)
+        .check(TEXT, &options(&stub.base_url()))
+        .expect_err("the stub never finishes loading");
+
+    match failure {
+        EngineFailure::Unavailable(message) => assert!(
+            message.contains("still loading"),
+            "the message says what the server is doing: {message}"
+        ),
+        other => panic!("expected engine_unavailable, got {other:?}"),
+    }
 }
 
 #[test]

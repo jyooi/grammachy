@@ -36,6 +36,8 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   A test that runs the binary must also point `openaiBaseUrl` away from the default `127.0.0.1:8080`, because a developer machine may answer there.
   `cli/tests/bench.rs` writes a dead address into every settings file for that reason.
   Live tests in `languagetool_live.rs`, `openai_live.rs`, and `interference_catch_rate.rs` skip when their port is silent, which keeps CI green without the packages.
+- llama.cpp binds its port before it has read the weights and answers HTTP 503 until it has, which is minutes for a 5 GB file.
+  `openai/mod.rs` maps that one status to `engine_unavailable`, so `start_and_retry` waits it out instead of calling the first Check of a session an engine error.
 - The `openai` base URL host must be loopback, and `cli/src/engines/openai/endpoint.rs` is the only place that decides it.
   A remote host is `bad_arguments` and no request is made; that is a product guarantee, so keep it tested.
   Its prompt in `prompt.rs` is the wording HUF-181 measured, and the "shortest exact substring" rule is what makes the spans usable rather than whole-sentence rewrites.
@@ -46,17 +48,25 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   `response::parse_array` drops a leading think anyway, because `openaiBaseUrl` may name a server this adapter did not start.
   The default lives twice, in `settings::DEFAULT_LOCAL_THINKING` and in the `localThinking` descriptor of `ui/settings.js`.
   `cli/tests/overlay_thinking.rs` keeps the two equal and keeps the Toggle inside the group the engine hides.
+- `grammachy model` lives in `cli/src/model/`, spec section 5.3: `list`, `download`, and `remove` for the Local LLM weights, plus the `ensure` that `setup` still calls.
+  `setup/model.rs` moved here; `setup/mod.rs` calls `model::ensure` and owns nothing about weights any more.
+  The catalogue is `mod.rs` and every row is pinned twice, by sha256 and by byte size, both read from the Hugging Face `x-linked-etag` and `x-linked-size` of an unauthenticated request.
+  A row belongs there only when that request answers 200 without a token.
+  The three verbs agree on one pair of paths, the row's own pinned file name and its `.part`, so a hand-placed `.gguf` is never listed and never deleted.
+  The licence of a row comes from `bench::weights::of`, which is the one product rule of spec section 13.1.
+  `cancel.rs` is the whole cancel: the SIGTERM handler only sets a flag, and `curl` polls that flag so the child dies and the `.part` file stays.
+  Seams are `GRAMMACHY_MODELS_DIR`, `GRAMMACHY_MODEL_BASE_URL`, `GRAMMACHY_MODEL_SHA256`, `GRAMMACHY_LLAMA_STOP`, plus the `Downloader` and `Stopper` values.
+  `cli/tests/model_download.rs` and `cli/tests/model_cancel.rs` each own their whole binary, because one sets a digest for the process and the other takes the signal disposition over.
 - `grammachy setup` lives in `cli/src/setup/`, spec section 10.
   It prints one JSON envelope (`SetupEnvelope`).
   Exit 1 uses `setup_failed`.
   `block.rs` owns the marked block both configuration files carry and the rule that makes `--remove` byte exact: the region always carries the newline on each side, so insertion and removal are the same substring.
   `bindings.rs` holds the two `hl.unbind` plus `o.bind` pairs of spec section 2 and the `hyprctl reload`; the file is `bindings.lua`, because Omarchy answers `configProvider: lua` and never reads the `.conf` files beside it.
   `menu.rs` holds the `grammachy.compose` row, which names `"parent": "root"` because nothing else creates a `grammachy` submenu.
-  `model.rs` downloads the weights with `curl`, the tool `bin/bootstrap.sh` uses, because `curl` resumes an interrupted multi-gigabyte transfer.
-  The catalogue file is `unsloth/gemma-4-E4B-it-GGUF` and is pinned by sha256.
+  The weights step calls `model::ensure`, which downloads with `curl`, the tool `bin/bootstrap.sh` uses, because `curl` resumes an interrupted multi-gigabyte transfer.
   A failed model step still writes the hotkeys and menu.
   Hardware tiers only name the llama.cpp backend packages, because the weights file is the same on both (spec section 4).
-  Every path and both side effects are seams: `GRAMMACHY_BINDINGS_LUA`, `GRAMMACHY_MENU_JSONC`, `GRAMMACHY_MODELS_DIR`, `GRAMMACHY_HYPRCTL_RELOAD=never`, `GRAMMACHY_MODEL_BASE_URL`, `GRAMMACHY_MODEL_SHA256`, plus the `Reloader` and `Downloader` values.
+  Every path and both side effects are seams: `GRAMMACHY_BINDINGS_LUA`, `GRAMMACHY_MENU_JSONC`, `GRAMMACHY_HYPRCTL_RELOAD=never`, plus the `Reloader` value and the `cli/src/model/` seams above.
   No test may touch a real config file, a real compositor, or the real weights host.
 - Settings resolve in `cli/src/settings.rs`: flags, then the plugin entry in `$HOME/.config/omarchy/shell.json`, then the defaults of spec section 7.
   The product path is that HOME path only. The CLI does not read `$XDG_CONFIG_HOME`.
@@ -114,8 +124,8 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   Every QML file in `ui/` only draws.
   `root.surface` is `"quick"` or `"compose"` and is what routes a summon (spec section 2); both surfaces share one `phase`, one Check, one review state, and one key map, so a change to either belongs in `Overlay.qml` rather than in a card.
   `Overlay.keyMode` is where a new `phase` has to be named, or its card silently inherits the review keys.
-  `ui/QuickCard.qml` and `ui/ComposeCard.qml` are the two surfaces; `ui/CardHero.qml`, `ui/Inspector.qml`, `ui/ReviewCounts.qml`, `ui/MarkedText.qml`, `ui/ErrorCard.qml`, and `ui/SettingsView.qml` are shared parts, so a change to the hero, the inspector, or the counts reaches both at once.
-  `ui/splice.js`, `ui/tokens.js`, `ui/keymap.js`, `ui/format.js`, `ui/settings.js`, `ui/errors.js`, `ui/anchor.js`, and `ui/limits.js` are loaded by QML and by node, so they may use neither's API.
+  `ui/QuickCard.qml` and `ui/ComposeCard.qml` are the two surfaces; `ui/CardHero.qml`, `ui/Inspector.qml`, `ui/ReviewCounts.qml`, `ui/MarkedText.qml`, `ui/ErrorCard.qml`, `ui/SettingsView.qml`, and `ui/ModelsView.qml` are shared parts, so a change to the hero, the inspector, or the counts reaches both at once.
+  `ui/splice.js`, `ui/tokens.js`, `ui/keymap.js`, `ui/format.js`, `ui/settings.js`, `ui/errors.js`, `ui/models.js`, `ui/anchor.js`, and `ui/limits.js` are loaded by QML and by node, so they may use neither's API.
   Their `*.test.js` siblings run under `node --test`; add a new one to `.github/workflows/ci.yml` and to `docs/dev.md`.
   `keymap.js` takes the Qt key codes as an argument, which is what lets node run it, and a mode string that says which card the press landed on.
   Anything worth a test belongs in one of those rather than in QML, because the repo has no QML test harness: `Overlay.qml` cannot be instantiated outside the shell's plugin loader, so a standalone Quickshell config hangs on it.
@@ -125,6 +135,12 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   `docs/dev.md` is the only route onto a live desktop, including the manual smoke items and the Compose walkthrough.
   A plugin folder that is a symlink reloads as `docs/dev.md` step 4 says.
   A leaf card does run outside the shell: a scratch Quickshell config whose root directory holds `Commons` and `Ui` symlinks into `/usr/share/omarchy/shell` plus a `ui` symlink into the repo can instantiate `ComposeCard` or `QuickCard` in a `FloatingWindow`, which is the fastest way to see a layout change without installing the plugin.
+- The Models list of spec sections 5.3 and 7 is `ui/models.js` plus `ui/ModelsView.qml`, embedded by `SettingsView.qml` and shown for the `openai` engine only.
+  `models.js` owns the envelope reader, the row state rule, the byte formatting, the hint line, and which buttons a row carries; `ui/models.test.js` runs the whole route against a stub binary that answers all three verbs.
+  `Overlay.qml` owns the two processes and the one-second `modelPoll`: the CLI prints nothing while curl runs, so the `.part` length that `model list` reports is the only progress there is.
+  Cancel is `modelActionProcess.signal(15)` and never `running = false`, which would orphan curl; `resetRun` deliberately touches none of the model state, because closing the overlay must not cancel a download.
+  `confirmModel` is a `phase` with its own `Overlay.keyMode` entry, and `cli/tests/overlay_models.rs` keeps all of that in step.
+  [ADR 0004](docs/adr/0004-model-downloads-run-through-the-cli.md) records why the download lives in the CLI.
 - `ui/anchor.js` owns both answers the source window of spec section 3 gives: where the quick popup opens (`placeCard`) and where Replace types (`focusCommand`, `isFocused`).
   `Overlay.sourceWindow` is that one recorded fact, read by `hyprctl activewindow -j` before the capture, because the popup window itself takes the answer away.
   Omarchy answers `configProvider: lua`, so `hyprctl dispatch` reads Lua: the focus is `hl.dsp.focus({ window = "address:0x..." })` and never the `focuswindow address:<addr>` line of the `.conf` provider.

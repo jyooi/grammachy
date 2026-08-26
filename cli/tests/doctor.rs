@@ -256,7 +256,7 @@ fn a_missing_accelerator_never_hides_the_real_cause() {
     assert!(!report.ready);
     assert_eq!(
         report.diagnosis,
-        "No weights for gemma-4-e4b-it in /home/u/.local/share/grammachy/models. Run: grammachy setup"
+        "No weights for gemma-4-e4b-it in /home/u/.local/share/grammachy/models. Run: grammachy model download gemma-4-e4b-it"
     );
 }
 
@@ -329,7 +329,7 @@ fn a_missing_backend_never_fails_another_engine() {
 }
 
 #[test]
-fn missing_weights_point_at_setup_and_never_at_pacman() {
+fn missing_weights_point_at_the_download_verb_and_never_at_pacman() {
     let mut facts = ready();
     facts.model_file = None;
 
@@ -337,7 +337,10 @@ fn missing_weights_point_at_setup_and_never_at_pacman() {
 
     assert_eq!(missing_lines(&text).len(), 1, "{text}");
     assert!(text.contains("No weights for gemma-4-e4b-it"), "{text}");
-    assert!(text.contains("Run: grammachy setup"), "{text}");
+    assert!(
+        text.contains("Run: grammachy model download gemma-4-e4b-it"),
+        "{text}"
+    );
 }
 
 #[test]

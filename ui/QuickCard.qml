@@ -66,6 +66,15 @@ BorderSurface {
   property string openaiModel: ""
   property bool localThinking: true
 
+  // The Models list of spec section 5.3, passed straight to the Settings view.
+  // The card knows nothing about it: Overlay.qml owns every process.
+  property var models: []
+  property string modelBusy: ""
+  property string modelConfirm: ""
+  property string modelsDirectory: ""
+  property double modelsFreeBytes: 0
+  property var modelNote: null
+
   property int cardWidth: Style.space(680)
   // The whole card fits in this, spec section 6. The marked text is what
   // gives, so a long Selection scrolls rather than pushing the card off screen.
@@ -82,6 +91,12 @@ BorderSurface {
   signal closeRequested()
   signal settingsToggled()
   signal settingChanged(string name, var value)
+  signal modelDownloadRequested(string name)
+  signal modelCancelRequested()
+  signal modelUseRequested(string name)
+  signal modelRemoveRequested(string name)
+  signal modelRemoveConfirmed(string name)
+  signal modelKeepRequested()
   // One button of an error card, spec section 8. The action is a button id
   // from `ui/errors.js`; Overlay.qml owns where each one goes.
   signal errorActionRequested(string action)
@@ -203,6 +218,18 @@ BorderSurface {
       openaiBaseUrl: root.openaiBaseUrl
       openaiModel: root.openaiModel
       localThinking: root.localThinking
+      models: root.models
+      modelBusy: root.modelBusy
+      modelConfirm: root.modelConfirm
+      modelsDirectory: root.modelsDirectory
+      modelsFreeBytes: root.modelsFreeBytes
+      modelNote: root.modelNote
+      onModelDownloadRequested: function(name) { root.modelDownloadRequested(name) }
+      onModelCancelRequested: root.modelCancelRequested()
+      onModelUseRequested: function(name) { root.modelUseRequested(name) }
+      onModelRemoveRequested: function(name) { root.modelRemoveRequested(name) }
+      onModelRemoveConfirmed: function(name) { root.modelRemoveConfirmed(name) }
+      onModelKeepRequested: root.modelKeepRequested()
       onSettingChanged: function(name, value) { root.settingChanged(name, value) }
     }
 

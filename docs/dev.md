@@ -531,14 +531,102 @@ Esc closes the card and keeps the Draft, the same as `Keep the draft`.
 
 The gear flips Compose to the same Settings view as the popup, and `Back` returns to whichever mode was on screen.
 
-## 15. Running the automated checks
+## 15. Smoke items 11 to 15: the Models list
+
+Spec sections 5.3 and 7.
+The list lives in Settings and is drawn for the Local LLM engine only, so open the gear and set Engine to Local LLM first.
+
+Every step here downloads real weights of about 2.5 GB.
+Run it on a machine with room and a connection you do not mind using.
+
+### The list
+
+1. Press SUPER + G on any selection, then click the gear.
+2. Set Engine to Local LLM.
+   A Models block appears under the two server fields.
+3. Check that each row says what the directory really holds:
+
+```bash
+ls -la ~/.local/share/grammachy/models/
+~/.config/omarchy/plugins/io.github.jyooi.grammachy/bin/grammachy model list | python3 -m json.tool
+```
+
+A row is Ready only when the whole `.gguf` is there.
+A `.part` file makes it part downloaded.
+Nothing else makes it either.
+
+The last line names the free space of that directory.
+Compare it with `df -h ~/.local/share/grammachy/models/`.
+
+### Download, Cancel, and resume
+
+4. Press the download arrow on `phi-4-mini-instruct`.
+   The hint line turns into a byte count and a bar appears under it.
+   The bar steps once a second, because the shell polls `grammachy model list` and reads the `.part` file.
+5. While it runs, check that every other row's download arrow is dimmed and does nothing.
+6. Press the cross on the running row.
+   The bar stops and the note says what arrived is kept.
+
+```bash
+ls -la ~/.local/share/grammachy/models/*.part
+```
+
+The `.part` file is there and it holds the bytes that arrived.
+
+7. Press the download arrow again on the same row.
+   The bar starts from where it stopped, not from zero.
+   Watch the `.part` file grow rather than restart:
+
+```bash
+watch -n 1 'ls -l ~/.local/share/grammachy/models/'
+```
+
+8. Let it finish.
+   The row turns Ready only after the digest matched, and the `.part` file is gone.
+   A file whose digest did not match stays a `.part` file and the note says so.
+
+9. Close the overlay while a download runs, then summon it again and open Settings.
+   The bar is still moving.
+   Closing the overlay never cancels a download.
+
+### Use and Remove
+
+10. Press the tick on a Ready row that is not the one in use.
+    The `in use` mark moves to it and the tick goes, because picking the model that is already picked does nothing.
+
+```bash
+python3 -c "import json;print(json.load(open('$HOME/.config/omarchy/shell.json')))" | grep -o "openaiModel[^,]*"
+```
+
+11. Run a Check on the Local LLM engine and watch the unit load the model you picked:
+
+```bash
+systemctl --user show grammachy-llama -p ExecStart --value
+```
+
+12. Press the bin on a Ready row that is not in use.
+    It goes at once, with no question.
+13. Press the bin on the row marked `in use`.
+    One question appears on that row.
+    Press Esc, or Keep, and nothing is deleted.
+14. Press the bin again and answer Remove, or press Enter.
+    The row turns Not downloaded, the file is gone, and the unit is stopped:
+
+```bash
+systemctl --user is-active grammachy-llama
+```
+
+It answers `inactive`.
+The setting is not touched: `openaiModel` still names the model that is now absent, and the next Check answers the `engine_unavailable` card.
+
+## 16. Running the automated checks
 
 The same three plugin checks CI runs, against the shell installed on this machine:
 
 ```bash
 for file in $(find . -name '*.qml' | sort); do qmllint -I /usr/share/omarchy/shell "$file" || echo "FAILED $file"; done
 omarchy-plugin-validate .
-node --test ui/splice.test.js ui/tokens.test.js ui/settings.test.js ui/keymap.test.js ui/errors.test.js ui/format.test.js ui/anchor.test.js ui/limits.test.js
+node --test ui/splice.test.js ui/tokens.test.js ui/settings.test.js ui/keymap.test.js ui/errors.test.js ui/format.test.js ui/anchor.test.js ui/limits.test.js ui/models.test.js
 ```
 
 The `qmllint` on `PATH` reports a syntax error through its exit status alone and prints nothing.
@@ -559,7 +647,7 @@ cargo clippy --all-targets -- -D warnings
 cargo test
 ```
 
-## 16. Removing it
+## 17. Removing it
 
 Remove the hotkeys and the menu entry first (spec section 10):
 

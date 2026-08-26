@@ -1,4 +1,4 @@
-// Corrected text and the span math around it. Spec sections 5.1 and 5.3.
+// Corrected text and the span math around it. Spec sections 5.1 and 5.4.
 //
 // Loaded twice: by the QML overlay through `import "splice.js" as Splice`,
 // and by `splice.test.js` under node. Nothing here may touch a QML or a node

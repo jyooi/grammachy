@@ -342,7 +342,10 @@ fn model_check(facts: &Facts) -> Check {
             name: "Model weights",
             ok: false,
             detail: format!("No weights for {model} in {}.", directory.display()),
-            remedy: Some("grammachy setup".to_string()),
+            // Spec section 5.3: the weights are the one missing piece a user
+            // fixes without a terminal, so the remedy names the verb the
+            // Settings Models list runs rather than the whole install step.
+            remedy: Some(format!("grammachy model download {model}")),
             engines: vec!["openai"],
         },
         (None, None) => Check {

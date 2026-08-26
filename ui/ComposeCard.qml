@@ -73,6 +73,15 @@ BorderSurface {
   property string openaiModel: ""
   property bool localThinking: true
 
+  // The Models list of spec section 5.3, passed straight to the Settings view.
+  // The card knows nothing about it: Overlay.qml owns every process.
+  property var models: []
+  property string modelBusy: ""
+  property string modelConfirm: ""
+  property string modelsDirectory: ""
+  property double modelsFreeBytes: 0
+  property var modelNote: null
+
   // Spec section 9: about 900 px wide and 80 percent of the screen height.
   property int cardWidth: Style.space(900)
   property int cardHeight: Style.space(600)
@@ -99,6 +108,12 @@ BorderSurface {
   signal closeRequested()
   signal settingsToggled()
   signal settingChanged(string name, var value)
+  signal modelDownloadRequested(string name)
+  signal modelCancelRequested()
+  signal modelUseRequested(string name)
+  signal modelRemoveRequested(string name)
+  signal modelRemoveConfirmed(string name)
+  signal modelKeepRequested()
 
   readonly property color acceptedColor: marked.acceptedColor
 
@@ -228,6 +243,18 @@ BorderSurface {
       openaiBaseUrl: root.openaiBaseUrl
       openaiModel: root.openaiModel
       localThinking: root.localThinking
+      models: root.models
+      modelBusy: root.modelBusy
+      modelConfirm: root.modelConfirm
+      modelsDirectory: root.modelsDirectory
+      modelsFreeBytes: root.modelsFreeBytes
+      modelNote: root.modelNote
+      onModelDownloadRequested: function(name) { root.modelDownloadRequested(name) }
+      onModelCancelRequested: root.modelCancelRequested()
+      onModelUseRequested: function(name) { root.modelUseRequested(name) }
+      onModelRemoveRequested: function(name) { root.modelRemoveRequested(name) }
+      onModelRemoveConfirmed: function(name) { root.modelRemoveConfirmed(name) }
+      onModelKeepRequested: root.modelKeepRequested()
       onSettingChanged: function(name, value) { root.settingChanged(name, value) }
     }
 

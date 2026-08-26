@@ -21,7 +21,22 @@ ColumnLayout {
   property string openaiModel: "gemma-4-e4b-it"
   property bool localThinking: true
 
+  // The Models list of spec section 5.3. Everything it needs arrives from
+  // Overlay.qml, which is the only thing that runs `grammachy model`.
+  property var models: []
+  property string modelBusy: ""
+  property string modelConfirm: ""
+  property string modelsDirectory: ""
+  property double modelsFreeBytes: 0
+  property var modelNote: null
+
   signal settingChanged(string name, var value)
+  signal modelDownloadRequested(string name)
+  signal modelCancelRequested()
+  signal modelUseRequested(string name)
+  signal modelRemoveRequested(string name)
+  signal modelRemoveConfirmed(string name)
+  signal modelKeepRequested()
 
   readonly property bool showsOpenai: root.engine === "openai"
 
@@ -220,6 +235,29 @@ ColumnLayout {
       checked: root.localThinking
       foreground: Color.popups.text
       onClicked: root.settingChanged("localThinking", !root.localThinking)
+    }
+
+    // Spec section 5.3: the weights this machine keeps, under the fields that
+    // name the server they run on. The model field above still takes any name,
+    // so a `.gguf` placed here by hand stays reachable without a row.
+    ModelsView {
+      Layout.fillWidth: true
+      Layout.topMargin: Style.spacing.md
+
+      models: root.models
+      busy: root.modelBusy
+      setting: root.openaiModel
+      confirmName: root.modelConfirm
+      directory: root.modelsDirectory
+      freeBytes: root.modelsFreeBytes
+      note: root.modelNote
+
+      onDownload: function(name) { root.modelDownloadRequested(name) }
+      onCancel: root.modelCancelRequested()
+      onUse: function(name) { root.modelUseRequested(name) }
+      onRemove: function(name) { root.modelRemoveRequested(name) }
+      onConfirmRemove: function(name) { root.modelRemoveConfirmed(name) }
+      onKeepModel: root.modelKeepRequested()
     }
   }
 }
