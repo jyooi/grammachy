@@ -209,28 +209,47 @@ fn scratch_dir() -> PathBuf {
 /// address, not that seam, is what keeps the suite off a live server.
 fn settings_file(name: &str, entry_body: &str) -> PathBuf {
     let path = scratch_dir().join(name);
-    let entry = if entry_body.contains("openaiBaseUrl") {
-        entry_body.to_string()
-    } else {
-        // The comma only joins two present fields, so an empty body stays
-        // valid JSON rather than leaving a dangling separator.
-        let separator = if entry_body.trim().is_empty() {
-            ""
-        } else {
-            ", "
-        };
-        format!(
-            r#""openaiBaseUrl": "http://{}"{separator}{entry_body}"#,
-            silent_address()
-        )
-    };
+    // A comma only ever joins two fields that are both there, so an empty body
+    // stays valid JSON rather than falling back to the real 127.0.0.1:8080.
+    let mut fields: Vec<String> = vec![r#""id": "io.github.jyooi.grammachy""#.to_string()];
+    if !entry_body.trim().is_empty() {
+        fields.push(entry_body.trim().trim_matches(',').to_string());
+    }
+    if !entry_body.contains("openaiBaseUrl") {
+        fields.push(format!(r#""openaiBaseUrl": "http://{}""#, silent_address()));
+    }
+    let entry = fields.join(", ");
     let document = format!(
         r#"{{ "bar": {{ "layout": {{ "left": [], "center": [
-            {{ "id": "io.github.jyooi.grammachy", {entry} }}
+            {{ {entry} }}
         ], "right": [] }} }}, "plugins": [] }}"#
     );
+    serde_json::from_str::<serde_json::Value>(&document).expect("the settings file is valid JSON");
     std::fs::write(&path, document).expect("the settings file is written");
     path
+}
+
+/// An entry body that names nothing still has to leave a readable file.
+///
+/// A stray comma made the document unparseable, `StoredSettings::load` then read
+/// no entry, and the run fell back to the built-in `127.0.0.1:8080`, which is a
+/// real llama-server on a developer machine. The suite stayed green throughout.
+#[test]
+fn an_entry_that_names_nothing_still_carries_the_silent_address() {
+    for body in ["", "  ", r#""engine": "harper""#] {
+        let path = settings_file("empty-entry.json", body);
+        let text = std::fs::read_to_string(&path).expect("the file is written");
+        let document: serde_json::Value =
+            serde_json::from_str(&text).unwrap_or_else(|error| panic!("{error}: {text}"));
+        let entry = &document["bar"]["layout"]["center"][0];
+
+        assert_eq!(entry["id"], "io.github.jyooi.grammachy", "{text}");
+        let base_url = entry["openaiBaseUrl"]
+            .as_str()
+            .unwrap_or_else(|| panic!("the entry names a base URL: {text}"));
+        // A port nothing listens on, so no run reaches a real llama-server.
+        assert!(base_url.starts_with("http://127.0.0.1:"), "{text}");
+    }
 }
 
 /// Run `grammachy bench` with the seams that keep the suite off this machine.
