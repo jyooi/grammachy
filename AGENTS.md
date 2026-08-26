@@ -29,7 +29,8 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   Tests must never reach a real server or a real unit.
   The seams are `GRAMMACHY_LANGUAGETOOL_ADDRESS`, `GRAMMACHY_LANGUAGETOOL_START=never`, and `GRAMMACHY_LLAMA_START=never`; `cli/tests/cli.rs` sets all three.
   The `openai` adapter takes its starter as a value, so `cli/tests/openai_stub.rs` covers the start behaviour with no systemd at all.
-  A test that runs the binary must also point `openaiBaseUrl` away from the default `127.0.0.1:8080`, because a developer machine may answer there; `cli/tests/bench.rs` writes a dead address into every settings file for that reason.
+  A test that runs the binary must also point `openaiBaseUrl` away from the default `127.0.0.1:8080`, because a developer machine may answer there.
+  `cli/tests/bench.rs` writes a dead address into every settings file for that reason.
   Live tests in `languagetool_live.rs`, `openai_live.rs`, and `interference_catch_rate.rs` skip when their port is silent, which keeps CI green without the packages.
 - The `openai` base URL host must be loopback, and `cli/src/engines/openai/endpoint.rs` is the only place that decides it.
   A remote host is `bad_arguments` and no request is made; that is a product guarantee, so keep it tested.
