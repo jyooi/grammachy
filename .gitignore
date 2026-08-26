@@ -7,3 +7,6 @@ checks.json.pending
 judgements.json
 judgements.json.pending
 __pycache__/
+
+# The eval-set corpus cache, fetched at run time and never committed (ADR 0003).
+cli/.eval-cache/

@@ -52,6 +52,7 @@
 //! pass the cap by at most one Check for each cloud row in flight. The report
 //! prints what the run actually paid rather than the cap.
 
+pub mod evalset;
 pub mod fixture;
 pub mod judge;
 pub mod machine;
