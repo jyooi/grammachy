@@ -344,11 +344,17 @@ fn rate_limiting_stub(answer: String) -> Stub {
         .to_string();
     let served = Arc::new(AtomicUsize::new(0));
     let counter = Arc::clone(&served);
+    let bodies = Arc::new(Mutex::new(Vec::new()));
+    let recorder = Arc::clone(&bodies);
 
     thread::spawn(move || {
         for stream in listener.incoming() {
             let Ok(mut stream) = stream else { break };
-            read_request(&mut stream);
+            let body = read_request(&mut stream);
+            recorder
+                .lock()
+                .expect("the recorder is readable")
+                .push(body);
             if counter.fetch_add(1, Ordering::SeqCst) == 0 {
                 let _ = write!(
                     stream,
@@ -366,7 +372,11 @@ fn rate_limiting_stub(answer: String) -> Stub {
         }
     });
 
-    Stub { address, served }
+    Stub {
+        address,
+        served,
+        bodies,
+    }
 }
 
 /// One entry of the record file, the shape the judge of HUF-205 reads.

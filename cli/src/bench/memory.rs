@@ -3,9 +3,13 @@
 //! "Resident memory" means three different things across the rows, so the
 //! report names the source of every number it prints:
 //!
-//! - A llama.cpp row on a graphics processor holds the weights on the device,
-//!   not in the process's RSS. RSS alone is wrong for such a row (HUF-209), so
-//!   the number is the device memory its server process holds.
+//! - A llama.cpp row on a graphics card holds the weights in the card's own
+//!   memory, not in the process's RSS. RSS alone is wrong for such a row
+//!   (HUF-209), so the number is the device memory its server process holds.
+//! - A llama.cpp row on an integrated graphics processor holds the weights in
+//!   system memory the device maps instead, which the kernel reports as a
+//!   separate pool. That row names that pool rather than the card memory it
+//!   does not have, so the printed label always matches the pool measured.
 //! - A server engine on the CPU reports the RSS of its server process, found
 //!   through the transient unit that spec section 4 names.
 //! - The in-process engine reports how far this process's own peak RSS grew
@@ -28,12 +32,19 @@ use std::process::Command;
 /// What one row prints when the number could not be read.
 pub const UNKNOWN: &str = "not measured";
 
-/// The fdinfo keys that report device memory one DRM client holds right now.
+/// The fdinfo keys that report the card memory one DRM client holds right now.
 ///
 /// `amdgpu` writes `drm-resident-vram`, and newer kernels number the region as
 /// `drm-resident-vram0`. The Intel and Xe drivers name the same region
 /// `drm-resident-local<n>` on a card with memory of its own.
-const DEVICE_KEYS: [&str; 2] = ["drm-resident-vram", "drm-resident-local"];
+const CARD_KEYS: [&str; 2] = ["drm-resident-vram", "drm-resident-local"];
+
+/// The fdinfo keys that report the system memory one DRM client maps.
+///
+/// This is where an integrated graphics processor holds the weights, because
+/// it owns no memory of its own. `amdgpu` calls that pool `drm-resident-gtt`
+/// and the Intel and Xe drivers call it `drm-resident-system<n>`.
+const SHARED_KEYS: [&str; 2] = ["drm-resident-gtt", "drm-resident-system"];
 
 /// The fdinfo key that tells two open files of one DRM client apart.
 const CLIENT_KEY: &str = "drm-client-id";
@@ -45,8 +56,10 @@ pub enum Source {
     Growth,
     /// The resident set size of the engine's server process.
     ServerRss,
-    /// The device memory the engine's server process holds.
+    /// The card memory the engine's server process holds.
     Device,
+    /// The system memory the engine's server process maps onto the device.
+    DeviceShared,
     /// Nothing to measure, because the model runs off this machine.
     Provider,
 }
@@ -60,6 +73,7 @@ impl Source {
             }
             Source::ServerRss => "the RSS of its server process",
             Source::Device => "the device memory its server process holds, read from the DRM fdinfo of that process rather than from its RSS",
+            Source::DeviceShared => "the system memory its server process maps onto an integrated graphics processor, read from the DRM fdinfo of that process rather than from its RSS",
             Source::Provider => "not measured, because the model runs on the provider's machine",
         }
     }
@@ -93,8 +107,8 @@ pub fn server_reading(pid: Option<u32>) -> Reading {
     let Some(pid) = pid else {
         return Reading::new(None, Source::ServerRss);
     };
-    match device_resident_bytes(pid) {
-        Some(bytes) => Reading::new(Some(bytes), Source::Device),
+    match device_resident_reading(pid) {
+        Some(reading) => reading,
         None => Reading::new(resident_bytes(pid), Source::ServerRss),
     }
 }
@@ -113,23 +127,41 @@ pub fn peak_resident_bytes() -> Option<u64> {
 }
 
 /// The device memory one process holds, or `None` when it holds none.
-pub fn device_resident_bytes(pid: u32) -> Option<u64> {
+pub fn device_resident_reading(pid: u32) -> Option<Reading> {
     let entries = std::fs::read_dir(format!("/proc/{pid}/fdinfo")).ok()?;
     let files: Vec<String> = entries
         .filter_map(|entry| entry.ok())
         .filter_map(|entry| std::fs::read_to_string(entry.path()).ok())
         .collect();
-    device_bytes(&files)
+    device_reading(&files)
 }
 
-/// The device memory of one process, summed over the DRM clients it opened.
+/// The device memory of one process, and which pool it was read from.
+///
+/// The card memory is asked for first, because a card with memory of its own
+/// is where a discrete graphics processor holds the weights. The system memory
+/// the device maps is the answer only when the process holds no card memory at
+/// all, which is what an integrated graphics processor reports. The two pools
+/// are never summed into one number, because one cell may name one pool only.
+///
+/// A process with no DRM client, or one holding nothing in either pool,
+/// answers `None`, which is what sends its row back to RSS.
+pub fn device_reading(fdinfo: &[String]) -> Option<Reading> {
+    let card = pool_bytes(fdinfo, &CARD_KEYS);
+    if card > 0 {
+        return Some(Reading::new(Some(card), Source::Device));
+    }
+    let shared = pool_bytes(fdinfo, &SHARED_KEYS);
+    (shared > 0).then(|| Reading::new(Some(shared), Source::DeviceShared))
+}
+
+/// One memory pool of a process, summed over the DRM clients it opened.
 ///
 /// A process opens the render node more than once, and every open file reports
 /// the whole client rather than its own share. So the sum is taken over
 /// `drm-client-id` and never over files, which would count one allocation as
-/// many. A process with no DRM client, or one holding nothing, answers `None`,
-/// which is what sends its row back to RSS.
-pub fn device_bytes(fdinfo: &[String]) -> Option<u64> {
+/// many.
+fn pool_bytes(fdinfo: &[String], keys: &[&str]) -> u64 {
     let mut per_client: HashMap<String, u64> = HashMap::new();
     for file in fdinfo {
         let Some(client) = value_of(file, CLIENT_KEY) else {
@@ -138,18 +170,13 @@ pub fn device_bytes(fdinfo: &[String]) -> Option<u64> {
         let held: u64 = file
             .lines()
             .filter_map(|line| line.split_once(':'))
-            .filter(|(key, _)| {
-                DEVICE_KEYS
-                    .iter()
-                    .any(|wanted| key.trim().starts_with(wanted))
-            })
+            .filter(|(key, _)| keys.iter().any(|wanted| key.trim().starts_with(wanted)))
             .filter_map(|(_, value)| size_bytes(value))
             .sum();
         let entry = per_client.entry(client).or_default();
         *entry = (*entry).max(held);
     }
-    let total: u64 = per_client.values().sum();
-    (total > 0).then_some(total)
+    per_client.values().sum()
 }
 
 /// The value of one fdinfo key, trimmed.
@@ -235,6 +262,14 @@ mod tests {
     /// One open file of a llama.cpp server on an `amdgpu` card, as the kernel
     /// of a real machine writes it, trimmed to the keys that matter.
     fn amdgpu_fdinfo(client: &str, vram_kib: u64) -> String {
+        amdgpu_pools(client, vram_kib, 14_352)
+    }
+
+    /// The same file, with both memory pools named.
+    ///
+    /// An integrated graphics processor owns no memory of its own, so it
+    /// reports the weights under `drm-resident-gtt` and no card memory at all.
+    fn amdgpu_pools(client: &str, vram_kib: u64, gtt_kib: u64) -> String {
         format!(
             "pos:\t0\n\
              drm-driver:\tamdgpu\n\
@@ -244,7 +279,8 @@ mod tests {
              drm-shared-vram:\t0\n\
              drm-resident-vram:\t{vram_kib} KiB\n\
              drm-purgeable-vram:\t0\n\
-             drm-resident-gtt:\t14352 KiB\n\
+             drm-total-gtt:\t{gtt_kib} KiB\n\
+             drm-resident-gtt:\t{gtt_kib} KiB\n\
              drm-memory-vram:\t{vram_kib} KiB\n\
              drm-engine-compute:\t26891966 ns\n"
         )
@@ -290,28 +326,82 @@ mod tests {
         // The same client, reported by two open files, is one allocation.
         let one_client = [amdgpu_fdinfo("13", 91_656), amdgpu_fdinfo("13", 91_656)];
 
-        assert_eq!(device_bytes(&one_client), Some(91_656 * 1_024));
+        assert_eq!(
+            device_reading(&one_client),
+            Some(Reading::new(Some(91_656 * 1_024), Source::Device))
+        );
 
         let two_clients = [amdgpu_fdinfo("13", 91_656), amdgpu_fdinfo("14", 8_000)];
 
-        assert_eq!(device_bytes(&two_clients), Some((91_656 + 8_000) * 1_024));
+        assert_eq!(
+            device_reading(&two_clients),
+            Some(Reading::new(Some((91_656 + 8_000) * 1_024), Source::Device))
+        );
+    }
+
+    #[test]
+    fn a_card_row_names_its_card_memory_alone_and_never_adds_the_shared_pool() {
+        let card = [amdgpu_pools("13", 91_656, 14_352)];
+
+        assert_eq!(
+            device_reading(&card),
+            Some(Reading::new(Some(91_656 * 1_024), Source::Device)),
+            "two pools are two numbers, so one cell names one of them"
+        );
+    }
+
+    #[test]
+    fn an_integrated_processor_holds_the_weights_in_the_shared_pool_not_in_rss() {
+        // An APU carves out no card memory for the weights, so the whole
+        // footprint lands in the system memory the device maps.
+        let integrated = [amdgpu_pools("13", 0, 1_800_000)];
+
+        assert_eq!(
+            device_reading(&integrated),
+            Some(Reading::new(Some(1_800_000 * 1_024), Source::DeviceShared)),
+            "an iGPU row reads the shared pool rather than falling back to RSS"
+        );
+
+        // The same client, reported by two open files, is still one allocation.
+        let two_files = [
+            amdgpu_pools("13", 0, 1_800_000),
+            amdgpu_pools("13", 0, 1_800_000),
+        ];
+
+        assert_eq!(
+            device_reading(&two_files),
+            Some(Reading::new(Some(1_800_000 * 1_024), Source::DeviceShared))
+        );
     }
 
     #[test]
     fn a_process_with_no_device_memory_reports_none_so_its_row_keeps_rss() {
-        assert_eq!(device_bytes(&[]), None);
-        assert_eq!(device_bytes(&[NO_DEVICE.to_string()]), None);
-        assert_eq!(device_bytes(&[amdgpu_fdinfo("13", 0)]), None);
+        assert_eq!(device_reading(&[]), None);
+        assert_eq!(device_reading(&[NO_DEVICE.to_string()]), None);
+        assert_eq!(device_reading(&[amdgpu_pools("13", 0, 0)]), None);
     }
 
     #[test]
-    fn the_intel_and_xe_drivers_report_the_same_region_under_another_name() {
+    fn the_intel_and_xe_drivers_report_the_same_regions_under_another_name() {
         let xe = "drm-driver:\txe\n\
                   drm-client-id:\t7\n\
                   drm-total-local0:\t524288 KiB\n\
                   drm-resident-local0:\t524288 KiB\n";
 
-        assert_eq!(device_bytes(&[xe.to_string()]), Some(524_288 * 1_024));
+        assert_eq!(
+            device_reading(&[xe.to_string()]),
+            Some(Reading::new(Some(524_288 * 1_024), Source::Device))
+        );
+
+        let integrated = "drm-driver:\txe\n\
+                          drm-client-id:\t7\n\
+                          drm-total-system0:\t262144 KiB\n\
+                          drm-resident-system0:\t262144 KiB\n";
+
+        assert_eq!(
+            device_reading(&[integrated.to_string()]),
+            Some(Reading::new(Some(262_144 * 1_024), Source::DeviceShared))
+        );
     }
 
     #[test]
@@ -326,14 +416,24 @@ mod tests {
 
     #[test]
     fn every_source_names_itself_in_one_sentence() {
-        for source in [
+        let sources = [
             Source::Growth,
             Source::ServerRss,
             Source::Device,
+            Source::DeviceShared,
             Source::Provider,
-        ] {
+        ];
+        for source in sources {
             assert!(!source.line().is_empty());
             assert!(!source.line().ends_with('.'), "the report adds the stop");
         }
+
+        let lines: std::collections::HashSet<&str> =
+            sources.iter().map(|source| source.line()).collect();
+        assert_eq!(
+            lines.len(),
+            sources.len(),
+            "two sources that print one sentence tell the reader nothing apart"
+        );
     }
 }
