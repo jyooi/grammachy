@@ -185,4 +185,55 @@ mod tests {
             "d7a8fbb307d7809469ca9abcb0082e4f8d5651e46d3cdb762d02d0bf37c9e592"
         );
     }
+
+    /// The vectors above all fit in one block, so none of them reaches the two
+    /// branches every real weights file takes: the compress in `update` when
+    /// the buffer fills, and the two-block padding in `finalize` when the last
+    /// block has no room for the length. These are the published FIPS 180-4
+    /// vectors, so the expected digests are right independently of this code.
+    #[test]
+    fn sha256_matches_the_multi_block_vectors() {
+        // 56 bytes: one block plus a tail with no room for the 8-byte length,
+        // which is the two-block padding path.
+        assert_eq!(
+            sha256_hex(b"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq"),
+            "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1"
+        );
+        // 112 bytes: an exact two blocks, so `update` compresses twice and the
+        // padding takes a third block of its own.
+        const TWO_BLOCKS: &[u8] = b"abcdefghbcdefghicdefghijdefghijkefghijklfghijklmghijklmnhijklmnoijklmnopjklmnopqklmnopqrlmnopqrsmnopqrstnopqrstu";
+        assert_eq!(TWO_BLOCKS.len(), 112);
+        assert_eq!(
+            sha256_hex(TWO_BLOCKS),
+            "cf5b16a778af8380036ce59e7b0492370b249b11e8f07a51afac45037afee9d1"
+        );
+        // A million bytes, which is the streaming case a 2.5 GB file is.
+        assert_eq!(
+            sha256_hex(&vec![b'a'; 1_000_000]),
+            "cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0"
+        );
+    }
+
+    /// `sha256_path` reads in 64 KB chunks, so a file larger than one chunk is
+    /// the only thing that proves a block split across two reads still hashes
+    /// to the same digest as the whole buffer.
+    #[test]
+    fn a_file_larger_than_one_read_hashes_the_same_as_its_bytes() {
+        let directory = scratch("digest-stream");
+        let path = directory.join("weights.bin");
+        let bytes: Vec<u8> = (0..200_000u32).map(|index| (index % 251) as u8).collect();
+        std::fs::write(&path, &bytes).expect("the file is written");
+
+        assert_eq!(
+            sha256_path(&path).expect("the file is read"),
+            sha256_hex(&bytes)
+        );
+    }
+
+    fn scratch(name: &str) -> std::path::PathBuf {
+        let directory = std::env::temp_dir().join(format!("grammachy-{name}"));
+        let _ = std::fs::remove_dir_all(&directory);
+        std::fs::create_dir_all(&directory).expect("the scratch directory is created");
+        directory
+    }
 }

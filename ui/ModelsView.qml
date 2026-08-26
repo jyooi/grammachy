@@ -25,6 +25,9 @@ ColumnLayout {
   property var models: []
   // The catalogue name a download is running on, or "" when none is.
   property string busy: ""
+  // Whether any verb is in flight, which is what every row but the one being
+  // downloaded draws its disabled state from.
+  property bool working: false
   // The stored `openaiModel`, so the row it names is marked and offers no Use.
   property string setting: ""
   // The name awaiting a Remove confirm, spec section 7, or "" when none is.
@@ -64,7 +67,7 @@ ColumnLayout {
       readonly property bool running: root.busy === row.name
       readonly property bool blocked: Models.isBlocked(row.modelData, {
         busy: root.busy,
-        confirm: root.confirmName
+        working: root.working
       })
       // The model a Check would load, resolved the way the CLI resolves it, so
       // a setting that names the file by a prefix still marks the right row.

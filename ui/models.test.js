@@ -255,7 +255,12 @@ test("the row in flight offers Cancel alone", () => {
 // row would be a dead click. It stays drawn and goes dim rather than vanishing,
 // which is what keeps the list from shifting under the pointer.
 test("every other row's buttons are blocked while one download runs", () => {
-  const busy = { busy: "qwen3-4b-instruct", setting: "gemma-4-e4b-it", models: CATALOGUE }
+  const busy = {
+    working: true,
+    busy: "qwen3-4b-instruct",
+    setting: "gemma-4-e4b-it",
+    models: CATALOGUE
+  }
 
   assert.deepEqual(actions(PHI, busy), [DOWNLOAD])
   assert.equal(isBlocked(PHI, busy), true)
@@ -269,14 +274,34 @@ test("every other row's buttons are blocked while one download runs", () => {
   assert.equal(isBlocked(QWEN, busy), false)
 
   // Nothing is blocked when nothing is running.
-  for (const row of CATALOGUE) assert.equal(isBlocked(row, { busy: "" }), false)
+  for (const row of CATALOGUE) assert.equal(isBlocked(row, { working: false, busy: "" }), false)
+})
+
+// A remove names no row the way a download does: it takes the one process with
+// `busy` still empty. Keying the rule on the states rather than on the one fact
+// is what left every row drawn live while every press on it was dropped.
+test("every row is blocked while a remove is in flight, not only a download", () => {
+  const removing = { working: true, busy: "", setting: "gemma-4-e4b-it", models: CATALOGUE }
+
+  for (const row of CATALOGUE) {
+    assert.equal(isBlocked(row, removing), true, row.name + " waits for the verb")
+  }
+  // The buttons stay drawn, so the list does not shift while the verb runs.
+  assert.deepEqual(actions(PHI, removing), [DOWNLOAD])
+  assert.deepEqual(actions(GEMMA, removing), [REMOVE])
+
+  // The verb finishing brings every row back.
+  const done = { ...removing, working: false }
+  for (const row of CATALOGUE) assert.equal(isBlocked(row, done), false)
+  assert.deepEqual(actions(PHI, done), [DOWNLOAD])
 })
 
 // One question at a time. A Download started under an open Remove confirm would
 // take the one process the answer needs, so the answer would vanish with no
-// note and nothing deleted. Refusing to start it is the whole rule.
+// note and nothing deleted. Refusing to start it is the whole rule, and the
+// confirm reaches this rule through the same `working` fact a verb does.
 test("an open Remove confirm blocks every row until it is answered", () => {
-  const asking = { busy: "", confirm: "gemma-4-e4b-it", setting: "gemma-4-e4b-it", models: CATALOGUE }
+  const asking = { working: true, busy: "", setting: "gemma-4-e4b-it", models: CATALOGUE }
 
   for (const row of CATALOGUE) {
     assert.equal(isBlocked(row, asking), true, row.name + " waits for the answer")
@@ -285,7 +310,7 @@ test("an open Remove confirm blocks every row until it is answered", () => {
   assert.deepEqual(actions(PHI, asking), [DOWNLOAD])
 
   // Answering the question closes it, and the same row is offered Download again.
-  const answered = { ...asking, confirm: "" }
+  const answered = { ...asking, working: false }
   assert.equal(isBlocked(PHI, answered), false)
   assert.deepEqual(actions(PHI, answered), [DOWNLOAD])
 })

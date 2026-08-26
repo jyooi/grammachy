@@ -163,6 +163,17 @@ Item {
   // behind it is whatever was there before.
   property string phaseBeforeModelConfirm: ""
 
+  // The one fact every model verb and every drawn button asks, spec section 7.
+  //
+  // `grammachy model` runs one verb at a time, so a second one is dropped
+  // whatever it was: a download, a remove that is stopping the unit, or the
+  // remove an open confirm is still waiting to be told about. Keeping the
+  // question in one place is what stops a row being drawn live over a press
+  // that goes nowhere. `modelBusy` stays separate, because it names the one row
+  // that gets a bar and a Cancel rather than a disabled button.
+  readonly property bool modelsBusy: modelActionProcess.running
+    || root.modelConfirm.length > 0
+
   // The clipboard the Ctrl + C fallback borrowed, put back once the Selection
   // is in hand. Spec section 3.
   property string borrowedClipboard: ""
@@ -553,13 +564,12 @@ Item {
     root.modelsFreeBytes = report.freeBytes
   }
 
-  // Spec section 5.3: one download at a time, so a second Download while one is
-  // in flight is a no-op rather than a second transfer. An open Remove confirm
-  // stops one too: the answer to that question needs the same one process, and
-  // starting a transfer under it would drop the answer with nothing on screen.
+  // Spec section 5.3: one download at a time, so a second Download while a verb
+  // is in flight is a no-op rather than a second transfer. The buttons that
+  // would reach here are drawn disabled from the same `modelsBusy`, so this
+  // guard is what makes the drawing true rather than a second opinion.
   function downloadModel(name) {
-    if (root.modelBusy.length > 0 || modelActionProcess.running) return
-    if (root.modelConfirm.length > 0) return
+    if (root.modelsBusy) return
     root.modelNote = null
     root.modelBusy = name
     root.runModelAction(["download", name])
@@ -576,7 +586,7 @@ Item {
   // Spec section 7: Use is the `openaiModel` setting and nothing else. The
   // weights are already on disk, so nothing is fetched and no Check is touched.
   function useModel(name) {
-    if (root.modelBusy.length > 0 || root.modelConfirm.length > 0) return
+    if (root.modelsBusy) return
     root.modelNote = null
     root.persistSetting("openaiModel", name)
   }
@@ -587,10 +597,9 @@ Item {
   // The setting is resolved the way `unit::model_file` resolves it, so a name
   // that reaches the file by prefix or in another case still asks.
   function removeModel(name) {
-    if (root.modelBusy.length > 0 || modelActionProcess.running) return
-    // One question at a time: a second bin press would take the phase to
+    // One question at a time too: a second bin press would take the phase to
     // restore back with it and leave the confirm with no way out.
-    if (root.modelConfirm.length > 0) return
+    if (root.modelsBusy) return
     root.modelNote = null
     var row = root.modelRow(name)
     if (!ModelsJs.resolves(row, String(root.setting("openaiModel")), root.models)) {
@@ -1751,6 +1760,7 @@ Item {
 
         models: root.models
         modelBusy: root.modelBusy
+        modelsBusy: root.modelsBusy
         modelConfirm: root.modelConfirm
         modelsDirectory: root.modelsDirectory
         modelsFreeBytes: root.modelsFreeBytes
@@ -1827,6 +1837,7 @@ Item {
 
         models: root.models
         modelBusy: root.modelBusy
+        modelsBusy: root.modelsBusy
         modelConfirm: root.modelConfirm
         modelsDirectory: root.modelsDirectory
         modelsFreeBytes: root.modelsFreeBytes

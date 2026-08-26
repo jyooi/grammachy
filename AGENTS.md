@@ -147,7 +147,9 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   `Overlay.qml` owns the two processes and the one-second `modelPoll`.
   The CLI prints nothing while curl runs, so the `.part` length `model list` reports is the only progress there is.
   Cancel is `modelActionProcess.signal(15)` and never `running = false`, which would orphan curl.
-  `resetRun` deliberately touches none of the model state, because closing the overlay must not cancel a download.
+  `resetRun` leaves `models`, `modelBusy`, `modelActionProcess`, and `modelPoll` alone, because closing the overlay must not cancel a download.
+  It does drop an open confirm, the spec section 7 rule that hiding the list answers the question with Keep.
+  `Overlay.modelsBusy` is the one fact the list draws its disabled buttons from: any verb in flight, including an open confirm.
   `confirmModel` is a `phase` with its own `Overlay.keyMode` entry, and `cli/tests/overlay_models.rs` keeps all of that in step.
   [ADR 0004](docs/adr/0004-model-downloads-run-through-the-cli.md) records why the download lives in the CLI.
 - `ui/anchor.js` owns both answers the source window of spec section 3 gives: where the quick popup opens (`placeCard`) and where Replace types (`focusCommand`, `isFocused`).

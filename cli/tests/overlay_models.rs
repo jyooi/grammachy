@@ -109,23 +109,37 @@ fn one_download_runs_at_a_time_and_cancel_signals_it() {
     let download = function_body(&source, "downloadModel");
 
     assert!(
-        download.contains("root.modelBusy.length > 0") && download.contains("return"),
-        "a second Download while one is in flight is a no-op: {download}"
-    );
-    assert!(
         download.contains("root.modelBusy = name"),
-        "the row in flight is named, which is what turns the other rows off: {download}"
+        "the row in flight is named, which is what gives it a bar and a Cancel: {download}"
     );
 
-    // A verb started under an open confirm takes the one process the answer to
-    // that question needs, so the answer is dropped with nothing on screen.
+    // Every verb refuses on the one fact the buttons are drawn from, so a
+    // button is never live over a press that goes nowhere. Naming the states
+    // one at a time is what left a running remove drawing every row enabled.
     for verb in ["downloadModel", "useModel", "removeModel"] {
         let body = function_body(&source, verb);
         assert!(
-            body.contains("root.modelConfirm.length > 0") && body.contains("return"),
-            "{verb} starts nothing while a question is open: {body}"
+            body.contains("root.modelsBusy") && body.contains("return"),
+            "{verb} starts nothing while any verb is in flight: {body}"
         );
     }
+
+    // That fact has to cover a running verb and an open question alike.
+    let busy = source
+        .split_once("readonly property bool modelsBusy:")
+        .expect("the overlay names the one busy fact")
+        .1
+        .split_once('\n')
+        .map(|(first, rest)| format!("{first}{}", rest.split_once('\n').unwrap_or((rest, "")).0))
+        .expect("the binding has a body");
+    assert!(
+        busy.contains("modelActionProcess.running") && busy.contains("root.modelConfirm.length"),
+        "a running verb and an open confirm both count as busy: {busy}"
+    );
+    assert!(
+        read("ui/SettingsView.qml").contains("working: root.modelsBusy"),
+        "the Models list draws its disabled buttons from that same fact"
+    );
 
     let cancel = function_body(&source, "cancelModelDownload");
     assert!(

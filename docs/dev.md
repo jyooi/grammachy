@@ -531,7 +531,7 @@ Esc closes the card and keeps the Draft, the same as `Keep the draft`.
 
 The gear flips Compose to the same Settings view as the popup, and `Back` returns to whichever mode was on screen.
 
-## 15. Smoke items 11 to 15: the Models list
+## 15. Smoke items 11 to 17: the Models list
 
 Spec sections 5.3 and 7.
 The list lives in Settings and is drawn for the Local LLM engine only, so open the gear and set Engine to Local LLM first.
@@ -622,9 +622,7 @@ It answers `inactive`.
 The setting is not touched: `openaiModel` still names the model that is now absent, and the next Check answers the `engine_unavailable` card.
 
 15. Press the tick on another Ready row, then press the bin on that same row to open the question again.
-    Press the download arrow on any other row: it is dimmed and starts nothing.
-    One question is open at a time, so no verb may start under it.
-16. With that question still up, press the gear to close Settings, then press Enter.
+    Press the gear to close Settings, then press Enter.
     Nothing is removed, because a question that leaves the screen is answered with Keep:
 
 ```bash
@@ -632,6 +630,11 @@ ls -la ~/.local/share/grammachy/models/
 ```
 
 The file the question asked about is still there.
+
+16. Press the bin on the row in use again to open the question once more.
+    Every row draws its buttons dimmed, and the download arrow on any other row starts nothing.
+    One verb runs at a time, so no press may go under an open question.
+    Answer Keep, and the buttons come back.
 
 ## 16. Running the automated checks
 

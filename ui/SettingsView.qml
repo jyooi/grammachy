@@ -25,6 +25,7 @@ ColumnLayout {
   // Overlay.qml, which is the only thing that runs `grammachy model`.
   property var models: []
   property string modelBusy: ""
+  property bool modelsBusy: false
   property string modelConfirm: ""
   property string modelsDirectory: ""
   property double modelsFreeBytes: 0
@@ -246,6 +247,7 @@ ColumnLayout {
 
       models: root.models
       busy: root.modelBusy
+      working: root.modelsBusy
       setting: root.openaiModel
       confirmName: root.modelConfirm
       directory: root.modelsDirectory

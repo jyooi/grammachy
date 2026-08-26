@@ -70,6 +70,7 @@ BorderSurface {
   // The card knows nothing about it: Overlay.qml owns every process.
   property var models: []
   property string modelBusy: ""
+  property bool modelsBusy: false
   property string modelConfirm: ""
   property string modelsDirectory: ""
   property double modelsFreeBytes: 0
@@ -220,6 +221,7 @@ BorderSurface {
       localThinking: root.localThinking
       models: root.models
       modelBusy: root.modelBusy
+      modelsBusy: root.modelsBusy
       modelConfirm: root.modelConfirm
       modelsDirectory: root.modelsDirectory
       modelsFreeBytes: root.modelsFreeBytes
