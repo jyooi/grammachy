@@ -178,11 +178,12 @@ impl Plan {
     }
 }
 
-/// Create the record file before the first row runs.
+/// Prove the record directory holds the file before the first row runs.
 ///
 /// A run through the cloud engine spends real money, and its report is the
 /// whole point of the run. So a directory that cannot hold the record ends the
-/// run here, rather than after the last row has already been paid for.
+/// run here, rather than after the last row has already been paid for. The
+/// probe is the pending file, so the record of an earlier run stays whole.
 fn open_record(directory: &Path) -> Result<PathBuf, String> {
     std::fs::create_dir_all(directory).map_err(|error| {
         format!(
@@ -191,9 +192,21 @@ fn open_record(directory: &Path) -> Result<PathBuf, String> {
         )
     })?;
     let path = directory.join(RECORD_FILE);
-    std::fs::write(&path, "[]")
-        .map_err(|error| format!("--record: {} cannot be written: {error}", path.display()))?;
+    let pending = pending_path(&path);
+    std::fs::write(&pending, "")
+        .map_err(|error| format!("--record: {} cannot be written: {error}", pending.display()))?;
+    let _ = std::fs::remove_file(&pending);
     Ok(path)
+}
+
+/// The file one run writes first and renames onto the record file.
+///
+/// The rename keeps the record of an earlier run whole until this run has a
+/// whole one of its own, because a run can end at any sentence.
+fn pending_path(path: &Path) -> PathBuf {
+    let mut name = path.as_os_str().to_os_string();
+    name.push(".pending");
+    PathBuf::from(name)
 }
 
 /// What the run has spent so far through the cloud engine.
@@ -228,7 +241,8 @@ impl Spend {
         }
     }
 
-    /// What the run has already paid the cloud engine.
+    /// What the run has already paid the cloud engine, over the answers that
+    /// reported a cost.
     ///
     /// The report reads this rather than the row tallies, because a row the cap
     /// or an unpriced answer ended carries no tally and was still billed.
@@ -524,8 +538,11 @@ fn reason(id: &str, failure: EngineFailure) -> String {
 
 /// Write every Check of the run to the record file the plan opened.
 fn record(path: &Path, checks: &[RecordedCheck]) -> Result<(), String> {
+    let pending = pending_path(path);
     let text = serde_json::to_string_pretty(checks).expect("checks serialise");
-    std::fs::write(path, text)
+    std::fs::write(&pending, text)
+        .map_err(|error| format!("--record: {} cannot be written: {error}", pending.display()))?;
+    std::fs::rename(&pending, path)
         .map_err(|error| format!("--record: {} cannot be written: {error}", path.display()))
 }
 
@@ -581,6 +598,25 @@ mod tests {
             cloud_models: Vec::new(),
             max_cost: None,
             record: None,
+        }
+    }
+
+    /// The record one earlier run left in the directory.
+    const EARLIER_RUN: &str = r#"[{"id":"zh-01"}]"#;
+
+    fn recorded_check(id: &str) -> RecordedCheck {
+        RecordedCheck {
+            engine: "openrouter".to_string(),
+            model: "deepseek/deepseek-v4-flash-0731".to_string(),
+            id: id.to_string(),
+            valid: true,
+            latency_ms: 120,
+            cost: Some(0.0001),
+            prompt_tokens: Some(31),
+            completion_tokens: Some(18),
+            prompt_ms: Some(12.5),
+            generation_ms: Some(240.0),
+            issues: Vec::new(),
         }
     }
 
@@ -731,24 +767,52 @@ mod tests {
     }
 
     #[test]
-    fn a_record_directory_is_created_and_proved_writable_up_front() {
+    fn a_record_directory_is_proved_writable_without_discarding_the_last_run() {
         let directory = std::env::temp_dir().join(format!(
             "grammachy-bench-record-{}-{}",
             std::process::id(),
             "dir"
         ));
         let _ = std::fs::remove_dir_all(&directory);
+        std::fs::create_dir_all(&directory).expect("the scratch directory is made");
+        let earlier = directory.join(RECORD_FILE);
+        std::fs::write(&earlier, EARLIER_RUN).expect("an earlier run left its record");
 
         let plan = Plan::of(&BenchArgs {
             record: Some(directory.clone()),
             ..args(None, &[])
         })
-        .expect("the directory is made");
+        .expect("the directory holds the record");
 
-        assert_eq!(plan.record, Some(directory.join(RECORD_FILE)));
+        assert_eq!(plan.record, Some(earlier.clone()));
         assert_eq!(
-            std::fs::read_to_string(directory.join(RECORD_FILE)).expect("the file exists"),
-            "[]"
+            std::fs::read_to_string(&earlier).expect("the earlier record is still there"),
+            EARLIER_RUN,
+            "a run that never reaches a row must not discard the last one's answers"
+        );
+        let _ = std::fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    fn the_record_file_is_replaced_only_once_the_new_one_is_whole() {
+        let directory = std::env::temp_dir().join(format!(
+            "grammachy-bench-record-{}-{}",
+            std::process::id(),
+            "replace"
+        ));
+        let _ = std::fs::remove_dir_all(&directory);
+        let path = open_record(&directory).expect("the directory holds the record");
+        std::fs::write(&path, EARLIER_RUN).expect("an earlier run left its record");
+
+        record(&path, &[recorded_check("zh-02")]).expect("the record is written");
+
+        let written: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).expect("the record is there"))
+                .expect("the record is JSON");
+        assert_eq!(written[0]["id"], "zh-02");
+        assert!(
+            !pending_path(&path).exists(),
+            "the pending file is renamed, not left behind"
         );
         let _ = std::fs::remove_dir_all(&directory);
     }

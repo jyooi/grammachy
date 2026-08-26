@@ -200,7 +200,7 @@ fn bench_cloud(settings: &Path, arguments: &[&str], openrouter_url: &str) -> Run
         .env("GRAMMACHY_LLAMA_START", "never")
         .env("GRAMMACHY_SHELL_JSON", settings)
         .env("GRAMMACHY_OPENROUTER_URL", openrouter_url)
-        .env("GRAMMACHY_OPENROUTER_KEY_FILE", key_file())
+        .env("GRAMMACHY_OPENROUTER_KEY_FILE", key_file(settings))
         .output()
         .expect("the binary runs");
 
@@ -210,9 +210,18 @@ fn bench_cloud(settings: &Path, arguments: &[&str], openrouter_url: &str) -> Run
     }
 }
 
-/// A scratch OpenRouter key, so no case reads the one under the real HOME.
-fn key_file() -> PathBuf {
-    let path = scratch_dir().join("openrouter-key");
+/// A scratch OpenRouter key for one case, so no case reads the real one.
+///
+/// The path carries the name of the case's own settings file. Cargo runs the
+/// cases at once. A shared path is empty for a moment on every rewrite, and a
+/// child that reads the key in that moment finds none.
+fn key_file(settings: &Path) -> PathBuf {
+    let case = settings
+        .file_stem()
+        .expect("the settings file has a name")
+        .to_string_lossy()
+        .to_string();
+    let path = scratch_dir().join(format!("openrouter-key-{case}"));
     std::fs::write(&path, "test-key").expect("the key file is written");
     path
 }
@@ -551,8 +560,9 @@ fn the_cost_cap_ends_the_cloud_row_and_the_report_keeps_what_it_paid() {
         run.stdout
     );
     assert!(
-        run.stdout
-            .contains("Cloud spend of this run: 0.0300 USD of the 0.05 USD cap."),
+        run.stdout.contains(
+            "Cloud spend of this run: 0.0300 USD of the 0.05 USD cap, summed over the answers that reported a cost."
+        ),
         "the row the cap ended carries no tally, and it was still billed:\n{}",
         run.stdout
     );
@@ -597,9 +607,19 @@ fn a_cloud_answer_without_a_cost_ends_every_cloud_row() {
             run.stdout
         );
     }
+    // The answer that ended the run was billed and reported no cost, so the
+    // figure counts the priced answers only and says that it is a lower bound.
     assert!(
+        run.stdout.contains(
+            "Cloud spend of this run: 0.0000 USD of the 10 USD cap, summed over the answers that reported a cost."
+        ),
+        "{}",
         run.stdout
-            .contains("Cloud spend of this run: 0.0000 USD of the 10 USD cap."),
+    );
+    assert!(
+        run.stdout.contains(
+            "An answer that reported no cost stays out of that sum, so the figure is a lower bound."
+        ),
         "{}",
         run.stdout
     );

@@ -3,3 +3,4 @@ node_modules/
 cli/target/
 bin/grammachy
 checks.json
+checks.json.pending

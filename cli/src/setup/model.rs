@@ -11,9 +11,9 @@
 //! manual, so it names the one this machine needs and leaves it to the user.
 //!
 //! The transfer itself is `curl`, the same tool `bin/bootstrap.sh` uses for the
-//! binary (spec section 10). Keeping it out of the CLI keeps TLS out of the
-//! 13 MB static binary, whose own HTTP client only ever talks to a loopback
-//! engine. The download runs into a `.part` file.
+//! binary (spec section 10). `curl` resumes an interrupted transfer of a
+//! multi-gigabyte file and retries a failed one, which the HTTP client of the
+//! CLI does not. The download runs into a `.part` file.
 //! The file is renamed only when it is whole and the pinned sha256 matches.
 
 use std::io::Read;

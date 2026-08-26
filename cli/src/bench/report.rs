@@ -93,8 +93,11 @@ pub struct Report {
     /// The engine a release is measured against (spec section 7).
     pub default_engine: String,
     pub max_cost: Option<f64>,
-    /// What the run paid the cloud engine, the rows the cap or an unpriced
-    /// answer ended included.
+    /// What the run paid the cloud engine, summed over the answers that
+    /// reported a cost.
+    ///
+    /// An answer with no `usage.cost` ends the cloud rows and stays out of this
+    /// sum, so the figure is a lower bound on what the run paid.
     pub cloud_spend_usd: f64,
     pub engines: Vec<EngineRow>,
     pub models: Vec<ModelRow>,
@@ -196,9 +199,12 @@ impl Report {
         }
         if let Some(cap) = self.max_cost {
             out.push_str(&format!(
-                "Cloud spend of this run: {:.4} USD of the {cap} USD cap.\n",
+                "Cloud spend of this run: {:.4} USD of the {cap} USD cap, summed over the answers that reported a cost.\n",
                 self.cloud_spend_usd
             ));
+            out.push_str(
+                "An answer that reported no cost stays out of that sum, so the figure is a lower bound.\n",
+            );
         }
         out.push('\n');
 
@@ -468,7 +474,7 @@ const MEASUREMENT_NOTE: &str = "\
 - Style creep: unpaired Issues on interference sentences, per 100 interference sentences.
 - Valid: Checks that returned a result. An invalid Check counts as zero Issues, so a miss, and stays out of precision, exact fix, and latency.
 - p50 and p95 latency: nearest rank over the valid Checks of the fixture, correct sentences included, measured in process around one Check.
-- Cost per 1,000 Checks: the sum of `usage.cost` over the row divided by the number of Checks that reported a cost, times 1,000. A row that leaves any valid Check unpriced prints `n/a` instead. Local rows cost nothing per Check.
+- Cost per 1,000 Checks: the sum of `usage.cost` over the row divided by the number of Checks that reported a cost, times 1,000. A cloud answer that reports no cost ends its row as skipped, because the run cannot then measure what it spends. A cloud row where no Check answered prints `n/a`. Local rows cost nothing per Check.
 - Every sentence is checked with the Native language the fixture records for it, which is what the shell passes on a real Check.
 ";
 
@@ -690,7 +696,7 @@ mod tests {
         );
         assert!(rendered.contains("Recommended cloud model, the `openrouterModel` line of the README: `deepseek/deepseek-v4-flash-0731`."), "{rendered}");
         assert!(
-            rendered.contains("Cloud spend of this run: 0.0016 USD of the 10 USD cap."),
+            rendered.contains("Cloud spend of this run: 0.0016 USD of the 10 USD cap, summed over the answers that reported a cost."),
             "{rendered}"
         );
         assert!(rendered.contains("| `qwen3.5-4b` | 29 of 30 (96.7%) | 29 of 30 (96.7%) | 29 of 30 (96.7%) | 96.7% | 25 of 30 (83.3%) | 0 of 10 | 6.7 | 40 of 40 (100.0%) |"), "{rendered}");
@@ -711,8 +717,14 @@ mod tests {
         let rendered = report.render();
 
         assert!(
-            rendered.contains("Cloud spend of this run: 0.0490 USD of the 0.05 USD cap."),
+            rendered.contains("Cloud spend of this run: 0.0490 USD of the 0.05 USD cap, summed over the answers that reported a cost."),
             "a row the cap ended carries no tally, and its spend still happened: {rendered}"
+        );
+        assert!(
+            rendered.contains(
+                "An answer that reported no cost stays out of that sum, so the figure is a lower bound."
+            ),
+            "{rendered}"
         );
     }
 
