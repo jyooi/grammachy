@@ -157,6 +157,11 @@ impl Openai {
             ureq::Error::ConnectionFailed => {
                 EngineFailure::Unavailable(format!("No model server answered on {address}"))
             }
+            // llama.cpp binds the port before the weights are loaded and
+            // answers 503 until they are, so this is a server still starting.
+            ureq::Error::StatusCode(503) => EngineFailure::Unavailable(format!(
+                "The model server is still loading on {address}"
+            )),
             ureq::Error::StatusCode(status) => EngineFailure::Failed(format!(
                 "The model server answered with HTTP {status} on {address}"
             )),
