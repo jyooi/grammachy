@@ -28,7 +28,9 @@ BorderSurface {
   // The whole capture, which is longer than sourceText after a first-N Check.
   property string fullText: ""
   property bool truncated: false
-  // One Check takes this many UTF-16 code units, spec section 6.
+  // One Check takes this many UTF-16 code units, spec section 6. The limit
+  // belongs to the Engine, so the overlay passes the selected engine's; this
+  // default is the default engine's, which `ui/limits.js` also answers.
   property int limitUnits: 5000
   property var issues: []
   // One entry per Issue: true accepted, false skipped, null still open.

@@ -10,6 +10,7 @@ import "ui/keymap.js" as Keymap
 import "ui/splice.js" as Splice
 import "ui/format.js" as Format
 import "ui/anchor.js" as Anchor
+import "ui/limits.js" as Limits
 
 // The overlay entry point. `open(payload)` routes a summon to a surface, spec
 // section 2. Quick mode captures the Selection (section 3), runs one Check
@@ -85,9 +86,11 @@ Item {
   property string errorDiagnosis: ""
   property int cardSerial: 0
 
-  // One Check takes this many UTF-16 code units. This is `MAX_UTF16_UNITS` of
-  // `cli/src/check.rs`, which `cli/tests/overlay_limit.rs` keeps in step.
-  readonly property int checkLimitUnits: 5000
+  // One Check takes this many UTF-16 code units. The limit belongs to the
+  // Engine (spec section 4), so it moves with the engine setting.
+  // `ui/limits.js` is the one place that answers it, and
+  // `cli/tests/overlay_limit.rs` keeps that file equal to the CLI.
+  readonly property int checkLimitUnits: Limits.checkLimit(root.setting("engine"))
 
   // A whole Draft takes this many. This is `MAX_DRAFT_UTF16_UNITS` of
   // `cli/src/chunk.rs`, kept in step by the same test. Spec section 9: over it
@@ -556,7 +559,9 @@ Item {
   function runChunkList() {
     chunkProcess.generation = root.runGeneration
     chunkProcess.stdinText = root.draftText
-    chunkProcess.command = [root.binaryPath, "chunk"]
+    // The Chunks are packed to the selected engine's limit, so the engine is
+    // named here the way `checkCommand` names it.
+    chunkProcess.command = [root.binaryPath, "chunk", "--engine", root.setting("engine")]
     // Writing to stdin closes it, so every run arms the channel again.
     chunkProcess.stdinEnabled = true
     chunkProcess.restartQueued = chunkProcess.running
