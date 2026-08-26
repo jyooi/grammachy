@@ -39,7 +39,7 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   `block.rs` owns the marked block both configuration files carry and the rule that makes `--remove` byte exact: the region always carries the newline on each side, so insertion and removal are the same substring.
   `bindings.rs` holds the two `hl.unbind` plus `o.bind` pairs of spec section 2 and the `hyprctl reload`; the file is `bindings.lua`, because Omarchy answers `configProvider: lua` and never reads the `.conf` files beside it.
   `menu.rs` holds the `grammachy.compose` row, which names `"parent": "root"` because nothing else creates a `grammachy` submenu.
-  `model.rs` downloads the weights with `curl`, the tool `bin/bootstrap.sh` uses, so TLS stays out of the binary.
+  `model.rs` downloads the weights with `curl`, the tool `bin/bootstrap.sh` uses, because `curl` resumes an interrupted multi-gigabyte transfer.
   The catalogue file is `unsloth/gemma-4-E4B-it-GGUF` and is pinned by sha256.
   A failed model step still writes the hotkeys and menu.
   Hardware tiers only name the llama.cpp backend package, because the weights file is the same on both (spec section 4).
@@ -49,11 +49,26 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   The product path is that HOME path only. The CLI does not read `$XDG_CONFIG_HOME`.
   The entry is looked up by plugin id in `bar.layout.{left,center,right}` first and in the top level `plugins` array next, the order `shell.qml` writes them in.
   `GRAMMACHY_SHELL_JSON` is the test seam; no test may read or write the real file.
-- `grammachy bench` in `cli/src/bench/` is the one subcommand that prints Markdown on stdout rather than a JSON envelope; a failure still prints the error envelope.
+- `grammachy bench` in `cli/src/bench/` is the one subcommand that prints Markdown on stdout rather than a JSON envelope; arguments that describe no run still print the error envelope.
+  A `--record` write that fails after the rows ran prints the report and exits 1, because the run already paid for those numbers.
   One run is the whole benchmark file: `grammachy bench ... > docs/benchmarks/<version>.md`, nothing added by hand.
   `--engine openai --model <name>` fills the Models table and does not narrow the Engines table.
   An engine the machine cannot reach is a skipped row, never an error, so a machine without llama.cpp still produces a valid file.
   `cli/src/bench/weights.rs` is the product rule for which models may be recommended (`docs/spec/evals.md` section 5).
+  `openrouter` is the cloud engine in `cli/src/engines/openrouter/`, and it reuses the `openai` request, prompt, and mapping.
+  It is why the binary carries a TLS stack: `ureq` runs with the `rustls` feature for it.
+  A cloud row needs `--max-cost <usd>`, the cap on the whole run, and the flag is refused when no cloud row runs.
+  `Spend` in `cli/src/bench/mod.rs` owns both ways a cloud row ends and what the report prints as the run's spend, because a row the cap ended carries no tally.
+  A cloud answer with no `usage.cost` ends its row and every later cloud row, because a run that cannot measure its spend cannot hold the cap.
+  `--record <dir>` writes `checks.json`, one entry per engine, model, and item, which the judge of a later ticket reads.
+  `Plan::of` proves the directory holds that file before the first row, so a directory the run cannot write never discards a report it already paid for.
+  The run writes `checks.json.pending` and renames it, so the record of an earlier run stays whole until this run has one of its own.
+  That file is gitignored, because it is the only place model output text lands.
+  `cli/src/bench/fixture.rs` is the one loader and `cli/src/bench/metrics.rs` is the one metrics module.
+  Both sets share the item shape `{ id, native, text, edits[], expected_text }` of the evals spec.
+  Every metric of that spec has a unit test in `metrics.rs` that runs from recorded answers, so no test needs a live model.
+  `cli/tests/bench.rs` must seam every server the run can reach, LanguageTool and the OpenAI base URL both.
+  The OpenAI default is a fixed loopback port, so a machine that already runs llama.cpp there answers a case meant to find nothing.
 - `doctor` reports the install state and the one-line engine diagnosis the `engine_unavailable` card shows.
   `docs/doctor.md` documents its envelope, exit code, and hardware tiers.
   `cli/src/doctor/facts.rs` is the only place that reads the machine, so the report is a pure function of recorded `Facts` and no test reads real hardware.

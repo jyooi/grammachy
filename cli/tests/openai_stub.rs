@@ -286,6 +286,29 @@ fn a_server_that_never_answers_is_a_timeout() {
     assert_eq!(starts.count(), 0);
 }
 
+/// llama.cpp answers 503 while it loads the weights, which the adapter must
+/// wait out rather than report; the pilot of HUF-209 failed every sentence
+/// of both local rows before this was covered.
+#[test]
+fn a_server_that_is_still_loading_is_waited_for_not_reported() {
+    let stub = Stub::serving(Answer::Status("503 Service Unavailable"));
+    let starts = Starts::default();
+
+    let failure = adapter(Duration::from_secs(2), true, &starts)
+        .check(TEXT, &options(&stub.base_url()))
+        .expect_err("the stub never finishes loading");
+
+    assert_eq!(
+        starts.count(),
+        1,
+        "a loading server is asked for once and then waited for"
+    );
+    assert!(
+        matches!(&failure, EngineFailure::Unavailable(message) if message.contains("still loading")),
+        "expected engine_unavailable, got {failure:?}"
+    );
+}
+
 #[test]
 fn a_server_error_is_an_engine_error() {
     let stub = Stub::serving(Answer::Status("500 Internal Server Error"));

@@ -23,6 +23,10 @@ pub const PLUGIN_ID: &str = "io.github.jyooi.grammachy";
 pub const DEFAULT_OPENAI_BASE_URL: &str = "http://127.0.0.1:8080";
 pub const DEFAULT_OPENAI_MODEL: &str = "gemma-4-e4b-it";
 
+/// The placeholder cloud model until the benchmark picks the recommended one
+/// (HUF-206).
+pub const DEFAULT_OPENROUTER_MODEL: &str = "deepseek/deepseek-v4-flash";
+
 /// Points the CLI at another `shell.json`, so tests never read or write the
 /// real one. Not a user-facing setting.
 pub const PATH_ENV: &str = "GRAMMACHY_SHELL_JSON";
@@ -37,6 +41,7 @@ pub struct StoredSettings {
     pub openai_base_url: Option<String>,
     pub openai_model: Option<String>,
     pub openai_api_key: Option<String>,
+    pub openrouter_model: Option<String>,
 }
 
 impl StoredSettings {
@@ -75,6 +80,7 @@ impl StoredSettings {
             // The empty string is the default of the API key and also a
             // meaningful stored value, so it is kept as it stands.
             openai_api_key: string(entry, "openaiApiKey").map(str::to_string),
+            openrouter_model: non_empty(entry, "openrouterModel"),
         }
     }
 }

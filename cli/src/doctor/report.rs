@@ -70,10 +70,11 @@ impl Report {
     pub fn new(facts: &Facts, engine: EngineSlug) -> Self {
         let tier = facts.tier();
         let checks = build_checks(facts, tier);
-        let ready = checks
-            .iter()
-            .filter(|check| check.needed_by(engine))
-            .all(|check| check.ok);
+        let ready = unchecked(engine).is_none()
+            && checks
+                .iter()
+                .filter(|check| check.needed_by(engine))
+                .all(|check| check.ok);
         let diagnosis = diagnose(&checks, facts, engine);
 
         Report {
@@ -332,7 +333,27 @@ fn diagnose(checks: &[Check], facts: &Facts, engine: EngineSlug) -> String {
     {
         return failed.line();
     }
-    ready_line(facts, engine)
+    match unchecked(engine) {
+        Some(why) => why.to_string(),
+        None => ready_line(facts, engine),
+    }
+}
+
+/// Why `doctor` cannot say the cloud engine is ready.
+///
+/// The engine needs one piece, the key file, and no check reads it yet.
+const CLOUD_UNCHECKED: &str =
+    "Grammachy cannot check the cloud key yet. Put the OpenRouter key in ~/.config/grammachy/openrouter-key.";
+
+/// Why `doctor` cannot decide one engine's readiness, when it cannot.
+///
+/// An engine whose pieces no check reads is never reported ready, because a
+/// ready answer on no evidence is worse than no answer.
+fn unchecked(engine: EngineSlug) -> Option<&'static str> {
+    match engine {
+        EngineSlug::Openrouter => Some(CLOUD_UNCHECKED),
+        _ => None,
+    }
 }
 
 /// What to say when nothing is missing.
@@ -366,5 +387,6 @@ fn ready_line(facts: &Facts, engine: EngineSlug) -> String {
                 ),
             }
         }
+        EngineSlug::Openrouter => CLOUD_UNCHECKED.to_string(),
     }
 }

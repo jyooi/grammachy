@@ -3,440 +3,520 @@
     "id": "zh-01",
     "native": "zh",
     "text": "Yesterday I go to the library with my friend.",
-    "expected_span": {
-      "start": 12,
-      "end": 14,
-      "text": "go"
-    },
-    "expected_fix": "went",
-    "error_type": "tense"
+    "edits": [
+      {
+        "start": 12,
+        "end": 14,
+        "text": "go",
+        "fix": "went",
+        "type": "tense"
+      }
+    ],
+    "expected_text": "Yesterday I went to the library with my friend."
   },
   {
     "id": "zh-02",
     "native": "zh",
     "text": "She bought three book from the store.",
-    "expected_span": {
-      "start": 17,
-      "end": 21,
-      "text": "book"
-    },
-    "expected_fix": "books",
-    "error_type": "plural"
+    "edits": [
+      {
+        "start": 17,
+        "end": 21,
+        "text": "book",
+        "fix": "books",
+        "type": "plural"
+      }
+    ],
+    "expected_text": "She bought three books from the store."
   },
   {
     "id": "zh-03",
     "native": "zh",
     "text": "I am very interested in study English literature.",
-    "expected_span": {
-      "start": 24,
-      "end": 29,
-      "text": "study"
-    },
-    "expected_fix": "studying",
-    "error_type": "gerund"
+    "edits": [
+      {
+        "start": 24,
+        "end": 29,
+        "text": "study",
+        "fix": "studying",
+        "type": "gerund"
+      }
+    ],
+    "expected_text": "I am very interested in studying English literature."
   },
   {
     "id": "zh-04",
     "native": "zh",
     "text": "He is teacher at a school near my house.",
-    "expected_span": {
-      "start": 6,
-      "end": 13,
-      "text": "teacher"
-    },
-    "expected_fix": "a teacher",
-    "error_type": "article"
+    "edits": [
+      {
+        "start": 6,
+        "end": 13,
+        "text": "teacher",
+        "fix": "a teacher",
+        "type": "article"
+      }
+    ],
+    "expected_text": "He is a teacher at a school near my house."
   },
   {
     "id": "zh-05",
     "native": "zh",
     "text": "Although it was raining, but we still went hiking.",
-    "expected_span": {
-      "start": 25,
-      "end": 28,
-      "text": "but"
-    },
-    "expected_fix": "",
-    "error_type": "conjunction"
+    "edits": [
+      {
+        "start": 25,
+        "end": 28,
+        "text": "but",
+        "fix": "",
+        "type": "conjunction"
+      }
+    ],
+    "expected_text": "Although it was raining, we still went hiking."
   },
   {
     "id": "zh-06",
     "native": "zh",
     "text": "I very like this song.",
-    "expected_span": {
-      "start": 2,
-      "end": 11,
-      "text": "very like"
-    },
-    "expected_fix": "really like",
-    "error_type": "word_order"
+    "edits": [
+      {
+        "start": 2,
+        "end": 11,
+        "text": "very like",
+        "fix": "really like",
+        "type": "word_order"
+      }
+    ],
+    "expected_text": "I really like this song."
   },
   {
     "id": "zh-07",
     "native": "zh",
     "text": "Can you borrow me your pen for a minute?",
-    "expected_span": {
-      "start": 8,
-      "end": 14,
-      "text": "borrow"
-    },
-    "expected_fix": "lend",
-    "error_type": "false_friend"
+    "edits": [
+      {
+        "start": 8,
+        "end": 14,
+        "text": "borrow",
+        "fix": "lend",
+        "type": "false_friend"
+      }
+    ],
+    "expected_text": "Can you lend me your pen for a minute?"
   },
   {
     "id": "zh-08",
     "native": "zh",
     "text": "There have many people in the park today.",
-    "expected_span": {
-      "start": 6,
-      "end": 10,
-      "text": "have"
-    },
-    "expected_fix": "are",
-    "error_type": "existential"
+    "edits": [
+      {
+        "start": 6,
+        "end": 10,
+        "text": "have",
+        "fix": "are",
+        "type": "existential"
+      }
+    ],
+    "expected_text": "There are many people in the park today."
   },
   {
     "id": "ms-01",
     "native": "ms",
     "text": "My father he works at the bank downtown.",
-    "expected_span": {
-      "start": 6,
-      "end": 8,
-      "text": "he"
-    },
-    "expected_fix": "",
-    "error_type": "double_subject"
+    "edits": [
+      {
+        "start": 10,
+        "end": 12,
+        "text": "he",
+        "fix": "",
+        "type": "double_subject"
+      }
+    ],
+    "expected_text": "My father works at the bank downtown."
   },
   {
     "id": "ms-02",
     "native": "ms",
     "text": "She already finish her homework before dinner.",
-    "expected_span": {
-      "start": 12,
-      "end": 18,
-      "text": "finish"
-    },
-    "expected_fix": "finished",
-    "error_type": "tense"
+    "edits": [
+      {
+        "start": 12,
+        "end": 18,
+        "text": "finish",
+        "fix": "finished",
+        "type": "tense"
+      }
+    ],
+    "expected_text": "She already finished her homework before dinner."
   },
   {
     "id": "ms-03",
     "native": "ms",
     "text": "I have stayed in Kuala Lumpur since ten years.",
-    "expected_span": {
-      "start": 30,
-      "end": 35,
-      "text": "since"
-    },
-    "expected_fix": "for",
-    "error_type": "preposition"
+    "edits": [
+      {
+        "start": 30,
+        "end": 35,
+        "text": "since",
+        "fix": "for",
+        "type": "preposition"
+      }
+    ],
+    "expected_text": "I have stayed in Kuala Lumpur for ten years."
   },
   {
     "id": "ms-04",
     "native": "ms",
     "text": "We discussed about the new project for hours.",
-    "expected_span": {
-      "start": 13,
-      "end": 18,
-      "text": "about"
-    },
-    "expected_fix": "",
-    "error_type": "preposition"
+    "edits": [
+      {
+        "start": 13,
+        "end": 18,
+        "text": "about",
+        "fix": "",
+        "type": "preposition"
+      }
+    ],
+    "expected_text": "We discussed the new project for hours."
   },
   {
     "id": "ms-05",
     "native": "ms",
     "text": "He is more taller than his brother.",
-    "expected_span": {
-      "start": 6,
-      "end": 17,
-      "text": "more taller"
-    },
-    "expected_fix": "taller",
-    "error_type": "comparative"
+    "edits": [
+      {
+        "start": 6,
+        "end": 17,
+        "text": "more taller",
+        "fix": "taller",
+        "type": "comparative"
+      }
+    ],
+    "expected_text": "He is taller than his brother."
   },
   {
     "id": "ms-06",
     "native": "ms",
     "text": "Please send me the informations by tomorrow.",
-    "expected_span": {
-      "start": 19,
-      "end": 31,
-      "text": "informations"
-    },
-    "expected_fix": "information",
-    "error_type": "plural"
+    "edits": [
+      {
+        "start": 19,
+        "end": 31,
+        "text": "informations",
+        "fix": "information",
+        "type": "plural"
+      }
+    ],
+    "expected_text": "Please send me the information by tomorrow."
   },
   {
     "id": "ms-07",
     "native": "ms",
     "text": "The car red is parked outside the house.",
-    "expected_span": {
-      "start": 4,
-      "end": 11,
-      "text": "car red"
-    },
-    "expected_fix": "red car",
-    "error_type": "word_order"
+    "edits": [
+      {
+        "start": 4,
+        "end": 11,
+        "text": "car red",
+        "fix": "red car",
+        "type": "word_order"
+      }
+    ],
+    "expected_text": "The red car is parked outside the house."
   },
   {
     "id": "ms-08",
     "native": "ms",
     "text": "Everybody were happy with the final result.",
-    "expected_span": {
-      "start": 10,
-      "end": 14,
-      "text": "were"
-    },
-    "expected_fix": "was",
-    "error_type": "agreement"
+    "edits": [
+      {
+        "start": 10,
+        "end": 14,
+        "text": "were",
+        "fix": "was",
+        "type": "agreement"
+      }
+    ],
+    "expected_text": "Everybody was happy with the final result."
   },
   {
     "id": "fr-01",
     "native": "fr",
     "text": "I am agree with your proposal.",
-    "expected_span": {
-      "start": 2,
-      "end": 10,
-      "text": "am agree"
-    },
-    "expected_fix": "agree",
-    "error_type": "false_friend"
+    "edits": [
+      {
+        "start": 2,
+        "end": 10,
+        "text": "am agree",
+        "fix": "agree",
+        "type": "false_friend"
+      }
+    ],
+    "expected_text": "I agree with your proposal."
   },
   {
     "id": "fr-02",
     "native": "fr",
     "text": "I have thirty years old and I live in Lyon.",
-    "expected_span": {
-      "start": 2,
-      "end": 6,
-      "text": "have"
-    },
-    "expected_fix": "am",
-    "error_type": "false_friend"
+    "edits": [
+      {
+        "start": 2,
+        "end": 6,
+        "text": "have",
+        "fix": "am",
+        "type": "false_friend"
+      }
+    ],
+    "expected_text": "I am thirty years old and I live in Lyon."
   },
   {
     "id": "fr-03",
     "native": "fr",
     "text": "He assisted to the meeting yesterday morning.",
-    "expected_span": {
-      "start": 3,
-      "end": 14,
-      "text": "assisted to"
-    },
-    "expected_fix": "attended",
-    "error_type": "false_friend"
+    "edits": [
+      {
+        "start": 3,
+        "end": 14,
+        "text": "assisted to",
+        "fix": "attended",
+        "type": "false_friend"
+      }
+    ],
+    "expected_text": "He attended the meeting yesterday morning."
   },
   {
     "id": "fr-04",
     "native": "fr",
     "text": "I am here since two hours.",
-    "expected_span": {
-      "start": 2,
-      "end": 15,
-      "text": "am here since"
-    },
-    "expected_fix": "have been here for",
-    "error_type": "tense"
+    "edits": [
+      {
+        "start": 2,
+        "end": 15,
+        "text": "am here since",
+        "fix": "have been here for",
+        "type": "tense"
+      }
+    ],
+    "expected_text": "I have been here for two hours."
   },
   {
     "id": "fr-05",
     "native": "fr",
     "text": "She explained me the problem very clearly.",
-    "expected_span": {
-      "start": 4,
-      "end": 16,
-      "text": "explained me"
-    },
-    "expected_fix": "explained to me",
-    "error_type": "preposition"
+    "edits": [
+      {
+        "start": 4,
+        "end": 16,
+        "text": "explained me",
+        "fix": "explained to me",
+        "type": "preposition"
+      }
+    ],
+    "expected_text": "She explained to me the problem very clearly."
   },
   {
     "id": "fr-06",
     "native": "fr",
     "text": "I like very much this restaurant.",
-    "expected_span": {
-      "start": 2,
-      "end": 32,
-      "text": "like very much this restaurant"
-    },
-    "expected_fix": "like this restaurant very much",
-    "error_type": "word_order"
+    "edits": [
+      {
+        "start": 2,
+        "end": 32,
+        "text": "like very much this restaurant",
+        "fix": "like this restaurant very much",
+        "type": "word_order"
+      }
+    ],
+    "expected_text": "I like this restaurant very much."
   },
   {
     "id": "fr-07",
     "native": "fr",
     "text": "I received an information about the schedule.",
-    "expected_span": {
-      "start": 11,
-      "end": 25,
-      "text": "an information"
-    },
-    "expected_fix": "some information",
-    "error_type": "article"
+    "edits": [
+      {
+        "start": 11,
+        "end": 25,
+        "text": "an information",
+        "fix": "some information",
+        "type": "article"
+      }
+    ],
+    "expected_text": "I received some information about the schedule."
   },
   {
     "id": "es-01",
     "native": "es",
     "text": "She has twenty years and studies medicine.",
-    "expected_span": {
-      "start": 4,
-      "end": 20,
-      "text": "has twenty years"
-    },
-    "expected_fix": "is twenty years old",
-    "error_type": "false_friend"
+    "edits": [
+      {
+        "start": 4,
+        "end": 20,
+        "text": "has twenty years",
+        "fix": "is twenty years old",
+        "type": "false_friend"
+      }
+    ],
+    "expected_text": "She is twenty years old and studies medicine."
   },
   {
     "id": "es-02",
     "native": "es",
     "text": "The people in my town is very friendly.",
-    "expected_span": {
-      "start": 22,
-      "end": 24,
-      "text": "is"
-    },
-    "expected_fix": "are",
-    "error_type": "agreement"
+    "edits": [
+      {
+        "start": 22,
+        "end": 24,
+        "text": "is",
+        "fix": "are",
+        "type": "agreement"
+      }
+    ],
+    "expected_text": "The people in my town are very friendly."
   },
   {
     "id": "es-03",
     "native": "es",
     "text": "She is very sensible to criticism from her boss.",
-    "expected_span": {
-      "start": 12,
-      "end": 20,
-      "text": "sensible"
-    },
-    "expected_fix": "sensitive",
-    "error_type": "false_friend"
+    "edits": [
+      {
+        "start": 12,
+        "end": 20,
+        "text": "sensible",
+        "fix": "sensitive",
+        "type": "false_friend"
+      }
+    ],
+    "expected_text": "She is very sensitive to criticism from her boss."
   },
   {
     "id": "es-04",
     "native": "es",
     "text": "Is raining a lot in Madrid today.",
-    "expected_span": {
-      "start": 0,
-      "end": 2,
-      "text": "Is"
-    },
-    "expected_fix": "It is",
-    "error_type": "missing_subject"
+    "edits": [
+      {
+        "start": 0,
+        "end": 2,
+        "text": "Is",
+        "fix": "It is",
+        "type": "missing_subject"
+      }
+    ],
+    "expected_text": "It is raining a lot in Madrid today."
   },
   {
     "id": "es-05",
     "native": "es",
     "text": "Yesterday I saw to my cousin at the market.",
-    "expected_span": {
-      "start": 12,
-      "end": 18,
-      "text": "saw to"
-    },
-    "expected_fix": "saw",
-    "error_type": "preposition"
+    "edits": [
+      {
+        "start": 12,
+        "end": 18,
+        "text": "saw to",
+        "fix": "saw",
+        "type": "preposition"
+      }
+    ],
+    "expected_text": "Yesterday I saw my cousin at the market."
   },
   {
     "id": "es-06",
     "native": "es",
     "text": "We are waiting the bus for twenty minutes.",
-    "expected_span": {
-      "start": 7,
-      "end": 14,
-      "text": "waiting"
-    },
-    "expected_fix": "waiting for",
-    "error_type": "preposition"
+    "edits": [
+      {
+        "start": 7,
+        "end": 14,
+        "text": "waiting",
+        "fix": "waiting for",
+        "type": "preposition"
+      }
+    ],
+    "expected_text": "We are waiting for the bus for twenty minutes."
   },
   {
     "id": "es-07",
     "native": "es",
     "text": "My sister wants to be doctor when she grows up.",
-    "expected_span": {
-      "start": 22,
-      "end": 28,
-      "text": "doctor"
-    },
-    "expected_fix": "a doctor",
-    "error_type": "article"
+    "edits": [
+      {
+        "start": 22,
+        "end": 28,
+        "text": "doctor",
+        "fix": "a doctor",
+        "type": "article"
+      }
+    ],
+    "expected_text": "My sister wants to be a doctor when she grows up."
   },
   {
     "id": "ok-01",
     "native": "zh",
     "text": "The meeting starts at nine tomorrow morning.",
-    "expected_span": null,
-    "expected_fix": null,
-    "error_type": "none"
+    "edits": [],
+    "expected_text": "The meeting starts at nine tomorrow morning."
   },
   {
     "id": "ok-02",
     "native": "zh",
     "text": "She has lived in Singapore for ten years.",
-    "expected_span": null,
-    "expected_fix": null,
-    "error_type": "none"
+    "edits": [],
+    "expected_text": "She has lived in Singapore for ten years."
   },
   {
     "id": "ok-03",
     "native": "ms",
     "text": "We discussed the new project for hours.",
-    "expected_span": null,
-    "expected_fix": null,
-    "error_type": "none"
+    "edits": [],
+    "expected_text": "We discussed the new project for hours."
   },
   {
     "id": "ok-04",
     "native": "ms",
     "text": "My brother is a teacher at a small school.",
-    "expected_span": null,
-    "expected_fix": null,
-    "error_type": "none"
+    "edits": [],
+    "expected_text": "My brother is a teacher at a small school."
   },
   {
     "id": "ok-05",
     "native": "ms",
     "text": "I would like to borrow your pen for a minute.",
-    "expected_span": null,
-    "expected_fix": null,
-    "error_type": "none"
+    "edits": [],
+    "expected_text": "I would like to borrow your pen for a minute."
   },
   {
     "id": "ok-06",
     "native": "fr",
     "text": "They are waiting for the bus outside the station.",
-    "expected_span": null,
-    "expected_fix": null,
-    "error_type": "none"
+    "edits": [],
+    "expected_text": "They are waiting for the bus outside the station."
   },
   {
     "id": "ok-07",
     "native": "fr",
     "text": "Everybody was happy with the final result.",
-    "expected_span": null,
-    "expected_fix": null,
-    "error_type": "none"
+    "edits": [],
+    "expected_text": "Everybody was happy with the final result."
   },
   {
     "id": "ok-08",
     "native": "es",
     "text": "It is raining a lot in Madrid today.",
-    "expected_span": null,
-    "expected_fix": null,
-    "error_type": "none"
+    "edits": [],
+    "expected_text": "It is raining a lot in Madrid today."
   },
   {
     "id": "ok-09",
     "native": "es",
     "text": "I agree with your proposal and will sign it tomorrow.",
-    "expected_span": null,
-    "expected_fix": null,
-    "error_type": "none"
+    "edits": [],
+    "expected_text": "I agree with your proposal and will sign it tomorrow."
   },
   {
     "id": "ok-10",
     "native": "es",
     "text": "Please send me the information by Friday.",
-    "expected_span": null,
-    "expected_fix": null,
-    "error_type": "none"
+    "edits": [],
+    "expected_text": "Please send me the information by Friday."
   }
 ]

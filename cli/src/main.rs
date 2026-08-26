@@ -13,7 +13,9 @@ use grammachy::{bench, check, chunk, doctor};
 ///
 /// `check` and `chunk` render one JSON envelope (spec section 5.1).
 /// `bench` renders its Markdown report, and still renders the error envelope
-/// when it fails. `doctor` renders its report (spec section 10).
+/// when its arguments do not describe a run. A `--record` write that fails
+/// after the rows ran keeps the report on stdout and exits 1.
+/// `doctor` renders its report (spec section 10).
 /// `setup` renders its JSON envelope (spec section 10).
 struct Output {
     text: String,
@@ -104,10 +106,19 @@ fn run() -> Option<Output> {
             Some(chunk::run(&text).into())
         }
         Command::Bench(args) => Some(match bench::run(&args, &StoredSettings::load()) {
-            Ok(report) => Output {
-                text: report,
-                exit_code: 0,
-            },
+            Ok(run) => {
+                let exit_code = match &run.record_failure {
+                    Some(message) => {
+                        eprintln!("grammachy: {message}");
+                        1
+                    }
+                    None => 0,
+                };
+                Output {
+                    text: run.report,
+                    exit_code,
+                }
+            }
             Err(message) => {
                 eprintln!("grammachy: {message}");
                 Envelope::error(ErrorCode::BadArguments, message).into()

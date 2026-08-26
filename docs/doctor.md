@@ -101,9 +101,11 @@ Check fields:
 | `languagetool` | `binary`, `languagetool`, `java`, `unit:languagetool` |
 | `openai` | `binary`, `llama.cpp`, `model`, `endpoint`, `unit:llama` |
 | `harper` | `binary` |
+| `openrouter` | none that `doctor` reads yet |
 
 The first missing piece in that order is the diagnosis.
 When nothing is missing, the diagnosis says the engine can run.
+`doctor` cannot read the cloud key yet, so `openrouter` always reports `ready: false` and names the key file.
 For `languagetool` and `openai` it also names the address its unit answers on.
 
 ## Hardware tiers
