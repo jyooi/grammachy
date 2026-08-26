@@ -204,13 +204,23 @@ fn scratch_dir() -> PathBuf {
 /// An entry that names no `openaiBaseUrl` gets a silent one. The default is a
 /// fixed loopback port, so a machine that already runs llama.cpp there would
 /// otherwise answer a run that is meant to find nothing.
+///
+/// `GRAMMACHY_LLAMA_START=never` stops a start rather than a connection, so the
+/// address, not that seam, is what keeps the suite off a live server.
 fn settings_file(name: &str, entry_body: &str) -> PathBuf {
     let path = scratch_dir().join(name);
     let entry = if entry_body.contains("openaiBaseUrl") {
         entry_body.to_string()
     } else {
+        // The comma only joins two present fields, so an empty body stays
+        // valid JSON rather than leaving a dangling separator.
+        let separator = if entry_body.trim().is_empty() {
+            ""
+        } else {
+            ", "
+        };
         format!(
-            r#""openaiBaseUrl": "http://{}", {entry_body}"#,
+            r#""openaiBaseUrl": "http://{}"{separator}{entry_body}"#,
             silent_address()
         )
     };

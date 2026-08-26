@@ -131,6 +131,7 @@ fn run() -> Option<Output> {
                     native: None,
                     target: None,
                     engine: args.engine,
+                    thinking: None,
                 },
                 &StoredSettings::load(),
             );

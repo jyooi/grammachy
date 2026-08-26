@@ -178,8 +178,27 @@ fn every_valid_flag_value_is_accepted() {
         );
     }
 
+    for thinking in ["on", "off"] {
+        let result = run(&["check", "--thinking", thinking], "Some text.");
+        assert_ne!(
+            envelope(&result)["error"]["code"],
+            "bad_arguments",
+            "--thinking {thinking} is valid"
+        );
+    }
+
     let result = run(&["check", "--target", "en-US"], "Some text.");
     assert_ne!(envelope(&result)["error"]["code"], "bad_arguments");
+}
+
+/// Spec section 4 gives `--thinking` two values, so anything else is refused
+/// before a Check runs.
+#[test]
+fn an_unknown_thinking_value_prints_bad_arguments() {
+    let result = run(&["check", "--thinking", "maybe"], "Some text.");
+
+    assert_eq!(result.status, 1);
+    assert_eq!(envelope(&result)["error"]["code"], "bad_arguments");
 }
 
 #[test]

@@ -11,7 +11,7 @@ use serde::Serialize;
 use crate::args::EngineSlug;
 use crate::envelope::CONTRACT_VERSION;
 
-use super::facts::{Facts, HardwareTier, UnitState};
+use super::facts::{Backend, Facts, HardwareTier, UnitState};
 
 /// One thing `doctor` looked at.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -117,6 +117,7 @@ fn build_checks(facts: &Facts, tier: HardwareTier) -> Vec<Check> {
         languagetool_check(facts),
         java_check(facts),
         llama_check(facts, tier),
+        backend_check(facts),
         model_check(facts),
         endpoint_check(facts),
         unit_check(
@@ -232,6 +233,45 @@ fn llama_check(facts: &Facts, tier: HardwareTier) -> Check {
             )),
             engines: vec!["openai"],
         },
+    }
+}
+
+/// The compute backend, spec section 4.
+///
+/// `llama-cpp` carries none of its own, so a machine with the server and no
+/// ggml package starts the unit and then gets no answer. That reads as a
+/// broken engine rather than as a missing package, which is why `doctor` looks
+/// at the backend libraries and not only at `/usr/bin/llama-server`.
+fn backend_check(facts: &Facts) -> Check {
+    let missing = facts.missing_backends();
+    if missing.is_empty() {
+        let installed: Vec<&str> = facts
+            .wanted_backends()
+            .into_iter()
+            .map(Backend::package)
+            .collect();
+        return Check {
+            id: "backend",
+            name: "llama.cpp backend",
+            ok: true,
+            detail: installed.join(", "),
+            remedy: None,
+            engines: vec!["openai"],
+        };
+    }
+
+    let packages: Vec<&str> = missing.iter().copied().map(Backend::package).collect();
+    Check {
+        id: "backend",
+        name: "llama.cpp backend",
+        ok: false,
+        detail: format!(
+            "llama.cpp has no compute backend: {} {} not installed.",
+            packages.join(" and "),
+            if packages.len() == 1 { "is" } else { "are" }
+        ),
+        remedy: Some(format!("sudo pacman -S {}", packages.join(" "))),
+        engines: vec!["openai"],
     }
 }
 

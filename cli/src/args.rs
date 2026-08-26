@@ -95,6 +95,24 @@ pub struct CheckArgs {
     /// The engine that performs the Check.
     #[arg(long, value_enum)]
     pub engine: Option<EngineSlug>,
+
+    /// Whether the local engine thinks before it answers. Omitted uses the
+    /// stored `localThinking`, then the default `on`.
+    #[arg(long, value_enum)]
+    pub thinking: Option<Thinking>,
+}
+
+/// The `--thinking` flag of spec section 4, which wins over the Setting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum Thinking {
+    On,
+    Off,
+}
+
+impl Thinking {
+    pub fn is_on(self) -> bool {
+        self == Thinking::On
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -214,6 +232,9 @@ pub struct CheckOptions {
     pub openai_api_key: String,
     /// The model id the `openrouter` engine asks for. Empty is `bad_arguments`.
     pub openrouter_model: String,
+    /// Whether the local engine thinks before it answers (spec section 4).
+    /// The adapter sends it per request, so a change needs no unit restart.
+    pub local_thinking: bool,
 }
 
 impl Default for CheckOptions {
@@ -226,6 +247,7 @@ impl Default for CheckOptions {
             openai_model: settings::DEFAULT_OPENAI_MODEL.to_string(),
             openai_api_key: String::new(),
             openrouter_model: settings::DEFAULT_OPENROUTER_MODEL.to_string(),
+            local_thinking: settings::DEFAULT_LOCAL_THINKING,
         }
     }
 }
@@ -255,6 +277,11 @@ impl CheckOptions {
                 .openrouter_model
                 .clone()
                 .unwrap_or(defaults.openrouter_model),
+            local_thinking: args
+                .thinking
+                .map(Thinking::is_on)
+                .or(stored.local_thinking)
+                .unwrap_or(defaults.local_thinking),
         }
     }
 }

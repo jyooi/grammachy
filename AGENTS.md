@@ -28,11 +28,20 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   Each `unit.rs` documents its own server command and its sharp edges: `/usr/bin/languagetool` needs `JAVA_HOME` and `--http`; `/usr/bin/llama-server` comes from `llama-cpp` plus a separate `ggml-cpu` or `ggml-vulkan` backend package.
   Tests must never reach a real server or a real unit.
   The seams are `GRAMMACHY_LANGUAGETOOL_ADDRESS`, `GRAMMACHY_LANGUAGETOOL_START=never`, and `GRAMMACHY_LLAMA_START=never`; `cli/tests/cli.rs` sets all three.
+  `GRAMMACHY_LLAMA_START=never` stops a start and never a connection.
+  The default `openaiBaseUrl` is `127.0.0.1:8080`, which is a real llama-server on a developer machine.
+  Every test settings file must name a silent `openaiBaseUrl` of its own.
+  `cli/tests/bench.rs` adds one for any entry body that does not.
   The `openai` adapter takes its starter as a value, so `cli/tests/openai_stub.rs` covers the start behaviour with no systemd at all.
   Live tests in `languagetool_live.rs`, `openai_live.rs`, and `interference_catch_rate.rs` skip when their port is silent, which keeps CI green without the packages.
 - The `openai` base URL host must be loopback, and `cli/src/engines/openai/endpoint.rs` is the only place that decides it.
   A remote host is `bad_arguments` and no request is made; that is a product guarantee, so keep it tested.
   Its prompt in `prompt.rs` is the wording HUF-181 measured, and the "shortest exact substring" rule is what makes the spans usable rather than whole-sentence rewrites.
+  Thinking (spec section 4) travels on the request as `chat_template_kwargs.enable_thinking` and never on the unit.
+  That is what makes a change of the Setting need no restart.
+  The unit only caps the think, with `--reasoning-budget`.
+  The default lives twice, in `settings::DEFAULT_LOCAL_THINKING` and in the `localThinking` descriptor of `ui/settings.js`.
+  `cli/tests/overlay_thinking.rs` keeps the two equal and keeps the Toggle inside the group the engine hides.
 - `grammachy setup` lives in `cli/src/setup/`, spec section 10.
   It prints one JSON envelope (`SetupEnvelope`).
   Exit 1 uses `setup_failed`.
@@ -72,6 +81,8 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 - `doctor` reports the install state and the one-line engine diagnosis the `engine_unavailable` card shows.
   `docs/doctor.md` documents its envelope, exit code, and hardware tiers.
   `cli/src/doctor/facts.rs` is the only place that reads the machine, so the report is a pure function of recorded `Facts` and no test reads real hardware.
+  The `backend` check reads the library names under `/usr/lib/ggml`, because `llama-cpp` carries no compute backend of its own.
+  A server without one starts and then answers nothing, which reads as a broken engine rather than a missing package.
 - Compose (spec section 9) keeps the Draft in `Overlay.draftText` and nowhere else: no file, no clipboard, no setting.
   `ui/DraftField.qml` is the text area; it forwards key presses to the overlay's key catcher through `Keys.forwardTo` with `Keys.priority: Keys.BeforeItem`, which is what lets Ctrl + Enter run the Check while every printable key still types.
   `Overlay.restoreFocus` is the one place that decides whether the Draft or the key catcher holds the keyboard.

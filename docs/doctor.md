@@ -2,7 +2,7 @@
 
 The install check of spec sections 4, 8, 10, and 12.
 It checks the binary, LanguageTool, llama.cpp, the model file, and the two transient units.
-It also checks the Java runtime and the local LLM endpoint.
+It also checks the Java runtime, the llama.cpp compute backend, and the local LLM endpoint.
 It prints one line per piece.
 A missing package carries the exact command that installs it.
 
@@ -33,6 +33,7 @@ Grammachy doctor
   ok       LanguageTool        /usr/bin/languagetool
   ok       Java runtime        /usr/lib/jvm/default/bin/java
   missing  llama.cpp server    llama.cpp is not installed: /usr/bin/llama-server does not exist. Run: sudo pacman -S llama-cpp ggml-vulkan
+  missing  llama.cpp backend   llama.cpp has no compute backend: ggml-cpu and ggml-vulkan are not installed. Run: sudo pacman -S ggml-cpu ggml-vulkan
   missing  Model weights       No weights for gemma-4-e4b-it in /home/u/.local/share/grammachy/models. Run: grammachy setup
   ok       Local LLM endpoint  127.0.0.1:8080
   ok       LanguageTool unit   grammachy-languagetool is not running. The next Check starts it.
@@ -87,7 +88,7 @@ Fields:
 
 Check fields:
 
-- `id`: stable across releases, never shown to a user. The ids are `binary`, `languagetool`, `java`, `llama.cpp`, `model`, `endpoint`, `unit:languagetool`, and `unit:llama`.
+- `id`: stable across releases, never shown to a user. The ids are `binary`, `languagetool`, `java`, `llama.cpp`, `backend`, `model`, `endpoint`, `unit:languagetool`, and `unit:llama`.
 - `name`: the display name.
 - `ok`: whether the piece is in place.
 - `detail`: one sentence saying what was found, or what is missing.
@@ -99,7 +100,7 @@ Check fields:
 | Slug | Pieces it needs |
 |---|---|
 | `languagetool` | `binary`, `languagetool`, `java`, `unit:languagetool` |
-| `openai` | `binary`, `llama.cpp`, `model`, `endpoint`, `unit:llama` |
+| `openai` | `binary`, `llama.cpp`, `backend`, `model`, `endpoint`, `unit:llama` |
 | `harper` | `binary` |
 | `openrouter` | none that `doctor` reads yet |
 
@@ -122,6 +123,19 @@ The tier is read from the graphics devices under `/sys/class/drm`:
 | `cpu` | Only a framebuffer or a virtual device, or no device at all | `ggml-cpu` |
 
 NPU use stays a documented manual FastFlowLM setup reached through the `openai` adapter, so no tier names it.
+
+## The compute backend
+
+The `backend` check is what spec section 4 asks for beyond `/usr/bin/llama-server`.
+A server with no backend starts and then answers nothing, which reads as a broken engine rather than as a missing package.
+
+The backend libraries live in `/usr/lib/ggml`.
+`ggml-cpu` installs one `libggml-cpu-<microarchitecture>.so` per microarchitecture.
+`ggml-vulkan` installs `libggml-vulkan.so`.
+
+Every tier wants `ggml-cpu`, because llama.cpp runs on the CPU the parts no other backend takes.
+A GPU tier wants `ggml-vulkan` beside it.
+The remedy names only the packages that are missing.
 
 ## Testing
 

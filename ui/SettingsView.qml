@@ -19,6 +19,7 @@ ColumnLayout {
   property bool autoReplace: false
   property string openaiBaseUrl: "http://127.0.0.1:8080"
   property string openaiModel: "gemma-4-e4b-it"
+  property bool localThinking: true
 
   signal settingChanged(string name, var value)
 
@@ -204,6 +205,21 @@ ColumnLayout {
       wrapMode: Text.Wrap
       font.family: Style.font.family
       font.pixelSize: Style.font.caption
+    }
+
+    // Spec section 4: thinking is on by default and the model reads it per
+    // request, so a change here needs no server restart.
+    //
+    // The top margin brings the gap above it up to the `lg` the other rows of
+    // the view sit at, because this group is packed at `labelGap`.
+    Toggle {
+      Layout.fillWidth: true
+      Layout.topMargin: Style.spacing.sm
+      label: "Thinking"
+      description: "Lets the model reason before it answers, which is slower and more accurate"
+      checked: root.localThinking
+      foreground: Color.popups.text
+      onClicked: root.settingChanged("localThinking", !root.localThinking)
     }
   }
 }

@@ -62,6 +62,7 @@ BorderSurface {
   property string engineSetting: "languagetool"
   property string openaiBaseUrl: ""
   property string openaiModel: ""
+  property bool localThinking: true
 
   property int cardWidth: Style.space(680)
   // The whole card fits in this, spec section 6. The marked text is what
@@ -199,6 +200,7 @@ BorderSurface {
       autoReplace: root.autoReplace
       openaiBaseUrl: root.openaiBaseUrl
       openaiModel: root.openaiModel
+      localThinking: root.localThinking
       onSettingChanged: function(name, value) { root.settingChanged(name, value) }
     }
 

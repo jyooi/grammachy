@@ -56,13 +56,15 @@ test("a stored value the spec lists reads back as it stands", () => {
     engine: "harper",
     autoReplace: true,
     openaiBaseUrl: "http://127.0.0.1:9090",
-    openaiModel: "some-model"
+    openaiModel: "some-model",
+    localThinking: false
   }
   assert.equal(valueOf(entry, "nativeLanguage"), "ms")
   assert.equal(valueOf(entry, "engine"), "harper")
   assert.equal(valueOf(entry, "autoReplace"), true)
   assert.equal(valueOf(entry, "openaiBaseUrl"), "http://127.0.0.1:9090")
   assert.equal(valueOf(entry, "openaiModel"), "some-model")
+  assert.equal(valueOf(entry, "localThinking"), false)
 })
 
 test("a missing key reads as the spec section 7 default", () => {
@@ -71,6 +73,16 @@ test("a missing key reads as the spec section 7 default", () => {
   assert.equal(valueOf({ id: PLUGIN_ID }, "autoReplace"), false)
   assert.equal(valueOf({ id: PLUGIN_ID }, "openaiBaseUrl"), "http://127.0.0.1:8080")
   assert.equal(valueOf({ id: PLUGIN_ID }, "openaiModel"), "gemma-4-e4b-it")
+  assert.equal(valueOf({ id: PLUGIN_ID }, "localThinking"), true)
+})
+
+// Spec section 4: thinking is on by default for the local engine, and the
+// stored `false` is a value rather than a missing key, so it has to survive.
+test("thinking is on by default and off only when the file says so", () => {
+  assert.equal(valueOf({}, "localThinking"), true)
+  assert.equal(valueOf({ localThinking: false }, "localThinking"), false)
+  assert.equal(valueOf({ localThinking: true }, "localThinking"), true)
+  assert.equal(defaultOf("localThinking"), true)
 })
 
 test("an unknown stored value reads as the default", () => {
@@ -80,6 +92,8 @@ test("an unknown stored value reads as the default", () => {
   assert.equal(valueOf({ autoReplace: "yes" }, "autoReplace"), false)
   assert.equal(valueOf({ openaiBaseUrl: "" }, "openaiBaseUrl"), "http://127.0.0.1:8080")
   assert.equal(valueOf({ openaiModel: null }, "openaiModel"), "gemma-4-e4b-it")
+  assert.equal(valueOf({ localThinking: "off" }, "localThinking"), true)
+  assert.equal(valueOf({ localThinking: 0 }, "localThinking"), true)
 })
 
 test("a caller may pass its own fallback, which is the seam the overlay uses", () => {
@@ -100,6 +114,8 @@ test("a write keeps a known value and replaces an unknown one with the default",
   assert.equal(normalised("openaiModel", ""), "gemma-4-e4b-it")
   assert.equal(normalised("openaiBaseUrl", "http://127.0.0.1:9090"), "http://127.0.0.1:9090")
   assert.equal(normalised("autoReplace", true), true)
+  assert.equal(normalised("localThinking", false), false)
+  assert.equal(normalised("localThinking", "off"), true)
 })
 
 // `updateEntryInline` replaces the entry, so anything the merge drops is gone

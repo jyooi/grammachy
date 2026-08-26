@@ -16,10 +16,10 @@ use serde_json::{json, Value};
 
 use crate::args::{CheckOptions, NativeLanguage};
 
-/// How much room the answer gets. One Check is at most 5,000 UTF-16 units, and
-/// an Issue costs about 40 tokens, so this is far past any honest answer and
-/// still bounds a model that will not stop.
-const MAX_TOKENS: u32 = 1_024;
+/// How much room one answer gets, spec section 4: 1,024 tokens for thinking
+/// and 1,024 tokens for the answer. The unit caps the thinking half itself
+/// with `--reasoning-budget`, so a runaway think never eats the answer.
+const MAX_TOKENS: u32 = 2_048;
 
 /// The language name the prompt uses, or `None` for `none`.
 ///
@@ -92,11 +92,12 @@ pub fn request_body(text: &str, options: &CheckOptions) -> Value {
         // A Check is a classification, not a piece of writing.
         "temperature": 0,
         "max_tokens": MAX_TOKENS,
-        // A thinking model spends the whole answer budget before the first
-        // bracket: Qwen3.5-4B scored zero in the HUF-209 pilot that way.
-        // llama.cpp reads this; other servers ignore an unknown field.
-        "chat_template_kwargs": { "enable_thinking": false },
         "stream": false,
+        // Spec section 4. llama.cpp reads this through the chat template of
+        // the model file, so a change of the Setting needs no unit restart.
+        // The unit caps the think with --reasoning-budget, so a runaway think
+        // cannot spend the whole answer budget before the first bracket.
+        "chat_template_kwargs": { "enable_thinking": options.local_thinking },
         "response_format": {
             "type": "json_schema",
             "json_schema": { "name": "issues", "schema": schema() }
@@ -129,12 +130,29 @@ mod tests {
     }
 
     #[test]
+    fn thinking_on_is_what_the_default_options_send() {
+        let body = request_body("He go home.", &options(NativeLanguage::None));
+
+        assert_eq!(body["chat_template_kwargs"]["enable_thinking"], true);
+        assert_eq!(body["max_tokens"], 2048);
+    }
+
+    #[test]
+    fn thinking_off_is_carried_on_the_same_key() {
+        let mut off = options(NativeLanguage::None);
+        off.local_thinking = false;
+        let body = request_body("He go home.", &off);
+
+        assert_eq!(body["chat_template_kwargs"]["enable_thinking"], false);
+        assert_eq!(body["max_tokens"], 2048);
+    }
+
+    #[test]
     fn the_body_names_the_model_and_asks_for_the_schema() {
         let body = request_body("He go home.", &options(NativeLanguage::None));
 
         assert_eq!(body["model"], "gemma-4-e4b-it");
         assert_eq!(body["temperature"], 0);
-        assert_eq!(body["chat_template_kwargs"]["enable_thinking"], false);
         assert_eq!(body["response_format"]["type"], "json_schema");
         assert_eq!(
             body["response_format"]["json_schema"]["schema"]["items"]["required"],

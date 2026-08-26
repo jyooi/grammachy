@@ -71,6 +71,7 @@ BorderSurface {
   property bool autoReplace: false
   property string openaiBaseUrl: ""
   property string openaiModel: ""
+  property bool localThinking: true
 
   // Spec section 9: about 900 px wide and 80 percent of the screen height.
   property int cardWidth: Style.space(900)
@@ -226,6 +227,7 @@ BorderSurface {
       autoReplace: root.autoReplace
       openaiBaseUrl: root.openaiBaseUrl
       openaiModel: root.openaiModel
+      localThinking: root.localThinking
       onSettingChanged: function(name, value) { root.settingChanged(name, value) }
     }
 
