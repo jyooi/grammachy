@@ -95,7 +95,7 @@ fn another_model_in_the_directory_is_never_used() {
     let failure = model_file(&directory, "gemma-4-e4b-it").expect_err("nothing matches");
 
     assert!(failure.0.contains("gemma-4-e4b-it"), "{}", failure.0);
-    assert!(failure.0.contains("grammachy setup"), "{}", failure.0);
+    assert!(failure.0.contains("Settings, Models"), "{}", failure.0);
 }
 
 #[test]
@@ -104,7 +104,7 @@ fn a_directory_that_does_not_exist_says_so_without_panicking() {
 
     let failure = model_file(&missing, "gemma-4-e4b-it").expect_err("the directory is absent");
 
-    assert!(failure.0.contains("grammachy setup"), "{}", failure.0);
+    assert!(failure.0.contains("Settings, Models"), "{}", failure.0);
 }
 
 #[test]
