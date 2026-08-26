@@ -35,6 +35,8 @@ const {
   bytes,
   share,
   hint,
+  resolvedName,
+  resolves,
   actions,
   isBlocked,
   actionIcon,
@@ -67,6 +69,10 @@ const PHI = {
   sizeBytes: 2491874272,
   licence: "MIT"
 }
+
+// The three rows as one list, which is what the view and the overlay hand the
+// shared functions so a setting can be resolved against the files on disk.
+const CATALOGUE = [GEMMA, QWEN, PHI]
 
 function envelope(verb, models) {
   return JSON.stringify({
@@ -229,13 +235,15 @@ test("a part downloaded row offers Download and Remove", () => {
 })
 
 test("a ready row the setting does not name offers Use and Remove", () => {
-  assert.deepEqual(actions(GEMMA, { busy: "", setting: "qwen3-4b-instruct" }), [USE, REMOVE])
+  assert.deepEqual(actions(GEMMA, { busy: "", setting: "qwen3-4b-instruct", models: CATALOGUE }),
+    [USE, REMOVE])
 })
 
 // Picking the model that is already picked does nothing, so the button is not
 // offered at all.
 test("the ready row the setting already names offers Remove alone", () => {
-  assert.deepEqual(actions(GEMMA, { busy: "", setting: "gemma-4-e4b-it" }), [REMOVE])
+  assert.deepEqual(actions(GEMMA, { busy: "", setting: "gemma-4-e4b-it", models: CATALOGUE }),
+    [REMOVE])
 })
 
 // One download at a time, spec section 7.
@@ -243,14 +251,86 @@ test("the row in flight offers Cancel alone", () => {
   assert.deepEqual(actions(QWEN, { busy: "qwen3-4b-instruct", setting: "gemma-4-e4b-it" }), [CANCEL])
 })
 
-test("every other row's Download is off while one download runs", () => {
-  assert.deepEqual(actions(PHI, { busy: "qwen3-4b-instruct", setting: "gemma-4-e4b-it" }), [])
-  assert.equal(isBlocked(PHI, { busy: "qwen3-4b-instruct" }), true)
-  assert.equal(isBlocked(PHI, { busy: "" }), false)
-  // A ready row has no download to wait for, so its buttons stay live.
-  assert.deepEqual(actions(GEMMA, { busy: "qwen3-4b-instruct", setting: "qwen3-4b-instruct" }),
-    [USE, REMOVE])
-  assert.equal(isBlocked(GEMMA, { busy: "qwen3-4b-instruct" }), false)
+// Only one verb of `grammachy model` runs at a time, so a button on any other
+// row would be a dead click. It stays drawn and goes dim rather than vanishing,
+// which is what keeps the list from shifting under the pointer.
+test("every other row's buttons are blocked while one download runs", () => {
+  const busy = { busy: "qwen3-4b-instruct", setting: "gemma-4-e4b-it", models: CATALOGUE }
+
+  assert.deepEqual(actions(PHI, busy), [DOWNLOAD])
+  assert.equal(isBlocked(PHI, busy), true)
+
+  // A Ready row's Remove and Use are just as dead, so they are dimmed too.
+  assert.deepEqual(actions(GEMMA, busy), [REMOVE])
+  assert.equal(isBlocked(GEMMA, busy), true)
+
+  // The row the download belongs to keeps its Cancel live.
+  assert.deepEqual(actions(QWEN, busy), [CANCEL])
+  assert.equal(isBlocked(QWEN, busy), false)
+
+  // Nothing is blocked when nothing is running.
+  for (const row of CATALOGUE) assert.equal(isBlocked(row, { busy: "" }), false)
+})
+
+// ------------------------------------------------- which row the setting names
+
+// The CLI is the authority: `unit::model_file` takes the exact `<name>.gguf`
+// first and then any `.gguf` that begins with the name, ignoring case. The
+// shell has to agree, or it marks the wrong row and skips the Remove confirm.
+const READY_CATALOGUE = [
+  GEMMA,
+  { ...QWEN, state: "ready", partialBytes: 0 },
+  { ...PHI, state: "ready" }
+]
+
+test("a setting that reaches a file by prefix resolves to that row", () => {
+  assert.equal(resolvedName(READY_CATALOGUE, "qwen3-4b"), "qwen3-4b-instruct")
+  assert.equal(resolvedName(READY_CATALOGUE, "Qwen3-4B-Instruct-2507-Q4_K_M"), "qwen3-4b-instruct")
+  assert.equal(resolves(READY_CATALOGUE[1], "qwen3-4b", READY_CATALOGUE), true)
+})
+
+test("the setting is matched without regard to case, the way the CLI matches it", () => {
+  assert.equal(resolvedName(READY_CATALOGUE, "Gemma-4-E4B-it"), "gemma-4-e4b-it")
+  assert.equal(resolves(GEMMA, "Gemma-4-E4B-it", READY_CATALOGUE), true)
+  assert.equal(resolves(GEMMA, "GEMMA-4-E4B-IT", READY_CATALOGUE), true)
+})
+
+test("a setting that reaches nothing resolves to no row at all", () => {
+  assert.equal(resolvedName(READY_CATALOGUE, "llama-3-8b"), "")
+  assert.equal(resolvedName(READY_CATALOGUE, ""), "")
+  assert.equal(resolvedName([], "gemma-4-e4b-it"), "")
+  for (const row of READY_CATALOGUE) assert.equal(resolves(row, "llama-3-8b", READY_CATALOGUE), false)
+})
+
+// Only a `ready` row has a `.gguf` on disk, so a part downloaded row is not
+// what a Check would load and the Remove confirm must not claim it is.
+test("a row that is not ready is never the model in use", () => {
+  assert.equal(resolvedName([QWEN], "qwen3-4b-instruct"), "")
+  assert.equal(resolves(QWEN, "qwen3-4b-instruct", [QWEN]), false)
+})
+
+// The CLI sorts the matching files and takes the first, so exactly one row is
+// ever marked even when several could match.
+test("only one row is marked when several files begin with the setting", () => {
+  const shared = [
+    { ...QWEN, name: "qwen3-4b-thinking", fileName: "Qwen3-4B-Thinking-Q4_K_M.gguf", state: "ready" },
+    { ...QWEN, name: "qwen3-4b-instruct", state: "ready" }
+  ]
+
+  const marked = shared.filter(row => resolves(row, "qwen3-4b", shared))
+
+  assert.equal(marked.length, 1)
+  assert.equal(marked[0].name, "qwen3-4b-instruct")
+})
+
+// The exact file wins over any prefix, which is the first thing the CLI checks.
+test("the exact file name wins over a row that only begins with the setting", () => {
+  const both = [
+    { ...QWEN, name: "qwen3-4b-instruct", state: "ready" },
+    { ...PHI, name: "hand-placed", fileName: "Qwen3-4B.gguf", state: "ready" }
+  ]
+
+  assert.equal(resolvedName(both, "Qwen3-4B"), "hand-placed")
 })
 
 // Spec section 7: the row buttons are icons only, so the verb is the tooltip

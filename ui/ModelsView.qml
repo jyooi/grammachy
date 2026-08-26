@@ -63,7 +63,9 @@ ColumnLayout {
       readonly property string name: String(row.modelData.name)
       readonly property bool running: root.busy === row.name
       readonly property bool blocked: Models.isBlocked(row.modelData, { busy: root.busy })
-      readonly property bool chosen: root.setting === row.name
+      // The model a Check would load, resolved the way the CLI resolves it, so
+      // a setting that names the file by a prefix still marks the right row.
+      readonly property bool chosen: Models.resolves(row.modelData, root.setting, root.models)
       readonly property bool asking: root.confirmName === row.name
 
       Layout.fillWidth: true
@@ -119,13 +121,14 @@ ColumnLayout {
           }
         }
 
-        // The buttons this row offers, spec section 7. A row whose Download is
-        // waiting on another download keeps the button in place and disabled,
-        // so the list never shifts under a click.
+        // The buttons this row offers, spec section 7. A row waiting on another
+        // row's download keeps every button in place and disabled, so the list
+        // never shifts under a click and no press is silently dropped.
         Repeater {
-          model: row.blocked ? [Models.DOWNLOAD] : Models.actions(row.modelData, {
+          model: Models.actions(row.modelData, {
             busy: root.busy,
-            setting: root.setting
+            setting: root.setting,
+            models: root.models
           })
 
           Button {

@@ -187,13 +187,56 @@ function hint(row, busy) {
   return "Not downloaded, " + size + ", " + licence
 }
 
+// Which catalogue row the `openaiModel` setting names, spec section 7.
+//
+// `unit::model_file` in the CLI is the authority, because it is what a Check
+// resolves the setting with: the exact `<setting>.gguf` wins, and failing that
+// the first `.gguf` whose name begins with the setting, ignoring case. Only a
+// `ready` row has a `.gguf` on disk, so only a `ready` row can be the answer.
+// Mirroring the rule here is what keeps the "in use" mark and the Remove
+// confirm on the file the next Check would load, rather than on a name that
+// happens to be spelled the same way.
+function resolvedName(models, setting) {
+  var wanted = String(setting || "")
+  if (wanted.length === 0) return ""
+  var lowered = wanted.toLowerCase()
+  var list = Array.isArray(models) ? models : []
+  var candidates = []
+
+  for (var i = 0; i < list.length; i++) {
+    var row = list[i]
+    if (!isPlainObject(row) || stateOf(row) !== READY) continue
+    var fileName = typeof row.fileName === "string" ? row.fileName : ""
+    if (fileName.length === 0) continue
+    if (fileName === wanted + ".gguf") return String(row.name)
+    if (fileName.toLowerCase().indexOf(lowered) === 0) candidates.push(row)
+  }
+
+  // Several files can begin with the same name, and the CLI sorts them and
+  // takes the first, so the same one wins here.
+  candidates.sort(function (left, right) {
+    if (left.fileName === right.fileName) return 0
+    return left.fileName < right.fileName ? -1 : 1
+  })
+  return candidates.length > 0 ? String(candidates[0].name) : ""
+}
+
+// Whether this row is the one the setting resolves to.
+function resolves(row, setting, models) {
+  var name = isPlainObject(row) ? String(row.name) : ""
+  if (name.length === 0) return false
+  return resolvedName(models, setting) === name
+}
+
 // Which buttons one row carries, spec section 7.
 //
-// One download runs at a time, so every other row's Download is off while one
-// is in flight. The row in flight offers Cancel alone: Use and Remove are about
-// a file that is not there yet.
+// The row a download is running on offers Cancel alone: Use and Remove are
+// about a file that is not there yet. Every other row keeps the buttons it
+// would carry anyway, and `isBlocked` is what draws them disabled while one
+// download holds the single verb the CLI runs at a time. The list never shifts
+// under a click that way.
 //
-// Use is offered on a Ready row that the setting does not already name, because
+// Use is offered on a Ready row the setting does not resolve to, because
 // picking the model that is already picked does nothing.
 function actions(row, options) {
   var context = isPlainObject(options) ? options : ({})
@@ -205,24 +248,26 @@ function actions(row, options) {
 
   var out = []
   if (state === READY) {
-    if (String(context.setting || "") !== name) out.push(USE)
+    if (!resolves(row, context.setting, context.models)) out.push(USE)
     out.push(REMOVE)
     return out
   }
 
-  // A download in flight belongs to another row, so this one waits its turn.
-  if (busyName.length === 0) out.push(DOWNLOAD)
+  out.push(DOWNLOAD)
   if (state === PARTIAL) out.push(REMOVE)
   return out
 }
 
-// Whether a row's Download button is drawn but cannot be pressed. The button
-// stays on the row so that the list does not shift while a download runs.
+// Whether a row's buttons are drawn but cannot be pressed.
+//
+// One verb of `grammachy model` runs at a time, so while a download is in
+// flight every other row's Download, Use, and Remove would be a dead click.
+// They stay on the row and go dim instead, which says why nothing happens.
 function isBlocked(row, options) {
   var context = isPlainObject(options) ? options : ({})
   var busyName = typeof context.busy === "string" ? context.busy : ""
   var name = isPlainObject(row) ? String(row.name) : ""
-  return busyName.length > 0 && busyName !== name && stateOf(row) !== READY
+  return busyName.length > 0 && busyName !== name
 }
 
 function actionIcon(action) {
@@ -306,6 +351,8 @@ if (typeof module !== "undefined" && module.exports) {
     bytes: bytes,
     share: share,
     hint: hint,
+    resolvedName: resolvedName,
+    resolves: resolves,
     actions: actions,
     isBlocked: isBlocked,
     actionIcon: actionIcon,

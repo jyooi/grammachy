@@ -176,15 +176,27 @@ impl Starts {
 }
 
 /// An adapter that records its start calls instead of running systemd.
+///
+/// Nothing comes up behind a recording starter, so one probe is all the retry
+/// loop needs to conclude and the budget is zero.
 fn adapter(timeout: Duration, start_unit: bool, starts: &Starts) -> Openai {
+    adapter_with_budget(timeout, start_unit, Duration::from_millis(0), starts)
+}
+
+/// The same recording adapter with a startup budget, for the one case where the
+/// stub does come up on a later request.
+fn adapter_with_budget(
+    timeout: Duration,
+    start_unit: bool,
+    startup_budget: Duration,
+    starts: &Starts,
+) -> Openai {
     let counter = Arc::clone(&starts.0);
     Openai::with_starter(
         Config {
             timeout,
             start_unit,
-            // Nothing comes up behind a recording starter, so one probe is all
-            // the retry loop needs to conclude.
-            startup_budget: Duration::from_millis(0),
+            startup_budget,
         },
         Box::new(move |_model: &str, _endpoint: &Endpoint| {
             counter.fetch_add(1, Ordering::SeqCst);
@@ -376,13 +388,11 @@ fn a_server_error_is_an_engine_error() {
 fn a_server_still_loading_its_weights_is_waited_out_rather_than_failed() {
     let stub = Stub::serving(Answer::LoadingThenJson(2, ANSWER));
     let starts = Starts::default();
-    let adapter = Openai::with_starter(
-        Config {
-            timeout: Duration::from_secs(2),
-            start_unit: true,
-            startup_budget: Duration::from_secs(5),
-        },
-        Box::new(|_model: &str, _endpoint: &Endpoint| Ok(())),
+    let adapter = adapter_with_budget(
+        Duration::from_secs(2),
+        true,
+        Duration::from_secs(5),
+        &starts,
     );
 
     let issues = adapter
@@ -393,7 +403,15 @@ fn a_server_still_loading_its_weights_is_waited_out_rather_than_failed() {
     // One request found it loading, the retry loop found it loading again, and
     // the third one got the answer.
     assert_eq!(stub.requests().len(), 3);
-    assert_eq!(starts.count(), 0, "no start was recorded on this adapter");
+    // The unit is asked once and never again: `systemctl start` on a unit that
+    // is already running is a no-op, so waiting is what earns the answer. A
+    // count that climbed with the retries would mean the loop was restarting a
+    // server that was already coming up.
+    assert_eq!(
+        starts.count(),
+        1,
+        "the unit is asked for once and then waited for"
+    );
 }
 
 /// With no budget left, a server that is still loading is the

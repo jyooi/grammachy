@@ -286,11 +286,26 @@ pub fn ensure(model: &str, directory: &Path, download: &Downloader) -> Result<Ou
 }
 
 /// Rename the `.part` file only when its digest matches the pin.
+///
+/// A mismatch deletes the partial. Those bytes are whole and wrong, so a resume
+/// would ask for a range past the end of the file and re-hash the same wrong
+/// bytes for ever: only a clean start can recover, and the next Download is
+/// what makes it. A cancel is the other case and keeps its `.part` file.
 fn promote(partial: &Path, final_path: &Path, expected_sha256: &str) -> Result<(), String> {
     let actual = digest::sha256_path(partial)?;
     if !actual.eq_ignore_ascii_case(expected_sha256) {
+        let next = match std::fs::remove_file(partial) {
+            Ok(()) => format!(
+                "{} was deleted, so the next download starts over.",
+                partial.display()
+            ),
+            Err(error) => format!(
+                "{} could not be deleted ({error}). Remove it before the next download.",
+                partial.display()
+            ),
+        };
         return Err(format!(
-            "The downloaded file does not match the pinned digest. Expected {expected_sha256}, got {actual}."
+            "The downloaded file does not match the pinned digest. Expected {expected_sha256}, got {actual}. {next}"
         ));
     }
     std::fs::rename(partial, final_path).map_err(|error| {

@@ -181,6 +181,12 @@ fn removing_the_model_in_use_asks_once_through_its_own_phase() {
         remove.contains("root.setting(\"openaiModel\")"),
         "the question is asked only about the model the setting names: {remove}"
     );
+    // A byte comparison against the row name is not what a Check resolves, so
+    // `qwen3-4b` would delete `qwen3-4b-instruct` with no question at all.
+    assert!(
+        remove.contains("ModelsJs.resolves("),
+        "the setting is resolved the way unit::model_file resolves it: {remove}"
+    );
     assert!(
         remove.contains("root.askRemoveModel(name)"),
         "the model in use goes through the confirm: {remove}"
@@ -208,6 +214,36 @@ fn removing_the_model_in_use_asks_once_through_its_own_phase() {
     assert!(
         handler.contains("Keymap.REMOVE_MODEL") && handler.contains("Keymap.KEEP_MODEL"),
         "both answers to the question are routed: {handler}"
+    );
+}
+
+/// A phase answers the keyboard whether or not its card is drawn, so the
+/// confirm has to go the moment the list stops being drawn. Otherwise Enter on
+/// a blank card deletes the weights a Check would load, with nothing on screen
+/// that asked.
+#[test]
+fn hiding_the_models_list_drops_the_confirm_rather_than_leaving_it_answerable() {
+    let source = read("Overlay.qml");
+    let handler = source
+        .split_once("onShowsModelsChanged:")
+        .expect("the overlay reacts to the list appearing and disappearing")
+        .1;
+    let body = handler
+        .split_once("\n  }")
+        .expect("the handler is closed")
+        .0;
+
+    assert!(
+        body.contains("root.closeModelConfirm()"),
+        "the list going away answers the question with Keep: {body}"
+    );
+    assert!(
+        body.contains("root.phase === \"confirmModel\""),
+        "only the confirm phase is dropped, so no other phase is disturbed: {body}"
+    );
+    assert!(
+        body.contains("root.refreshModels()"),
+        "the list still reads itself when it appears: {body}"
     );
 }
 
@@ -267,7 +303,7 @@ fn the_list_belongs_to_the_local_llm_engine_alone() {
         "the list is the Local LLM engine's alone"
     );
     assert!(
-        source.contains("onShowsModelsChanged: if (root.showsModels) root.refreshModels()"),
+        source.contains("onShowsModelsChanged:"),
         "opening it is what reads it"
     );
     assert!(

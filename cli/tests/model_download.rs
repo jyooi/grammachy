@@ -203,6 +203,10 @@ fn a_cancel_halfway_leaves_what_arrived_and_promotes_nothing() {
 
 /// A file that arrived whole but is not the pinned one never becomes the
 /// weights: the rename is what the digest guards.
+///
+/// The partial goes with it, unlike the cancel above. A whole wrong file cannot
+/// be resumed into a right one, so keeping it would make every retry fail the
+/// same way for ever.
 #[test]
 fn a_digest_that_does_not_match_the_pin_is_download_failed() {
     let _guard = serially();
@@ -224,8 +228,27 @@ fn a_digest_that_does_not_match_the_pin_is_download_failed() {
         panic!("a bad digest is the download_failed code: {failure:?}")
     };
     assert!(message.contains("pinned digest"), "{message}");
+    assert!(
+        message.contains("starts over"),
+        "the message says the next download starts clean: {message}"
+    );
     assert!(!directory.join(QWEN).exists());
-    assert!(directory.join(format!("{QWEN}.part")).is_file());
+    assert!(
+        !directory.join(format!("{QWEN}.part")).exists(),
+        "the wrong bytes are gone, so a retry is not the same failure again"
+    );
+
+    // The retry a user makes next really does land the weights.
+    let retried = Models {
+        directory: directory.clone(),
+        download: whole(),
+        stop: Box::new(|_unit| Ok(())),
+    };
+    let row = retried
+        .fetch(NAME)
+        .expect("the retry starts clean and lands");
+    assert_eq!(row.state, State::Ready);
+    assert!(directory.join(QWEN).is_file());
 }
 
 /// A transfer that could not run at all is `download_failed`, not a cancel.

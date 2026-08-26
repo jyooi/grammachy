@@ -205,7 +205,14 @@ Item {
   // still running keeps the poll going whatever the card shows.
   readonly property bool showsModels: root.settingsOpen && String(root.setting("engine")) === "openai"
 
-  onShowsModelsChanged: if (root.showsModels) root.refreshModels()
+  // A question that is off the screen must never still be answerable: the
+  // confirm is a phase, and a phase answers the keyboard whether or not its
+  // card is drawn. Closing Settings and moving the engine away from Local LLM
+  // both take the list away, so both drop the question with it.
+  onShowsModelsChanged: {
+    if (root.showsModels) root.refreshModels()
+    else if (root.phase === "confirmModel") root.closeModelConfirm()
+  }
 
   // Persist on change, spec section 7: no Save button, and the Issues on
   // screen stay because nothing here touches the Check.
@@ -572,14 +579,24 @@ Item {
 
   // Remove asks once when the setting resolves to this model, because the next
   // Check would then have nothing to load. Every other row goes straight out.
+  //
+  // The setting is resolved the way `unit::model_file` resolves it, so a name
+  // that reaches the file by prefix or in another case still asks.
   function removeModel(name) {
     if (root.modelBusy.length > 0 || modelActionProcess.running) return
     root.modelNote = null
-    if (String(root.setting("openaiModel")) !== name) {
+    var row = root.modelRow(name)
+    if (!ModelsJs.resolves(row, String(root.setting("openaiModel")), root.models)) {
       root.runModelAction(["remove", name])
       return
     }
     root.askRemoveModel(name)
+  }
+
+  function modelRow(name) {
+    for (var i = 0; i < root.models.length; i++)
+      if (String(root.models[i].name) === name) return root.models[i]
+    return null
   }
 
   function askRemoveModel(name) {
