@@ -53,7 +53,7 @@ const GEMMA = {
   state: "ready",
   partialBytes: 0,
   sizeBytes: 4977171584,
-  licence: "Gemma Terms of Use"
+  licence: "Apache-2.0"
 }
 const QWEN = {
   name: "qwen3-4b-instruct",
@@ -328,7 +328,7 @@ test("a resumed download starts its bar where the part file already is", () => {
 // ----------------------------------------------------------------- the hints
 
 test("a hint names the licence and the size, which is what the reader chooses between", () => {
-  assert.equal(hint(GEMMA, false), "Ready, 4.6 GB, Gemma Terms of Use")
+  assert.equal(hint(GEMMA, false), "Ready, 4.6 GB, Apache-2.0")
   assert.equal(hint(PHI, false), "Not downloaded, 2.3 GB, MIT")
   assert.equal(hint(QWEN, false), "Part downloaded, 1.2 GB of 2.3 GB, Apache-2.0")
 })
@@ -606,7 +606,7 @@ test("a list from a real process becomes the rows the view draws", () => {
 
   assert.equal(answer.error, null)
   assert.deepEqual(answer.report.models.map(row => row.state), [READY, ABSENT, ABSENT])
-  assert.equal(hint(answer.report.models[0], false), "Ready, 4.6 GB, Gemma Terms of Use")
+  assert.equal(hint(answer.report.models[0], false), "Ready, 4.6 GB, Apache-2.0")
 })
 
 // The acceptance criterion of this ticket: the bar moves while a download runs,
