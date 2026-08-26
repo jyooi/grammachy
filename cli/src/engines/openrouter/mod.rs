@@ -83,6 +83,18 @@ pub fn honours_temperature(model: &str) -> bool {
         || id.starts_with("anthropic/claude-sonnet"))
 }
 
+/// The `reasoning` field for one model: off where the provider allows it, and
+/// the least it accepts where it does not. Gemini answers HTTP 400 "Reasoning
+/// is mandatory for this endpoint" to `enabled: false` (pilot, 2026-08-26),
+/// and `effort: minimal` is the smallest it takes.
+pub fn reasoning(model: &str) -> Value {
+    if model.to_ascii_lowercase().starts_with("google/") {
+        json!({ "effort": "minimal" })
+    } else {
+        json!({ "enabled": false })
+    }
+}
+
 /// The whole POST body: the `openai` body with the OpenRouter additions.
 pub fn request_body(text: &str, options: &CheckOptions) -> Value {
     let local = CheckOptions {
@@ -92,7 +104,10 @@ pub fn request_body(text: &str, options: &CheckOptions) -> Value {
     let mut body = prompt::request_body(text, &local);
     if let Some(fields) = body.as_object_mut() {
         fields.insert("usage".to_string(), json!({ "include": true }));
-        fields.insert("reasoning".to_string(), json!({ "enabled": false }));
+        fields.insert(
+            "reasoning".to_string(),
+            reasoning(&options.openrouter_model),
+        );
         if !honours_temperature(&options.openrouter_model) {
             fields.remove("temperature");
         }
@@ -128,10 +143,13 @@ impl Openrouter {
     fn request(&self, key: &str, body: &str) -> Result<Value, EngineFailure> {
         // Redirects and proxies stay off, so the text goes to openrouter.ai
         // and nowhere the response or the environment could send it.
+        // A status is read here rather than raised by ureq, so the error body
+        // OpenRouter sends with a 400 reaches the message the card shows.
         let agent: ureq::Agent = ureq::Agent::config_builder()
             .timeout_global(Some(self.config.timeout))
             .proxy(None)
             .max_redirects(0)
+            .http_status_as_error(false)
             .build()
             .into();
 
@@ -143,10 +161,14 @@ impl Openrouter {
             .send(body)
             .map_err(|error| self.classify(error))?;
 
+        let status = answer.status().as_u16();
         let text = answer
             .into_body()
             .read_to_string()
             .map_err(|error| EngineFailure::Failed(format!("OpenRouter sent no body: {error}")))?;
+        if status != 200 {
+            return Err(classify_status(status, &text));
+        }
 
         serde_json::from_str(&text).map_err(|error| {
             EngineFailure::Failed(format!(
@@ -161,29 +183,6 @@ impl Openrouter {
                 "OpenRouter did not answer within {} s.",
                 self.config.timeout.as_secs()
             )),
-            ureq::Error::StatusCode(401) | ureq::Error::StatusCode(403) => {
-                EngineFailure::Unavailable(
-                    "OpenRouter rejected the key. Run: printf '%s' \"$KEY\" | grammachy setup --openrouter-key (reason: rejected_key)"
-                        .to_string(),
-                )
-            }
-            ureq::Error::StatusCode(402) => EngineFailure::Unavailable(
-                "OpenRouter credits are used up. Add credits on openrouter.ai, then retry. (reason: no_credit)"
-                    .to_string(),
-            ),
-            ureq::Error::StatusCode(429) => EngineFailure::Unavailable(
-                "OpenRouter is rate limited. Wait a moment, then retry. (reason: rate_limited)"
-                    .to_string(),
-            ),
-            ureq::Error::StatusCode(400) | ureq::Error::StatusCode(404) => {
-                EngineFailure::BadArguments(
-                    "OpenRouter does not know the model, or refused the request for it."
-                        .to_string(),
-                )
-            }
-            ureq::Error::StatusCode(status) => {
-                EngineFailure::Failed(format!("OpenRouter answered with HTTP {status}."))
-            }
             ureq::Error::Io(_)
             | ureq::Error::ConnectionFailed
             | ureq::Error::HostNotFound
@@ -193,6 +192,43 @@ impl Openrouter {
             ),
             other => EngineFailure::Failed(format!("OpenRouter could not be reached: {other}")),
         }
+    }
+}
+
+/// The failure one non-200 status stands for, with the sentence OpenRouter
+/// put in its error body when there is one.
+fn classify_status(status: u16, body: &str) -> EngineFailure {
+    let said = serde_json::from_str::<Value>(body)
+        .ok()
+        .and_then(|value| {
+            value
+                .get("error")
+                .and_then(|error| error.get("message"))
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        })
+        .unwrap_or_default();
+    match status {
+        401 | 403 => EngineFailure::Unavailable(
+            "OpenRouter rejected the key. Run: printf '%s' \"$KEY\" | grammachy setup --openrouter-key (reason: rejected_key)"
+                .to_string(),
+        ),
+        402 => EngineFailure::Unavailable(
+            "OpenRouter credits are used up. Add credits on openrouter.ai, then retry. (reason: no_credit)"
+                .to_string(),
+        ),
+        429 => EngineFailure::Unavailable(
+            "OpenRouter is rate limited. Wait a moment, then retry. (reason: rate_limited)"
+                .to_string(),
+        ),
+        400 | 404 if said.is_empty() => EngineFailure::BadArguments(
+            "OpenRouter does not know the model, or refused the request for it.".to_string(),
+        ),
+        400 | 404 => EngineFailure::BadArguments(format!("OpenRouter refused the request: {said}")),
+        _ if said.is_empty() => {
+            EngineFailure::Failed(format!("OpenRouter answered with HTTP {status}."))
+        }
+        _ => EngineFailure::Failed(format!("OpenRouter answered with HTTP {status}: {said}")),
     }
 }
 
@@ -271,6 +307,35 @@ mod tests {
         assert!(request_body("x", &options("anthropic/claude-haiku-4.5"))
             .get("temperature")
             .is_some());
+    }
+
+    #[test]
+    fn a_provider_that_cannot_disable_reasoning_gets_the_least_of_it() {
+        let gemini = request_body("x", &options("google/gemini-3.7-flash"));
+        assert_eq!(gemini["reasoning"], json!({ "effort": "minimal" }));
+
+        let deepseek = request_body("x", &options("deepseek/deepseek-v4-flash-0731"));
+        assert_eq!(deepseek["reasoning"], json!({ "enabled": false }));
+    }
+
+    #[test]
+    fn a_refusal_carries_the_sentence_openrouter_sent() {
+        let failure = classify_status(
+            400,
+            r#"{"error":{"message":"Reasoning is mandatory for this endpoint and cannot be disabled.","code":400}}"#,
+        );
+        assert!(
+            matches!(&failure, EngineFailure::BadArguments(message) if message.contains("Reasoning is mandatory")),
+            "{failure:?}"
+        );
+        assert!(matches!(
+            classify_status(402, ""),
+            EngineFailure::Unavailable(_)
+        ));
+        assert!(matches!(
+            classify_status(503, "not json"),
+            EngineFailure::Failed(_)
+        ));
     }
 
     #[test]
