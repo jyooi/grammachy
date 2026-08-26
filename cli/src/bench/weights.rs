@@ -10,7 +10,9 @@
 //!
 //! So this table is a product rule, not a convenience. A model it does not know
 //! is `Unknown`, which is never recommended either: a license nobody checked is
-//! not a license that passed.
+//! not a license that passed. A model reached through the cloud engine has no
+//! weights on this machine at all, so it is `Hosted` and competes only for the
+//! cloud recommendation line (HUF-206).
 
 /// What one license allows, as far as the recommendation rule cares.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -23,6 +25,8 @@ pub enum Terms {
     NonCommercial,
     /// Not in the table below.
     Unknown,
+    /// Served by a provider through the cloud engine; no weights to license.
+    Hosted,
 }
 
 /// The weights license of one model.
@@ -34,13 +38,18 @@ pub struct Weights {
 }
 
 impl Weights {
-    /// The Recommended cell of the Models table.
-    pub fn recommendation(&self) -> &'static str {
+    /// Whether the license alone allows the row to be recommended.
+    pub fn is_eligible(&self) -> bool {
+        matches!(self.terms, Terms::Permissive | Terms::Hosted)
+    }
+
+    /// Why the license keeps the row out of the recommendation, or `None`.
+    pub fn objection(&self) -> Option<&'static str> {
         match self.terms {
-            Terms::Permissive => "eligible",
-            Terms::Restricted => "no, the license is neither Apache-2.0 nor MIT",
-            Terms::NonCommercial => "never, the weights are non-commercial",
-            Terms::Unknown => "no, the license was not checked",
+            Terms::Permissive | Terms::Hosted => None,
+            Terms::Restricted => Some("no, the license is neither Apache-2.0 nor MIT"),
+            Terms::NonCommercial => Some("never, the weights are non-commercial"),
+            Terms::Unknown => Some("no, the license was not checked"),
         }
     }
 }
@@ -74,8 +83,17 @@ const KNOWN: &[(&str, Weights)] = &[
             terms: Terms::Permissive,
         },
     ),
+    // Every Qwen3 release so far, including the 3.5 line, is Apache-2.0.
     (
         "qwen3",
+        Weights {
+            license: "Apache-2.0",
+            terms: Terms::Permissive,
+        },
+    ),
+    // Gemma 4 moved to Apache-2.0 (HUF-204); earlier Gemma stays on its terms.
+    (
+        "gemma-4",
         Weights {
             license: "Apache-2.0",
             terms: Terms::Permissive,
@@ -117,6 +135,27 @@ const KNOWN: &[(&str, Weights)] = &[
         },
     ),
     (
+        "ministral",
+        Weights {
+            license: "Apache-2.0",
+            terms: Terms::Permissive,
+        },
+    ),
+    (
+        "granite",
+        Weights {
+            license: "Apache-2.0",
+            terms: Terms::Permissive,
+        },
+    ),
+    (
+        "smollm3",
+        Weights {
+            license: "Apache-2.0",
+            terms: Terms::Permissive,
+        },
+    ),
+    (
         "codestral",
         Weights {
             license: "Mistral AI Non-Production License",
@@ -130,9 +169,23 @@ const UNKNOWN: Weights = Weights {
     terms: Terms::Unknown,
 };
 
+/// The Weights column of a row that runs through the cloud engine.
+pub const HOSTED: Weights = Weights {
+    license: "hosted",
+    terms: Terms::Hosted,
+};
+
+/// A prefix matches at the end of the name or before a hyphen or a dot, so
+/// `qwen3` covers `qwen3.5-4b` and `gemma-4` covers `gemma-4-e4b-it` while
+/// `gemma` does not swallow `gemma2-9b`.
 fn matches_prefix(name: &str, prefix: &str) -> bool {
-    name.starts_with(prefix)
-        && (name.len() == prefix.len() || name.as_bytes().get(prefix.len()) == Some(&b'-'))
+    if !name.starts_with(prefix) {
+        return false;
+    }
+    match name.as_bytes().get(prefix.len()) {
+        None => true,
+        Some(next) => *next == b'-' || *next == b'.',
+    }
 }
 
 /// The weights license of one model name.
@@ -155,7 +208,8 @@ mod tests {
 
         assert_eq!(weights.license, "Apache-2.0");
         assert_eq!(weights.terms, Terms::Permissive);
-        assert_eq!(weights.recommendation(), "eligible");
+        assert!(weights.is_eligible());
+        assert_eq!(weights.objection(), None);
     }
 
     #[test]
@@ -169,9 +223,11 @@ mod tests {
 
             assert_eq!(weights.terms, Terms::NonCommercial, "{model}");
             assert!(
-                weights.recommendation().starts_with("never"),
-                "{model} is marked never recommended: {}",
-                weights.recommendation()
+                weights
+                    .objection()
+                    .is_some_and(|why| why.starts_with("never")),
+                "{model} is marked never recommended: {:?}",
+                weights.objection()
             );
         }
     }
@@ -184,14 +240,39 @@ mod tests {
     }
 
     #[test]
-    fn a_license_that_allows_commercial_use_but_is_not_apache_or_mit_is_not_eligible() {
+    fn the_shipped_default_is_apache_licensed_and_eligible() {
         let weights = of(crate::settings::DEFAULT_OPENAI_MODEL);
+
+        assert_eq!(weights.license, "Apache-2.0");
+        assert!(weights.is_eligible());
+    }
+
+    #[test]
+    fn earlier_gemma_keeps_its_own_terms() {
+        let weights = of("gemma-3-4b-it");
 
         assert_eq!(weights.terms, Terms::Restricted);
         assert_eq!(
-            weights.recommendation(),
-            "no, the license is neither Apache-2.0 nor MIT"
+            weights.objection(),
+            Some("no, the license is neither Apache-2.0 nor MIT")
         );
+    }
+
+    #[test]
+    fn the_qwen3_line_matches_through_its_point_release() {
+        assert_eq!(of("Qwen3.5-4B-Q4_K_M").terms, Terms::Permissive);
+        assert_eq!(of("qwen3-8b").terms, Terms::Permissive);
+    }
+
+    #[test]
+    fn the_small_apache_rows_of_the_candidate_list_are_known() {
+        for model in [
+            "Ministral-3-3B-Instruct-2512",
+            "granite-4.1-3b",
+            "SmolLM3-3B",
+        ] {
+            assert_eq!(of(model).license, "Apache-2.0", "{model}");
+        }
     }
 
     #[test]
@@ -200,7 +281,7 @@ mod tests {
 
         assert_eq!(weights.license, "unknown");
         assert_eq!(weights.terms, Terms::Unknown);
-        assert_eq!(weights.recommendation(), "no, the license was not checked");
+        assert_eq!(weights.objection(), Some("no, the license was not checked"));
     }
 
     #[test]
@@ -209,6 +290,11 @@ mod tests {
 
         assert_eq!(weights.license, "unknown");
         assert_eq!(weights.terms, Terms::Unknown);
-        assert_eq!(weights.recommendation(), "no, the license was not checked");
+    }
+
+    #[test]
+    fn a_hosted_row_has_no_license_objection() {
+        assert!(HOSTED.is_eligible());
+        assert_eq!(HOSTED.license, "hosted");
     }
 }
