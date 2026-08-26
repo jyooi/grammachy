@@ -117,6 +117,16 @@ fn one_download_runs_at_a_time_and_cancel_signals_it() {
         "the row in flight is named, which is what turns the other rows off: {download}"
     );
 
+    // A verb started under an open confirm takes the one process the answer to
+    // that question needs, so the answer is dropped with nothing on screen.
+    for verb in ["downloadModel", "useModel", "removeModel"] {
+        let body = function_body(&source, verb);
+        assert!(
+            body.contains("root.modelConfirm.length > 0") && body.contains("return"),
+            "{verb} starts nothing while a question is open: {body}"
+        );
+    }
+
     let cancel = function_body(&source, "cancelModelDownload");
     assert!(
         cancel.contains("modelActionProcess.signal(15)"),

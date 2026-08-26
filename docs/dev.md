@@ -563,7 +563,8 @@ Compare it with `df -h ~/.local/share/grammachy/models/`.
 4. Press the download arrow on `phi-4-mini-instruct`.
    The hint line turns into a byte count and a bar appears under it.
    The bar steps once a second, because the shell polls `grammachy model list` and reads the `.part` file.
-5. While it runs, check that every other row's download arrow is dimmed and does nothing.
+5. While it runs, check that every other row's buttons are dimmed and do nothing.
+   Only the cross on the running row stays live.
 6. Press the cross on the running row.
    The bar stops and the note says what arrived is kept.
 
@@ -583,7 +584,8 @@ watch -n 1 'ls -l ~/.local/share/grammachy/models/'
 
 8. Let it finish.
    The row turns Ready only after the digest matched, and the `.part` file is gone.
-   A file whose digest did not match stays a `.part` file and the note says so.
+   A file whose digest did not match is deleted, and the note says the next download starts over.
+   Only a cancel keeps a `.part` file.
 
 9. Close the overlay while a download runs, then summon it again and open Settings.
    The bar is still moving.
@@ -618,6 +620,18 @@ systemctl --user is-active grammachy-llama
 
 It answers `inactive`.
 The setting is not touched: `openaiModel` still names the model that is now absent, and the next Check answers the `engine_unavailable` card.
+
+15. Press the tick on another Ready row, then press the bin on that same row to open the question again.
+    Press the download arrow on any other row: it is dimmed and starts nothing.
+    One question is open at a time, so no verb may start under it.
+16. With that question still up, press the gear to close Settings, then press Enter.
+    Nothing is removed, because a question that leaves the screen is answered with Keep:
+
+```bash
+ls -la ~/.local/share/grammachy/models/
+```
+
+The file the question asked about is still there.
 
 ## 16. Running the automated checks
 

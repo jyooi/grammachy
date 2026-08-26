@@ -703,7 +703,10 @@ mod tests {
         );
         assert!(error.contains(&sha256_hex(BYTES)), "{error}");
         assert!(!directory.join("gemma-4-E4B-it-Q4_K_M.gguf").exists());
-        assert!(directory.join("gemma-4-E4B-it-Q4_K_M.gguf.part").is_file());
+        assert!(
+            !directory.join("gemma-4-E4B-it-Q4_K_M.gguf.part").exists(),
+            "the wrong bytes go, so the next run is not the same failure again"
+        );
     }
 
     #[test]
@@ -720,8 +723,11 @@ mod tests {
         assert!(!partial.exists());
     }
 
+    /// A whole file that is not the pinned one cannot be resumed into the right
+    /// one, so it goes and the next download starts over. A cancel is the other
+    /// case and keeps its `.part` file.
     #[test]
-    fn a_mismatched_digest_leaves_the_part_file() {
+    fn a_mismatched_digest_removes_the_part_file() {
         let directory = scratch("digest-mismatch");
         let bytes = b"small fake weights";
         let partial = directory.join("model.gguf.part");
@@ -735,7 +741,7 @@ mod tests {
         assert!(error.contains(&expected), "{error}");
         assert!(error.contains(&actual), "{error}");
         assert!(!final_path.exists());
-        assert_eq!(std::fs::read(&partial).unwrap(), bytes);
+        assert!(!partial.exists(), "the wrong bytes were deleted");
     }
 
     fn scratch(name: &str) -> PathBuf {

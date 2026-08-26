@@ -554,9 +554,12 @@ Item {
   }
 
   // Spec section 5.3: one download at a time, so a second Download while one is
-  // in flight is a no-op rather than a second transfer.
+  // in flight is a no-op rather than a second transfer. An open Remove confirm
+  // stops one too: the answer to that question needs the same one process, and
+  // starting a transfer under it would drop the answer with nothing on screen.
   function downloadModel(name) {
     if (root.modelBusy.length > 0 || modelActionProcess.running) return
+    if (root.modelConfirm.length > 0) return
     root.modelNote = null
     root.modelBusy = name
     root.runModelAction(["download", name])
@@ -573,6 +576,7 @@ Item {
   // Spec section 7: Use is the `openaiModel` setting and nothing else. The
   // weights are already on disk, so nothing is fetched and no Check is touched.
   function useModel(name) {
+    if (root.modelBusy.length > 0 || root.modelConfirm.length > 0) return
     root.modelNote = null
     root.persistSetting("openaiModel", name)
   }
@@ -584,6 +588,9 @@ Item {
   // that reaches the file by prefix or in another case still asks.
   function removeModel(name) {
     if (root.modelBusy.length > 0 || modelActionProcess.running) return
+    // One question at a time: a second bin press would take the phase to
+    // restore back with it and leave the confirm with no way out.
+    if (root.modelConfirm.length > 0) return
     root.modelNote = null
     var row = root.modelRow(name)
     if (!ModelsJs.resolves(row, String(root.setting("openaiModel")), root.models)) {

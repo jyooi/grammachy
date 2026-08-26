@@ -62,7 +62,10 @@ ColumnLayout {
 
       readonly property string name: String(row.modelData.name)
       readonly property bool running: root.busy === row.name
-      readonly property bool blocked: Models.isBlocked(row.modelData, { busy: root.busy })
+      readonly property bool blocked: Models.isBlocked(row.modelData, {
+        busy: root.busy,
+        confirm: root.confirmName
+      })
       // The model a Check would load, resolved the way the CLI resolves it, so
       // a setting that names the file by a prefix still marks the right row.
       readonly property bool chosen: Models.resolves(row.modelData, root.setting, root.models)

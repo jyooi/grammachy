@@ -260,13 +260,22 @@ function actions(row, options) {
 
 // Whether a row's buttons are drawn but cannot be pressed.
 //
-// One verb of `grammachy model` runs at a time, so while a download is in
-// flight every other row's Download, Use, and Remove would be a dead click.
-// They stay on the row and go dim instead, which says why nothing happens.
+// One verb of `grammachy model` runs at a time, and one question is open at a
+// time. While a download is in flight, every other row's Download, Use, and
+// Remove would be a dead click. While a Remove confirm waits for an answer,
+// so would every row's, because a verb started under the question would take
+// the one process the answer needs and the answer would be dropped.
+//
+// A blocked button stays on the row and goes dim rather than vanishing, which
+// says why nothing happens and keeps the list from shifting under a click. The
+// confirm's own Keep and Remove are not row buttons and stay live, because
+// answering the question is the only way to close it.
 function isBlocked(row, options) {
   var context = isPlainObject(options) ? options : ({})
   var busyName = typeof context.busy === "string" ? context.busy : ""
+  var confirmName = typeof context.confirm === "string" ? context.confirm : ""
   var name = isPlainObject(row) ? String(row.name) : ""
+  if (confirmName.length > 0) return true
   return busyName.length > 0 && busyName !== name
 }
 

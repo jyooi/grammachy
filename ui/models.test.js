@@ -272,6 +272,24 @@ test("every other row's buttons are blocked while one download runs", () => {
   for (const row of CATALOGUE) assert.equal(isBlocked(row, { busy: "" }), false)
 })
 
+// One question at a time. A Download started under an open Remove confirm would
+// take the one process the answer needs, so the answer would vanish with no
+// note and nothing deleted. Refusing to start it is the whole rule.
+test("an open Remove confirm blocks every row until it is answered", () => {
+  const asking = { busy: "", confirm: "gemma-4-e4b-it", setting: "gemma-4-e4b-it", models: CATALOGUE }
+
+  for (const row of CATALOGUE) {
+    assert.equal(isBlocked(row, asking), true, row.name + " waits for the answer")
+  }
+  // The button stays drawn, so the list does not shift while the question is up.
+  assert.deepEqual(actions(PHI, asking), [DOWNLOAD])
+
+  // Answering the question closes it, and the same row is offered Download again.
+  const answered = { ...asking, confirm: "" }
+  assert.equal(isBlocked(PHI, answered), false)
+  assert.deepEqual(actions(PHI, answered), [DOWNLOAD])
+})
+
 // ------------------------------------------------- which row the setting names
 
 // The CLI is the authority: `unit::model_file` takes the exact `<name>.gguf`
