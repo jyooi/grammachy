@@ -10,7 +10,7 @@ use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread;
 
 use serde::Deserialize;
@@ -60,6 +60,7 @@ fn cloud_usage(cost: Option<f64>) -> Value {
 struct Stub {
     address: String,
     served: Arc<AtomicUsize>,
+    bodies: Arc<Mutex<Vec<String>>>,
 }
 
 impl Stub {
@@ -70,6 +71,17 @@ impl Stub {
     /// How many Checks reached this endpoint.
     fn requests(&self) -> usize {
         self.served.load(Ordering::SeqCst)
+    }
+
+    /// Every request body this endpoint read.
+    ///
+    /// The body is what proves which mode a run asked the server for, and the
+    /// Settings are the only thing that decides it (spec section 7).
+    fn bodies(&self) -> Vec<String> {
+        self.bodies
+            .lock()
+            .expect("the recorder is readable")
+            .clone()
     }
 }
 
@@ -86,11 +98,17 @@ fn stub(answer: String, answers: usize) -> Stub {
         .to_string();
     let served = Arc::new(AtomicUsize::new(0));
     let counter = Arc::clone(&served);
+    let bodies = Arc::new(Mutex::new(Vec::new()));
+    let recorder = Arc::clone(&bodies);
 
     thread::spawn(move || {
         for stream in listener.incoming() {
             let Ok(mut stream) = stream else { break };
-            read_request(&mut stream);
+            let body = read_request(&mut stream);
+            recorder
+                .lock()
+                .expect("the recorder is readable")
+                .push(body);
             if counter.fetch_add(1, Ordering::SeqCst) >= answers {
                 let _ = write!(
                     stream,
@@ -108,7 +126,11 @@ fn stub(answer: String, answers: usize) -> Stub {
         }
     });
 
-    Stub { address, served }
+    Stub {
+        address,
+        served,
+        bodies,
+    }
 }
 
 /// The address of a stub that answers every Check.
@@ -157,12 +179,12 @@ fn fixture_ids() -> Vec<String> {
     items.into_iter().map(|item| item.id).collect()
 }
 
-/// Read one whole request, headers and body.
+/// Read one whole request and answer with its body.
 ///
 /// The body must be drained too. A stub that answers and closes on an unread
 /// body resets the connection, and the adapter then reports the server as
 /// unreachable rather than reading the answer.
-fn read_request(stream: &mut TcpStream) {
+fn read_request(stream: &mut TcpStream) -> String {
     let mut head = Vec::new();
     let mut byte = [0u8; 1];
     while stream.read(&mut byte).unwrap_or(0) == 1 {
@@ -180,6 +202,7 @@ fn read_request(stream: &mut TcpStream) {
         .unwrap_or(0);
     let mut body = vec![0u8; length];
     let _ = stream.read_exact(&mut body);
+    String::from_utf8_lossy(&body).to_string()
 }
 
 /// An address on the loopback interface with nothing listening on it.
@@ -447,6 +470,40 @@ fn a_model_with_non_commercial_weights_is_shown_but_never_recommended() {
         "{}",
         run.stdout
     );
+}
+
+/// Spec section 7 precedence: the stored entry decides the mode a benchmark
+/// measures, the same way it decides the address.
+///
+/// A user who turned Thinking off must not read rows measuring a mode their
+/// machine never runs, in either the latency column or the catch rate.
+#[test]
+fn the_stored_thinking_setting_is_what_the_benchmark_measures() {
+    for (stored, expected) in [(r#", "localThinking": false"#, false), ("", true)] {
+        let endpoint = stub(answer_body(None), usize::MAX);
+        let settings = settings_file(
+            "thinking.json",
+            &format!(r#""openaiBaseUrl": "{}"{stored}"#, endpoint.url()),
+        );
+
+        let run = bench(
+            &settings,
+            &["--engine", "openai", "--model", "qwen2.5-7b-instruct"],
+        );
+
+        assert_eq!(run.status, 0, "{}", run.stdout);
+        let bodies = endpoint.bodies();
+        assert!(!bodies.is_empty(), "the run reached the stub endpoint");
+        for body in &bodies {
+            let request: serde_json::Value =
+                serde_json::from_str(body).expect("the request body is one JSON object");
+            assert_eq!(
+                request["chat_template_kwargs"]["enable_thinking"],
+                serde_json::json!(expected),
+                "the stored localThinking is what the request carries: {body}"
+            );
+        }
+    }
 }
 
 #[test]
