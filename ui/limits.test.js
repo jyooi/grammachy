@@ -12,6 +12,7 @@ test("the local engine reads a smaller limit than every other engine", () => {
   assert.equal(Limits.checkLimit("openai"), 2000)
   assert.equal(Limits.checkLimit("languagetool"), 5000)
   assert.equal(Limits.checkLimit("harper"), 5000)
+  assert.equal(Limits.checkLimit("openrouter"), 5000)
 })
 
 test("an unknown or missing engine reads the wider limit", () => {
