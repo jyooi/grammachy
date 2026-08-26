@@ -46,8 +46,48 @@ fn the_overlay_default_equals_the_cli_default() {
     );
 }
 
+/// Where the block holding `marker` ends, by matching its braces.
+///
+/// Braces inside a double-quoted string do not count, because a description
+/// may carry one. This is what bounds a containment check to one block rather
+/// than to the rest of the file.
+fn block_end(source: &str, marker: usize) -> usize {
+    let mut depth = 0i32;
+    let mut in_string = false;
+    let mut escaped = false;
+
+    for (offset, character) in source[marker..].char_indices() {
+        if in_string {
+            match character {
+                _ if escaped => escaped = false,
+                '\\' => escaped = true,
+                '"' => in_string = false,
+                _ => {}
+            }
+            continue;
+        }
+        match character {
+            '"' => in_string = true,
+            '{' => depth += 1,
+            '}' => {
+                if depth == 0 {
+                    return marker + offset;
+                }
+                depth -= 1;
+            }
+            _ => {}
+        }
+    }
+    panic!("the block that starts at {marker} is closed");
+}
+
 /// Spec section 7: the Toggle is shown for the Local LLM engine only, so it
 /// belongs inside the group the view hides with `showsOpenai`.
+///
+/// The bound is the group's own closing brace, not the end of the file, so
+/// hoisting the Toggle out into the root layout fails this test. That move is
+/// the regression it exists to catch, because it shows the control for every
+/// engine.
 #[test]
 fn the_toggle_sits_in_the_local_llm_group_and_writes_the_key() {
     let source = read("ui/SettingsView.qml");
@@ -55,13 +95,14 @@ fn the_toggle_sits_in_the_local_llm_group_and_writes_the_key() {
     let group = source
         .find("visible: root.showsOpenai")
         .expect("the view hides one group for the Local LLM engine");
+    let group_end = block_end(&source, group);
     let toggle = source
         .find(r#"root.settingChanged("localThinking""#)
         .expect("the Toggle writes localThinking");
 
     assert!(
-        toggle > group,
-        "the Toggle is inside the group the engine hides"
+        toggle > group && toggle < group_end,
+        "the Toggle is inside the group the engine hides: it sits at {toggle}, and the group runs to {group_end}"
     );
     assert!(
         source.contains("checked: root.localThinking"),

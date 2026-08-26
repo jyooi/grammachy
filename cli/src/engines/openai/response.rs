@@ -123,11 +123,14 @@ pub fn issues_from_content(text: &str, content: &str) -> Vec<Issue> {
 /// scan below would start inside the think and slice a fragment (HUF-224).
 /// The adapter pins `deepseek` on the unit it starts, but `openaiBaseUrl` may
 /// name a server it did not start, which is why the guard lives here too.
+///
+/// Only what follows the think is ever scanned. A model drafts a candidate
+/// array while it reasons and then declines it, so reading the think would
+/// report an Issue the model rejected. No array after the think means no
+/// suggestion, and an unterminated think means the answer never arrived.
 fn parse_array(content: &str) -> Option<Vec<Suggestion>> {
-    // An unterminated think never reached the array, so the answer holds no
-    // suggestion. Scanning it anyway would read the think as the answer.
     let answer = after_think(content)?;
-    scan_array(answer).or_else(|| scan_array(content))
+    scan_array(answer)
 }
 
 /// What follows the leading think block, or nothing when the think never ends.
@@ -356,6 +359,23 @@ mod tests {
 
         assert_eq!(issues.len(), 1, "{issues:?}");
         assert_eq!(issues[0].fix, "books");
+    }
+
+    /// A model drafts an array while it reasons and then declines it. The
+    /// answer is what follows the think, so the draft is never an Issue.
+    #[test]
+    fn an_array_drafted_inside_the_think_is_never_the_answer() {
+        let text = "She bought three book from the store.";
+        let content = concat!(
+            r#"<think>The schema wants "#,
+            r#"[{"original":"book","fix":"books","reason":"plural","category":"grammar"}], "#,
+            r#"but the sentence is fine.</think>No corrections needed."#
+        );
+
+        assert!(
+            issues_from_content(text, content).is_empty(),
+            "the model declined, so the draft is not an Issue"
+        );
     }
 
     /// A truncated think never reached the array, so reading it as the answer
