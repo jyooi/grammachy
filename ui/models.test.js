@@ -294,6 +294,37 @@ test("a live byte count overrides the one the list carries", () => {
   assert.equal(hint(QWEN, true, -1), "Downloading 1.2 GB of 2.3 GB, 50%")
 })
 
+// A Download pressed on a part downloaded row resumes it, so the bar has to
+// carry on from where the earlier cancel left it. The running row reads the
+// live count rather than the list, so the live count starts at what the list
+// already holds: seeding it with 0 would animate the bar down to empty and
+// back up again a second later.
+test("a resumed download starts its bar where the part file already is", () => {
+  const half = { ...QWEN, state: "partial", partialBytes: QWEN.sizeBytes / 2 }
+  const list = read(envelope("list", [GEMMA, half, PHI])).report.models
+  const row = list.find(row => row.name === "qwen3-4b-instruct")
+
+  // Before the press the row is not running, so the list is the only answer.
+  assert.equal(share(row, -1), 0.5)
+
+  // Pressing Download seeds the live count off the row the user pressed.
+  const seeded = partialOf(list, "qwen3-4b-instruct")
+  assert.equal(seeded, QWEN.sizeBytes / 2)
+  assert.equal(share(row, seeded), 0.5)
+  assert.equal(hint(row, true, seeded), "Downloading 1.2 GB of 2.3 GB, 50%")
+
+  // The first poll lands a second later, and the bar only ever moves forward.
+  const polled = partialOf(
+    read(envelope("list", [
+      GEMMA,
+      { ...half, partialBytes: half.partialBytes + 4096 },
+      PHI
+    ])).report.models,
+    "qwen3-4b-instruct"
+  )
+  assert.ok(share(row, polled) >= share(row, seeded), "the share never goes backwards")
+})
+
 // ----------------------------------------------------------------- the hints
 
 test("a hint names the licence and the size, which is what the reader chooses between", () => {

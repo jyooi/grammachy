@@ -28,6 +28,24 @@ fn pin_the_fake_digest() {
     );
 }
 
+/// Pin the size of the fake bytes too.
+///
+/// `fetch` runs the free-space check against the pinned size before it calls
+/// the downloader, so without this every test here would need the 2.5 GB the
+/// real row asks for and would fail on a small disk for a reason that has
+/// nothing to do with what it asserts.
+///
+/// Safety: as above, one variable read by this binary alone.
+fn pin_the_fake_size(bytes: u64) {
+    std::env::set_var(grammachy::model::SIZE_ENV, bytes.to_string());
+}
+
+/// The pin every test but the free-space one wants.
+fn pin_the_fake_weights() {
+    pin_the_fake_digest();
+    pin_the_fake_size(FAKE_WEIGHTS.len() as u64);
+}
+
 /// The cancel flag is one flag for the whole process, so every test that sets
 /// it takes this first. Nothing else here needs ordering.
 static ONE_AT_A_TIME: Mutex<()> = Mutex::new(());
@@ -93,7 +111,7 @@ fn slow(pieces: Arc<AtomicUsize>) -> Downloader {
 #[test]
 fn a_finished_transfer_renames_the_part_file_and_reports_ready() {
     let _guard = serially();
-    pin_the_fake_digest();
+    pin_the_fake_weights();
     cancel::reset();
     let directory = scratch("finished");
     let models = models(directory.clone(), whole());
@@ -111,7 +129,7 @@ fn a_finished_transfer_renames_the_part_file_and_reports_ready() {
 #[test]
 fn a_cancel_keeps_the_part_file_and_a_second_download_resumes_it() {
     let _guard = serially();
-    pin_the_fake_digest();
+    pin_the_fake_weights();
     cancel::reset();
     let directory = scratch("cancel-resume");
     let pieces = Arc::new(AtomicUsize::new(0));
@@ -155,7 +173,7 @@ fn a_cancel_keeps_the_part_file_and_a_second_download_resumes_it() {
 #[test]
 fn a_cancel_halfway_leaves_what_arrived_and_promotes_nothing() {
     let _guard = serially();
-    pin_the_fake_digest();
+    pin_the_fake_weights();
     cancel::reset();
     let directory = scratch("cancel-halfway");
     let stop_after = FAKE_WEIGHTS.len() / 3;
@@ -210,7 +228,7 @@ fn a_cancel_halfway_leaves_what_arrived_and_promotes_nothing() {
 #[test]
 fn a_digest_that_does_not_match_the_pin_is_download_failed() {
     let _guard = serially();
-    pin_the_fake_digest();
+    pin_the_fake_weights();
     cancel::reset();
     let directory = scratch("digest");
     let download: Downloader = Box::new(|_url, path| {
@@ -255,7 +273,7 @@ fn a_digest_that_does_not_match_the_pin_is_download_failed() {
 #[test]
 fn a_transfer_that_could_not_run_is_download_failed() {
     let _guard = serially();
-    pin_the_fake_digest();
+    pin_the_fake_weights();
     cancel::reset();
     let directory = scratch("no-curl");
     let download: Downloader = Box::new(|_url, _path| Err("curl could not run".to_string()));
@@ -270,7 +288,7 @@ fn a_transfer_that_could_not_run_is_download_failed() {
 #[test]
 fn a_model_already_here_is_not_fetched_again() {
     let _guard = serially();
-    pin_the_fake_digest();
+    pin_the_fake_weights();
     cancel::reset();
     let directory = scratch("already-here");
     let calls = Arc::new(AtomicUsize::new(0));
@@ -293,4 +311,39 @@ fn a_model_already_here_is_not_fetched_again() {
     );
 
     assert_eq!(calls.load(Ordering::SeqCst), 1);
+}
+
+/// Spec section 5.3: a disk with no room for the transfer is `bad_arguments`,
+/// and nothing is fetched. That is the one product guarantee the size seam
+/// could hide, so this test pins a size no disk could hold rather than a small
+/// one, and proves the downloader was never called.
+#[test]
+fn a_disk_with_no_room_refuses_before_it_fetches_anything() {
+    let _guard = serially();
+    pin_the_fake_digest();
+    pin_the_fake_size(u64::MAX);
+    cancel::reset();
+    let directory = scratch("no-room");
+    let calls = Arc::new(AtomicUsize::new(0));
+    let counted = Arc::clone(&calls);
+    let download: Downloader = Box::new(move |_url, path| {
+        counted.fetch_add(1, Ordering::SeqCst);
+        std::fs::write(path, FAKE_WEIGHTS)
+            .map(|()| Transfer::Finished)
+            .map_err(|error| error.to_string())
+    });
+    let models = models(directory.clone(), download);
+
+    let failure = models
+        .fetch(NAME)
+        .expect_err("no disk holds that many bytes");
+
+    let Failure::BadArguments(message) = failure else {
+        panic!("no room is the bad_arguments code: {failure:?}")
+    };
+    assert!(message.contains(NAME), "{message}");
+    assert!(message.contains("free"), "{message}");
+    assert_eq!(calls.load(Ordering::SeqCst), 0, "nothing was fetched");
+    assert!(!directory.join(format!("{QWEN}.part")).exists());
+    assert!(!directory.join(QWEN).exists());
 }

@@ -585,6 +585,10 @@ Item {
     if (root.modelsBusy) return
     root.modelNote = null
     root.modelBusy = name
+    // The running row's bar reads the live count rather than the list, so it
+    // starts where the list already is. Without this a resumed download snaps
+    // the bar back to empty until the first poll lands a second later.
+    root.modelBusyBytes = ModelsJs.partialOf(root.models, name)
     root.runModelAction(["download", name])
     modelPoll.start()
   }

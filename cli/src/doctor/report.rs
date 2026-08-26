@@ -10,6 +10,7 @@ use serde::Serialize;
 
 use crate::args::EngineSlug;
 use crate::envelope::CONTRACT_VERSION;
+use crate::model;
 
 use super::facts::{Backend, Facts, HardwareTier, UnitState};
 
@@ -334,6 +335,21 @@ fn model_check(facts: &Facts) -> Check {
             name: "Model weights",
             ok: true,
             detail: path.display().to_string(),
+            remedy: None,
+            engines: vec!["openai"],
+        },
+        // Only a catalogue name has a download. The `openaiModel` field takes
+        // any name, and `unit::model_file` resolves a hand-placed `.gguf`, so
+        // naming the verb for such a name would hand the reader a line that
+        // always answers `bad_arguments`. The detail says what helps instead.
+        (None, Some(directory)) if model::weights(model).is_none() => Check {
+            id: "model",
+            name: "Model weights",
+            ok: false,
+            detail: format!(
+                "No weights for {model} in {}. Grammachy cannot fetch {model}, so put its .gguf file there yourself, or pick a catalogue model in Settings, Models.",
+                directory.display()
+            ),
             remedy: None,
             engines: vec!["openai"],
         },

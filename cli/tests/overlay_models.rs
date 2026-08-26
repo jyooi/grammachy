@@ -129,6 +129,13 @@ fn one_download_runs_at_a_time_and_cancel_signals_it() {
         download.contains("root.modelBusy = name"),
         "the row in flight is named, which is what gives it a bar and a Cancel: {download}"
     );
+    // The running row's bar reads the live count rather than the list, so the
+    // press has to seed it. Otherwise a resumed download animates the bar down
+    // to empty and back up again when the first poll lands.
+    assert!(
+        download.contains("root.modelBusyBytes = ModelsJs.partialOf(root.models, name)"),
+        "a resumed download starts its bar where the part file already is: {download}"
+    );
 
     // Every verb refuses on the one fact the buttons are drawn from, so a
     // button is never live over a press that goes nowhere. Naming the states

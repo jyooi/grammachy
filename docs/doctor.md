@@ -12,6 +12,9 @@ pacman steps stay manual.
 Missing weights are the one piece a user fixes without a terminal.
 Settings, Models downloads, picks, and removes any catalogue model (spec section 5.3).
 `grammachy model download <name>` is the same step from a shell.
+Doctor names that command only for a catalogue name.
+The `openaiModel` field takes any name, and a name the catalogue does not carry has no download.
+For such a name the detail says to place the `.gguf` file by hand, or to pick a catalogue model.
 
 ```
 grammachy doctor [--engine <slug>] [--json]

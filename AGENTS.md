@@ -61,7 +61,8 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   The licence of a row comes from `bench::weights::of`, the one product rule of spec section 13.1.
   `cancel.rs` is the whole cancel.
   The SIGTERM handler only sets a flag, and `curl` polls it so the child dies and the `.part` file stays.
-  Seams are `GRAMMACHY_MODELS_DIR`, `GRAMMACHY_MODEL_BASE_URL`, `GRAMMACHY_MODEL_SHA256`, `GRAMMACHY_LLAMA_STOP`, plus the `Downloader` and `Stopper` values.
+  Seams are `GRAMMACHY_MODELS_DIR`, `GRAMMACHY_MODEL_BASE_URL`, `GRAMMACHY_MODEL_SHA256`, `GRAMMACHY_MODEL_SIZE_BYTES`, `GRAMMACHY_LLAMA_STOP`, plus the `Downloader` and `Stopper` values.
+  `GRAMMACHY_MODEL_SIZE_BYTES` is what lets a test drive the transfer without the gigabytes of free disk the pinned size asks for.
   `cli/tests/model_download.rs` and `cli/tests/model_cancel.rs` each own their whole binary, because one sets a digest for the process and the other takes the signal disposition over.
 - `grammachy setup` lives in `cli/src/setup/`, spec section 10.
   It prints one JSON envelope (`SetupEnvelope`).

@@ -53,6 +53,12 @@ fn the_transfer_after_the_signal_answers_cancelled_and_keeps_the_part_file() {
     std::fs::create_dir_all(&directory).expect("the scratch directory is created");
     let partial = directory.join("Qwen3-4B-Instruct-2507-Q4_K_M.gguf.part");
     std::fs::write(&partial, b"half a model").expect("the part file is written");
+    // `fetch` checks the free space against the pinned size first, so without
+    // this the test would need the 2.5 GB the real row asks for and would
+    // refuse before it ever reached the signal it is here to cover.
+    //
+    // Safety: one variable, read by this binary alone, under the guard above.
+    std::env::set_var(grammachy::model::SIZE_ENV, "4096");
 
     let download: Downloader = Box::new(|_url, _path| {
         if cancel::requested() {

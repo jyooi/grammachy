@@ -25,8 +25,9 @@
 //! The file is renamed only when it is whole and the pinned sha256 matches.
 //!
 //! Every path and every side effect is a seam: `GRAMMACHY_MODELS_DIR`,
-//! `GRAMMACHY_MODEL_BASE_URL`, `GRAMMACHY_MODEL_SHA256`, `GRAMMACHY_LLAMA_STOP`,
-//! plus the [`Downloader`] and [`Stopper`] values. No test reaches the real
+//! `GRAMMACHY_MODEL_BASE_URL`, `GRAMMACHY_MODEL_SHA256`,
+//! `GRAMMACHY_MODEL_SIZE_BYTES`, `GRAMMACHY_LLAMA_STOP`, plus the
+//! [`Downloader`] and [`Stopper`] values. No test reaches the real
 //! weights host, the real models directory, or a real unit.
 
 pub mod cancel;
@@ -55,6 +56,13 @@ pub const BASE_URL_ENV: &str = "GRAMMACHY_MODEL_BASE_URL";
 /// Points the CLI at another expected digest for a small fake file.
 /// Not a user-facing setting.
 pub const SHA256_ENV: &str = "GRAMMACHY_MODEL_SHA256";
+
+/// Points the CLI at another pinned size for a small fake file.
+///
+/// The free-space check runs against the pinned size before the transfer does
+/// anything, so without this seam every test of the transfer would need the
+/// gigabytes of free disk a real row asks for. Not a user-facing setting.
+pub const SIZE_ENV: &str = "GRAMMACHY_MODEL_SIZE_BYTES";
 
 /// Keeps `model remove` from stopping the real llama.cpp unit. Tests and CI set
 /// it to `never`. Not a user-facing setting.
@@ -216,12 +224,16 @@ pub fn weights(model: &str) -> Option<Weights> {
         .ok()
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| row.sha256.to_string());
+    let size_bytes = std::env::var(SIZE_ENV)
+        .ok()
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        .unwrap_or(row.size_bytes);
 
     Some(Weights {
         file_name: row.file_name.to_string(),
         url: format!("{base}/{}/resolve/main/{}", row.repository, row.file_name),
         sha256,
-        size_bytes: row.size_bytes,
+        size_bytes,
     })
 }
 
