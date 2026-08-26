@@ -3,7 +3,7 @@
 Settled on the evals map [HUF-202](https://linear.app/huffman/issue/HUF-202) between 2026-08-25 and 2026-08-26.
 Each section names the ticket that holds its detail.
 This spec fixes the eval set, the metrics, the `bench` runner, the `openrouter` cloud engine, the local engine changes the pilot forced, the model shortlist, and the milestones.
-It amends `docs/spec/v1.md` sections 4, 5.2, 6, 7, and 13.1 as stated in section 10.
+It amends `docs/spec/v1.md` sections 1, 4, 5.2, 6, 7, 10, and 13.1 as stated in section 10.
 
 ## 1. Purpose and the two sets
 
@@ -231,10 +231,12 @@ Out: Muse Glimmer (16.8 GB, over the tier and the device), LFM2.5 (restricted li
 
 ## 10. Amendments to `docs/spec/v1.md`
 
+- Section 1: the offline standing rule and the out-of-scope line carve out the opt-in `openrouter` engine.
 - Section 4: the `openrouter` row and rules of HUF-206; the `openai` row gains the reasoning flags, `max_tokens` 2048, the thinking Setting, and the 2,000-unit limit; TLS note; `doctor` backend-package check.
 - Section 5.2: the Check size limit is a property of the Engine; `chunk` packs to the selected engine's limit.
 - Section 6: the too-long card fires at the selected engine's limit.
 - Section 7: `localThinking`, `openrouterModel`, `cloudConsent`; the dropdown label.
+- Section 10: `setup --openrouter-key` joins the subcommand list and writes the key file; `setup --remove` deletes it.
 - Section 13.1: replaced by a pointer to this spec for sets, metrics, tables, flags, and recommendation rules; the regression rule sentence stays.
 - `CONTEXT.md`: Check size limit belongs to the Engine; terms Edit, Pair, Exact fix, Style creep, Valid Check, Eval set, Record file, Cloud engine, Consent (from the glossary branches).
 
