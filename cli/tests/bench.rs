@@ -88,11 +88,23 @@ fn scratch_dir() -> PathBuf {
 }
 
 /// Write one temporary `shell.json`, so no run reads the real one.
+///
+/// An entry that names no `openaiBaseUrl` gets a silent one. The default is a
+/// fixed loopback port, so a machine that already runs llama.cpp there would
+/// otherwise answer a run that is meant to find nothing.
 fn settings_file(name: &str, entry_body: &str) -> PathBuf {
     let path = scratch_dir().join(name);
+    let entry = if entry_body.contains("openaiBaseUrl") {
+        entry_body.to_string()
+    } else {
+        format!(
+            r#""openaiBaseUrl": "http://{}", {entry_body}"#,
+            silent_address()
+        )
+    };
     let document = format!(
         r#"{{ "bar": {{ "layout": {{ "left": [], "center": [
-            {{ "id": "io.github.jyooi.grammachy", {entry_body} }}
+            {{ "id": "io.github.jyooi.grammachy", {entry} }}
         ], "right": [] }} }}, "plugins": [] }}"#
     );
     std::fs::write(&path, document).expect("the settings file is written");
