@@ -27,9 +27,11 @@
 //! every cloud row after it. A cloud answer that carries no `usage.cost` ends
 //! its row the same way, because a run that cannot measure its spend cannot
 //! hold the cap. `--record <dir>` writes every Check's answer to `checks.json`,
-//! the input of the judge script (HUF-205). The run creates that file before
-//! the first row, so a directory it cannot write never discards a report it
-//! already paid for.
+//! the input of the judge script (HUF-205). The run proves the directory holds
+//! that file before the first row, so a directory it cannot write never
+//! discards a report it already paid for. The last row writes a pending file
+//! and renames it, so the record of an earlier run stays whole until this run
+//! has a whole one of its own.
 
 pub mod fixture;
 pub mod machine;
@@ -111,7 +113,7 @@ pub fn run(args: &BenchArgs, stored: &StoredSettings) -> Result<String, String> 
 #[derive(Debug, PartialEq)]
 struct Plan {
     rows: Vec<(EngineSlug, String)>,
-    /// The record file, already created and proved writable.
+    /// Where `record` writes, in a directory already proved writable.
     record: Option<PathBuf>,
 }
 

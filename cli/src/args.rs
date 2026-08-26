@@ -51,8 +51,10 @@ pub struct BenchArgs {
     #[arg(long = "cloud-model", value_name = "ID")]
     pub cloud_models: Vec<String>,
 
-    /// The most the whole run may spend on openrouter, in USD. Required when
-    /// any row runs through openrouter, refused otherwise.
+    /// A bound on what the whole run may spend on openrouter, in USD. The run
+    /// weighs it between Checks and ends a cloud row before the next Check
+    /// would pass it. Required when any row runs through openrouter, refused
+    /// otherwise.
     #[arg(long = "max-cost", value_name = "USD")]
     pub max_cost: Option<f64>,
 

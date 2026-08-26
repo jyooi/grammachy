@@ -196,6 +196,10 @@ fn a_missing_key_file_sends_nothing() {
         matches!(&failure, EngineFailure::Unavailable(message) if message.contains("no_key")),
         "{failure:?}"
     );
+    assert!(
+        matches!(&failure, EngineFailure::Unavailable(message) if message.contains("~/.config/grammachy/openrouter-key")),
+        "the card tells the user the file to write: {failure:?}"
+    );
     assert!(stub.requests().is_empty(), "nothing was sent");
 }
 
@@ -236,6 +240,10 @@ fn http_statuses_map_onto_the_agreed_reasons() {
         assert!(
             matches!(&failure, EngineFailure::Unavailable(message) if message.contains(reason)),
             "{line}: {failure:?}"
+        );
+        assert!(
+            matches!(&failure, EngineFailure::Unavailable(message) if !message.contains("grammachy setup")),
+            "the remedy never names a setup flag the binary does not take: {failure:?}"
         );
     }
 

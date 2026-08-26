@@ -409,6 +409,29 @@ fn the_binary_prints_a_report_and_a_json_envelope() {
     assert_eq!(value["ready"], true, "{harper}");
 }
 
+/// The cloud engine needs one piece, the key file, and no check reads it yet.
+/// So `doctor` must never answer that it is ready on evidence it never took.
+#[test]
+fn the_cloud_engine_is_never_reported_ready_while_no_check_reads_its_key() {
+    let facts = ready();
+
+    let report = Report::new(&facts, EngineSlug::Openrouter);
+
+    assert!(!report.ready, "{report:?}");
+    assert_eq!(report.exit_code(), 1);
+    assert!(
+        report
+            .diagnosis
+            .contains("~/.config/grammachy/openrouter-key"),
+        "the diagnosis names the file the user must write: {}",
+        report.diagnosis
+    );
+    assert!(
+        Report::new(&facts, EngineSlug::Harper).ready,
+        "the same machine is still ready for an engine doctor does read"
+    );
+}
+
 fn run_binary(args: &[&str]) -> String {
     let output = Command::new(env!("CARGO_BIN_EXE_grammachy"))
         .args(args)

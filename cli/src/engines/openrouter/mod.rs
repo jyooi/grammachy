@@ -125,7 +125,7 @@ fn read_key(config: &Config) -> Result<String, EngineFailure> {
     match std::fs::read_to_string(path) {
         Ok(text) if !text.trim().is_empty() => Ok(text.trim().to_string()),
         _ => Err(EngineFailure::Unavailable(
-            "Cloud LLM has no key. Run: printf '%s' \"$KEY\" | grammachy setup --openrouter-key (reason: no_key)"
+            "Cloud LLM has no key. Put the OpenRouter key in ~/.config/grammachy/openrouter-key, mode 0600. (reason: no_key)"
                 .to_string(),
         )),
     }
@@ -210,7 +210,7 @@ fn classify_status(status: u16, body: &str) -> EngineFailure {
         .unwrap_or_default();
     match status {
         401 | 403 => EngineFailure::Unavailable(
-            "OpenRouter rejected the key. Run: printf '%s' \"$KEY\" | grammachy setup --openrouter-key (reason: rejected_key)"
+            "OpenRouter rejected the key. Replace the key in ~/.config/grammachy/openrouter-key. (reason: rejected_key)"
                 .to_string(),
         ),
         402 => EngineFailure::Unavailable(

@@ -32,9 +32,9 @@ pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(90);
 /// How long the adapter waits for a freshly started server to answer.
 ///
 /// This budget is separate from the Check timeout, which applies to one
-/// request. llama.cpp binds the port only after the weights are loaded, and the
-/// recommended model is a 4.7 GB file, so a first Check after a login reads it
-/// from disk before anything answers.
+/// request. llama.cpp binds the port first and answers HTTP 503 until the
+/// weights are loaded. The recommended model is a 4.7 GB file, so a first Check
+/// after a login waits while the server reads it from disk.
 pub const DEFAULT_STARTUP_BUDGET: Duration = Duration::from_secs(120);
 
 /// Time between two probes while the unit starts.
