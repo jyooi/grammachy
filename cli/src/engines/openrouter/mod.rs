@@ -16,7 +16,7 @@ use std::time::Duration;
 use serde_json::{json, Value};
 
 use crate::args::CheckOptions;
-use crate::engine::{Answer, Engine, EngineFailure};
+use crate::engine::{Answer, Engine, EngineFailure, Usage};
 use crate::engines::openai::{prompt, response};
 
 /// The one address a Check may leave the machine for.
@@ -261,6 +261,7 @@ impl Engine for Openrouter {
             .get("usage")
             .and_then(|usage| usage.get("cost"))
             .and_then(Value::as_f64);
+        let usage = Usage::from_response(&raw);
         let completion: response::ChatResponse = serde_json::from_value(raw).map_err(|error| {
             EngineFailure::Failed(format!(
                 "OpenRouter sent an answer that is not a chat completion: {error}"
@@ -268,7 +269,11 @@ impl Engine for Openrouter {
         })?;
         let issues = response::issues_from(text, &completion).map_err(EngineFailure::Failed)?;
 
-        Ok(Answer { issues, cost })
+        Ok(Answer {
+            issues,
+            cost,
+            usage,
+        })
     }
 }
 

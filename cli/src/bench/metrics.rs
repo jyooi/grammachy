@@ -26,6 +26,7 @@
 use std::collections::BTreeMap;
 
 use crate::bench::fixture::Span;
+use crate::engine::Usage;
 use crate::envelope::Issue;
 use crate::text::{byte_index_of_utf16, utf16_slice};
 
@@ -48,6 +49,8 @@ pub struct Recorded {
     pub latency_ms: u64,
     /// `usage.cost` in USD when the engine reported one.
     pub cost: Option<f64>,
+    /// Token counts and server timings when the engine reported them.
+    pub usage: Option<Usage>,
 }
 
 impl Recorded {
@@ -90,6 +93,21 @@ pub struct Tally {
     /// The ids of the interference sentences no Issue touched.
     pub misses: Vec<String>,
     pub by_language: BTreeMap<String, LanguageRecall>,
+    pub throughput: Throughput,
+}
+
+/// How fast the model produced its answers, from what the server reported.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Throughput {
+    /// Median time before the first output token, from server timings.
+    pub ttft_p50_ms: Option<u64>,
+    /// Output tokens per second over the row.
+    pub tokens_per_second: Option<f64>,
+    /// Whether the rate was measured around the whole request rather than
+    /// the server's own generation time, so it includes the network.
+    pub whole_request: bool,
+    /// Median output tokens of one Check.
+    pub output_tokens_p50: Option<u64>,
 }
 
 impl Tally {
@@ -154,6 +172,7 @@ impl Tally {
         latencies.sort_unstable();
         tally.p50_ms = nearest_rank(&latencies, 0.5);
         tally.p95_ms = nearest_rank(&latencies, 0.95);
+        tally.throughput = Throughput::of(recorded);
         tally
     }
 
@@ -228,12 +247,13 @@ impl Tally {
         count_cell(self.valid, self.checks)
     }
 
-    /// Cost per 1,000 Checks in USD, or `None` when a priced row lacks a cost.
+    /// Cost per 1,000 Checks in USD, or `None` when a valid answer lacks a
+    /// cost. An invalid Check bought nothing, so it neither counts nor blocks.
     pub fn cost_per_1000(&self) -> Option<f64> {
-        if self.priced == 0 || self.priced < self.checks {
+        if self.priced == 0 || self.priced < self.valid {
             return None;
         }
-        Some(self.cost_usd / self.checks as f64 * 1_000.0)
+        Some(self.cost_usd / self.priced as f64 * 1_000.0)
     }
 
     /// One cell of the "Recall by native language" table.
@@ -243,6 +263,60 @@ impl Tally {
             format!("{} of {}", recall.pairs, recall.edits)
         } else {
             count_cell(recall.pairs, recall.edits)
+        }
+    }
+}
+
+impl Throughput {
+    fn of(recorded: &[Recorded]) -> Throughput {
+        let valid: Vec<&Recorded> = recorded.iter().filter(|sentence| sentence.valid).collect();
+        let usages: Vec<Usage> = valid.iter().filter_map(|sentence| sentence.usage).collect();
+
+        let mut ttft: Vec<u64> = usages
+            .iter()
+            .filter_map(|usage| usage.prompt_ms)
+            .map(|ms| ms.round() as u64)
+            .collect();
+        ttft.sort_unstable();
+
+        let mut outputs: Vec<u64> = usages
+            .iter()
+            .filter_map(|usage| usage.completion_tokens)
+            .collect();
+        outputs.sort_unstable();
+
+        // The server's own generation time when every priced answer has it,
+        // otherwise the whole request time around the same answers.
+        let timed: Vec<(u64, f64)> = valid
+            .iter()
+            .filter_map(|sentence| {
+                let usage = sentence.usage?;
+                Some((usage.completion_tokens?, usage.generation_ms?))
+            })
+            .collect();
+        let (pairs, whole_request) = if timed.is_empty() {
+            let around: Vec<(u64, f64)> = valid
+                .iter()
+                .filter_map(|sentence| {
+                    Some((
+                        sentence.usage?.completion_tokens?,
+                        sentence.latency_ms as f64,
+                    ))
+                })
+                .collect();
+            (around, true)
+        } else {
+            (timed, false)
+        };
+        let tokens: u64 = pairs.iter().map(|(tokens, _)| tokens).sum();
+        let ms: f64 = pairs.iter().map(|(_, ms)| ms).sum();
+        let tokens_per_second = (ms > 0.0).then(|| tokens as f64 / ms * 1_000.0);
+
+        Throughput {
+            ttft_p50_ms: (!ttft.is_empty()).then(|| nearest_rank(&ttft, 0.5)),
+            tokens_per_second,
+            whole_request: whole_request && tokens_per_second.is_some(),
+            output_tokens_p50: (!outputs.is_empty()).then(|| nearest_rank(&outputs, 0.5)),
         }
     }
 }
@@ -397,6 +471,7 @@ mod tests {
             valid: true,
             latency_ms: ms,
             cost: None,
+            usage: None,
         }
     }
 
@@ -631,8 +706,13 @@ mod tests {
         let full = Tally::of(&[priced.clone(), also.clone()]);
         assert!((full.cost_per_1000().unwrap() - 0.03).abs() < 1e-9);
 
-        let partial = Tally::of(&[priced, also, unpriced]);
+        let partial = Tally::of(&[priced.clone(), also.clone(), unpriced]);
         assert_eq!(partial.cost_per_1000(), None);
+
+        let mut failed = recorded("ok-05", BOOK, &[], &[], 1);
+        failed.valid = false;
+        let with_failure = Tally::of(&[priced, also, failed]);
+        assert!((with_failure.cost_per_1000().unwrap() - 0.03).abs() < 1e-9);
 
         assert_eq!(
             Tally::of(&[recorded("ok-04", BOOK, &[], &[], 1)]).cost_per_1000(),
@@ -658,6 +738,36 @@ mod tests {
         assert_eq!(tally.language_cell("zh"), "1 of 1");
         assert_eq!(tally.language_cell("es"), "0 of 1");
         assert_eq!(tally.language_cell("fr"), "0 of 0");
+    }
+
+    #[test]
+    fn throughput_prefers_server_timings_and_falls_back_to_the_whole_request() {
+        let mut local = recorded("ok-01", BOOK, &[], &[], 20_000);
+        local.usage = Some(Usage {
+            prompt_tokens: Some(180),
+            completion_tokens: Some(500),
+            prompt_ms: Some(500.0),
+            generation_ms: Some(19_500.0),
+        });
+        let tally = Tally::of(&[local]);
+        assert_eq!(tally.throughput.ttft_p50_ms, Some(500));
+        assert!((tally.throughput.tokens_per_second.unwrap() - 500.0 / 19.5).abs() < 1e-6);
+        assert!(!tally.throughput.whole_request);
+        assert_eq!(tally.throughput.output_tokens_p50, Some(500));
+
+        let mut cloud = recorded("ok-02", BOOK, &[], &[], 4_000);
+        cloud.usage = Some(Usage {
+            prompt_tokens: Some(180),
+            completion_tokens: Some(100),
+            ..Usage::default()
+        });
+        let tally = Tally::of(&[cloud]);
+        assert_eq!(tally.throughput.ttft_p50_ms, None);
+        assert!((tally.throughput.tokens_per_second.unwrap() - 25.0).abs() < 1e-9);
+        assert!(tally.throughput.whole_request);
+
+        let none = Tally::of(&[recorded("ok-03", BOOK, &[], &[], 10)]);
+        assert_eq!(none.throughput, Throughput::default());
     }
 
     #[test]

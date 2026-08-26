@@ -206,6 +206,10 @@ struct RecordedCheck {
     valid: bool,
     latency_ms: u64,
     cost: Option<f64>,
+    prompt_tokens: Option<u64>,
+    completion_tokens: Option<u64>,
+    prompt_ms: Option<f64>,
+    generation_ms: Option<f64>,
     issues: Vec<Issue>,
 }
 
@@ -374,8 +378,8 @@ fn measure(
         let answer = adapter.answer(&sentence.text, &options);
         let latency_ms = started.elapsed().as_millis() as u64;
 
-        let (issues, cost, valid) = match answer {
-            Ok(answer) => (answer.issues, answer.cost, true),
+        let (issues, cost, usage, valid) = match answer {
+            Ok(answer) => (answer.issues, answer.cost, answer.usage, true),
             Err(failure) if index == 0 && ends_the_row(&failure) => {
                 return Outcome::Skipped(reason(&sentence.id, failure));
             }
@@ -386,7 +390,7 @@ fn measure(
                     sentence.id,
                     reason(&sentence.id, failure)
                 );
-                (Vec::new(), None, false)
+                (Vec::new(), None, None, false)
             }
         };
         if slug.is_cloud() && valid && cost.is_none() {
@@ -404,6 +408,10 @@ fn measure(
             valid,
             latency_ms,
             cost,
+            prompt_tokens: usage.and_then(|usage| usage.prompt_tokens),
+            completion_tokens: usage.and_then(|usage| usage.completion_tokens),
+            prompt_ms: usage.and_then(|usage| usage.prompt_ms),
+            generation_ms: usage.and_then(|usage| usage.generation_ms),
             issues: issues.clone(),
         });
         recorded.push(Recorded {
@@ -416,6 +424,7 @@ fn measure(
             valid,
             latency_ms,
             cost,
+            usage,
         });
     }
 

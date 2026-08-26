@@ -19,7 +19,7 @@ use std::thread::sleep;
 use std::time::{Duration, Instant};
 
 use crate::args::CheckOptions;
-use crate::engine::{Engine, EngineFailure};
+use crate::engine::{Answer, Engine, EngineFailure, Usage};
 use crate::engines::local::{is_unreachable, StartFailure};
 use crate::envelope::Issue;
 
@@ -109,7 +109,7 @@ impl Openai {
         endpoint: &Endpoint,
         options: &CheckOptions,
         body: &str,
-    ) -> Result<ChatResponse, EngineFailure> {
+    ) -> Result<serde_json::Value, EngineFailure> {
         // Spec section 1: no text leaves the machine. ureq follows HTTP_PROXY
         // and 3xx by default, so both must stay off on this Agent.
         let agent: ureq::Agent = ureq::Agent::config_builder()
@@ -177,7 +177,7 @@ impl Openai {
         endpoint: &Endpoint,
         options: &CheckOptions,
         body: &str,
-    ) -> Result<ChatResponse, EngineFailure> {
+    ) -> Result<serde_json::Value, EngineFailure> {
         if let Err(StartFailure(message)) = (self.starter)(&options.openai_model, endpoint) {
             return Err(EngineFailure::Unavailable(message));
         }
@@ -203,6 +203,10 @@ impl Engine for Openai {
     }
 
     fn check(&self, text: &str, options: &CheckOptions) -> Result<Vec<Issue>, EngineFailure> {
+        self.answer(text, options).map(|answer| answer.issues)
+    }
+
+    fn answer(&self, text: &str, options: &CheckOptions) -> Result<Answer, EngineFailure> {
         // Before anything is sent anywhere: the host must be this machine.
         let endpoint =
             endpoint::parse(&options.openai_base_url).map_err(EngineFailure::BadArguments)?;
@@ -220,6 +224,17 @@ impl Engine for Openai {
             outcome => outcome?,
         };
 
-        response::issues_from(text, &answer).map_err(EngineFailure::Failed)
+        let usage = Usage::from_response(&answer);
+        let completion: ChatResponse = serde_json::from_value(answer).map_err(|error| {
+            EngineFailure::Failed(format!(
+                "The model server sent an answer that is not a chat completion: {error}"
+            ))
+        })?;
+        let issues = response::issues_from(text, &completion).map_err(EngineFailure::Failed)?;
+        Ok(Answer {
+            issues,
+            cost: None,
+            usage,
+        })
     }
 }

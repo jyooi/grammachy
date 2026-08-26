@@ -199,6 +199,18 @@ impl Report {
         }
         out.push('\n');
 
+        out.push_str("### Throughput\n\n");
+        out.push_str("| Model | Time to first token (p50) | Output tokens per second | Output tokens per Check (p50) |\n");
+        out.push_str("|---|---|---|---|\n");
+        for row in &self.models {
+            out.push_str(&format!(
+                "| `{}` | {} |\n",
+                row.model,
+                throughput_cells(&row.outcome).join(" | ")
+            ));
+        }
+        out.push_str("\nTime to first token and the token rate come from the model server's own timings. A rate marked `whole request` is output tokens over the request time as seen from this machine, network included, because the provider reports no timings.\n\n");
+
         out.push_str("### Recall by native language\n\n");
         out.push_str(&format!("| Model | {} |\n", self.languages.join(" | ")));
         out.push_str(&format!("|---|{}\n", "---|".repeat(self.languages.len())));
@@ -397,6 +409,35 @@ fn quality_cells(outcome: &Outcome) -> Vec<String> {
             ]
         }
     }
+}
+
+/// The three measured cells of one Throughput row.
+fn throughput_cells(outcome: &Outcome) -> Vec<String> {
+    let Outcome::Measured(measurement) = outcome else {
+        return vec![SKIPPED.to_string(); 3];
+    };
+    let throughput = &measurement.tally.throughput;
+    let unmeasured = || "not measured".to_string();
+    vec![
+        throughput
+            .ttft_p50_ms
+            .map(|ms| format!("{ms} ms"))
+            .unwrap_or_else(unmeasured),
+        throughput
+            .tokens_per_second
+            .map(|rate| {
+                if throughput.whole_request {
+                    format!("{rate:.1} (whole request)")
+                } else {
+                    format!("{rate:.1}")
+                }
+            })
+            .unwrap_or_else(unmeasured),
+        throughput
+            .output_tokens_p50
+            .map(|tokens| tokens.to_string())
+            .unwrap_or_else(unmeasured),
+    ]
 }
 
 /// The four measured cells of one Cost row, before the license and verdict.
@@ -657,6 +698,52 @@ mod tests {
             "{rendered}"
         );
         assert!(rendered.contains("| `qwen3.5-4b` | 29 of 30 (96.7%) | 29 of 30 (96.7%) | 29 of 30 (96.7%) | 96.7% | 25 of 30 (83.3%) | 0 of 10 | 6.7 | 40 of 40 (100.0%) |"), "{rendered}");
+    }
+
+    #[test]
+    fn the_throughput_table_marks_a_rate_measured_around_the_whole_request() {
+        let mut report = report();
+        let mut local = tally(28, 20, 0, 40);
+        local.throughput = crate::bench::metrics::Throughput {
+            ttft_p50_ms: Some(510),
+            tokens_per_second: Some(25.3),
+            whole_request: false,
+            output_tokens_p50: Some(480),
+        };
+        let mut cloud = tally(30, 29, 0, 40);
+        cloud.throughput = crate::bench::metrics::Throughput {
+            ttft_p50_ms: None,
+            tokens_per_second: Some(31.0),
+            whole_request: true,
+            output_tokens_p50: Some(120),
+        };
+        report.models = vec![
+            model(
+                "gemma-4-e4b-it",
+                "openai",
+                weights::of("gemma-4-e4b-it"),
+                measured(local, None),
+            ),
+            model(
+                "deepseek/deepseek-v4-flash-0731",
+                "openrouter",
+                weights::HOSTED,
+                measured(cloud, None),
+            ),
+        ];
+
+        let rendered = report.render();
+
+        assert!(
+            rendered.contains("| `gemma-4-e4b-it` | 510 ms | 25.3 | 480 |"),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains(
+                "| `deepseek/deepseek-v4-flash-0731` | not measured | 31.0 (whole request) | 120 |"
+            ),
+            "{rendered}"
+        );
     }
 
     #[test]
