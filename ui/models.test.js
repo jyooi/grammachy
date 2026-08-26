@@ -18,6 +18,8 @@ const {
   PARTIAL,
   READY,
   STATES,
+  NOTICE,
+  FAILURE,
   CANCELLED,
   DOWNLOAD_FAILED,
   BAD_ARGUMENTS,
@@ -271,12 +273,15 @@ test("a cancel says the part file is kept, because a cancel is not a failure", (
   assert.equal(line.title, "Download of qwen3-4b-instruct stopped")
   assert.ok(line.body.includes("kept"))
   assert.equal(line.message, "")
+  // A cancel is the reader's own decision, so it is not drawn as a failure.
+  assert.equal(line.kind, NOTICE)
 })
 
 test("a failed download names what the CLI said", () => {
   const line = note(DOWNLOAD_FAILED, "curl could not fetch it", "phi-4-mini-instruct")
   assert.equal(line.title, "phi-4-mini-instruct could not be downloaded")
   assert.equal(line.message, "curl could not fetch it")
+  assert.equal(line.kind, FAILURE)
 })
 
 test("no JSON at all is the companion tool being missing or out of date", () => {
@@ -289,6 +294,7 @@ test("any other failure says the models on disk did not change", () => {
   const line = note(BAD_ARGUMENTS, "no such model", "no-such-model")
   assert.ok(line.body.includes("did not change"))
   assert.equal(line.message, "no such model")
+  assert.equal(line.kind, FAILURE)
 })
 
 // ------------------------------------------- a whole run against a stub binary

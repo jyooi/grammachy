@@ -236,7 +236,13 @@ function actionTooltip(action, name) {
   return name ? verb + " " + name : verb
 }
 
-// The one line the list shows when a verb failed, spec section 5.3.
+// What a note is: something that went wrong, or something that simply
+// happened. A cancel is the reader's own decision, so drawing it in the colour
+// of a failure would tell them they broke something.
+var NOTICE = "notice"
+var FAILURE = "failure"
+
+// The one line the list shows after a verb, spec section 5.3.
 //
 // A cancel is not a failure and says so: the part file is kept and the same
 // button starts it again. Everything else names what went wrong and leaves the
@@ -247,12 +253,32 @@ function note(code, message, name) {
   var said = typeof message === "string" ? message : ""
 
   if (settled === CANCELLED)
-    return { title: "Download of " + model + " stopped", body: "What arrived is kept. Download resumes it.", message: "" }
+    return {
+      kind: NOTICE,
+      title: "Download of " + model + " stopped",
+      body: "What arrived is kept. Download resumes it.",
+      message: ""
+    }
   if (settled === DOWNLOAD_FAILED)
-    return { title: model + " could not be downloaded", body: "Nothing was installed. Download tries again.", message: said }
+    return {
+      kind: FAILURE,
+      title: model + " could not be downloaded",
+      body: "Nothing was installed. Download tries again.",
+      message: said
+    }
   if (settled === BAD_ARGUMENTS && said.length === 0)
-    return { title: "Grammachy could not read the model list", body: "The companion tool is missing or out of date.", message: "" }
-  return { title: "Grammachy could not finish that", body: "The models on disk did not change.", message: said }
+    return {
+      kind: FAILURE,
+      title: "Grammachy could not read the model list",
+      body: "The companion tool is missing or out of date.",
+      message: ""
+    }
+  return {
+    kind: FAILURE,
+    title: "Grammachy could not finish that",
+    body: "The models on disk did not change.",
+    message: said
+  }
 }
 
 if (typeof module !== "undefined" && module.exports) {
@@ -262,6 +288,8 @@ if (typeof module !== "undefined" && module.exports) {
     PARTIAL: PARTIAL,
     READY: READY,
     STATES: STATES,
+    NOTICE: NOTICE,
+    FAILURE: FAILURE,
     CANCELLED: CANCELLED,
     DOWNLOAD_FAILED: DOWNLOAD_FAILED,
     BAD_ARGUMENTS: BAD_ARGUMENTS,

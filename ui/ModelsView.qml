@@ -237,7 +237,9 @@ ColumnLayout {
     Text {
       Layout.fillWidth: true
       text: root.note ? String(root.note.title) : ""
-      color: Color.urgent
+      // A cancel is what the reader asked for, so it never wears the colour
+      // of something that went wrong.
+      color: root.note && root.note.kind === Models.NOTICE ? Color.popups.text : Color.urgent
       wrapMode: Text.Wrap
       font.family: Style.font.family
       font.pixelSize: Style.font.caption
