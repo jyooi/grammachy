@@ -32,6 +32,7 @@ const {
   read,
   rows,
   merged,
+  absorbed,
   bytes,
   share,
   partialOf,
@@ -181,6 +182,62 @@ test("one answered row replaces its own row and leaves the rest alone", () => {
 test("a name the list does not carry is appended", () => {
   const next = merged(rows([GEMMA]), rows([PHI]))
   assert.deepEqual(next.map(row => row.name), ["gemma-4-e4b-it", "phi-4-mini-instruct"])
+})
+
+// ------------------------------------------------------- answers out of order
+//
+// The overlay stamps every `model list` run with the moment it started and
+// raises a floor when a verb answers. These walk that route the way the overlay
+// does, so an answer that read the disk too early loses.
+
+// The download of a part downloaded row, poll answer and all, in the order the
+// processes finish. `pollAt` is the run the poll started, and the verb answers
+// after it started but before it landed.
+test("a poll answer captured before the rename never reverts the finished row", () => {
+  const running = read(envelope("list", [GEMMA, QWEN, PHI])).report
+  let list = absorbed([], running, 1, 0).models
+  assert.equal(list[1].state, PARTIAL)
+
+  // The poll fires and its run starts, stamped 2. The download then finishes
+  // hashing and renaming, and its own answer lands first.
+  const finished = read(envelope("download", [{ ...QWEN, state: "ready", partialBytes: 0 }])).report
+  const floor = 3
+  list = absorbed(list, finished, 0, floor).models
+  assert.equal(list[1].state, READY)
+
+  // The poll's answer arrives now, still describing the `.part` file it saw.
+  const late = read(envelope("list", [GEMMA, QWEN, PHI])).report
+
+  assert.equal(absorbed(list, late, 2, floor), null, "the older run says nothing")
+})
+
+test("the next list run after the verb is the one that speaks", () => {
+  const ready = { ...QWEN, state: "ready", partialBytes: 0 }
+  let list = absorbed([], read(envelope("download", [ready])).report, 0, 3).models
+
+  const fresh = read(envelope("list", [GEMMA, { ...QWEN, state: "absent", partialBytes: 0 }, PHI])).report
+  list = absorbed(list, fresh, 3, 3).models
+
+  assert.equal(list[1].state, ABSENT, "a read taken after the verb is the true one")
+})
+
+test("a stale answer changes neither the directory nor the free bytes", () => {
+  const first = read(envelope("list", CATALOGUE)).report
+  const settled = absorbed([], first, 4, 0)
+
+  assert.equal(settled.directory, "/home/u/.local/share/grammachy/models")
+  assert.equal(settled.freeBytes, 700000000000)
+  assert.equal(absorbed(settled.models, first, 3, 4), null)
+})
+
+// The two verbs answer about the disk as it is when they end, so no stamp can
+// make them lose. Only a `list` run reads the disk before it answers.
+test("a verb answer is never dropped, whatever the floor says", () => {
+  const answered = read(envelope("remove", [{ ...GEMMA, state: "absent" }])).report
+  const settled = absorbed(rows(CATALOGUE), answered, 0, 99)
+
+  assert.equal(settled.models.length, 3)
+  assert.equal(settled.models[0].state, ABSENT)
 })
 
 // ---------------------------------------------------------------- the numbers

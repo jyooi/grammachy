@@ -139,6 +139,31 @@ function merged(current, answered) {
   return next
 }
 
+// Everything one answer changes on screen, or `null` for an answer that is
+// already out of date.
+//
+// `list` answers every row, so its rows are the whole list. `download` and
+// `remove` answer the one row they acted on, so a merge is what keeps the rest.
+//
+// A `list` run reads the directory the moment it starts, while `download`
+// answers only after it has hashed the `.part` file and renamed it, which takes
+// tens of seconds on a multi-gigabyte file. So a poll that fired during the
+// hash is still in flight when the verb answers, and it truthfully reports the
+// row as `partial` while the file on disk is already `ready`. `stamp` says
+// which run answered and `floor` is the first run no verb has overtaken, so the
+// older of the two loses and a finished row never goes back to `partial`.
+function absorbed(current, report, stamp, floor) {
+  if (!isPlainObject(report)) return null
+  var verb = String(report.verb || "")
+  if (verb === "list" && (Number(stamp) || 0) < (Number(floor) || 0)) return null
+  var answered = Array.isArray(report.models) ? report.models : []
+  return {
+    models: verb === "list" ? answered : merged(current, answered),
+    directory: String(report.directory || ""),
+    freeBytes: Number(report.freeBytes) || 0
+  }
+}
+
 // A byte count as the list says it, spec section 7.
 //
 // Weights are gigabytes, so the unit is chosen per number and one decimal is
@@ -417,6 +442,7 @@ if (typeof module !== "undefined" && module.exports) {
     read: read,
     rows: rows,
     merged: merged,
+    absorbed: absorbed,
     bytes: bytes,
     share: share,
     partialBytesOf: partialBytesOf,

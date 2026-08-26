@@ -81,6 +81,25 @@ fn partial_bytes_is_the_length_of_the_part_file_and_zero_otherwise() {
     assert_eq!(row(&rows, "phi-4-mini-instruct").partial_bytes, 0);
 }
 
+/// A cancelled download keeps its `.part` file on purpose, so a `.gguf` placed
+/// beside it by hand leaves both files there. Spec section 5.3 says the row is
+/// then `ready` with a `partialBytes` of 0, because the part file is no longer
+/// anything the reader is waiting on.
+#[test]
+fn a_ready_row_with_a_part_file_beside_it_reports_no_partial_bytes() {
+    let directory = scratch("ready-with-part");
+    std::fs::write(directory.join(GEMMA), b"whole").expect("the ready file is written");
+    std::fs::write(directory.join(format!("{GEMMA}.part")), vec![7u8; 2_048])
+        .expect("the part file is written");
+    let (models, _) = models(directory);
+
+    let json = serde_json::to_value(models.list_envelope()).expect("the envelope serialises");
+
+    assert_eq!(json["models"][0]["name"], "gemma-4-e4b-it");
+    assert_eq!(json["models"][0]["state"], "ready");
+    assert_eq!(json["models"][0]["partialBytes"], 0);
+}
+
 /// Every row carries the pinned size the progress bar measures against, and the
 /// licence from the one table spec section 13.1 fixes.
 #[test]

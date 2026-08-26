@@ -479,7 +479,14 @@ impl Models {
             name: name.to_string(),
             file_name: weights.file_name,
             state,
-            partial_bytes: partial_bytes.unwrap_or(0),
+            // Spec section 5.3: the length of the `.part` file, and `0` for any
+            // other state. A cancelled download keeps its `.part` on purpose, so
+            // a `.gguf` placed beside it by hand would otherwise report a ready
+            // row with a part length the contract says cannot exist.
+            partial_bytes: match state {
+                State::Partial => partial_bytes.unwrap_or(0),
+                _ => 0,
+            },
             size_bytes: weights.size_bytes,
             licence: licences::of(name).license.to_string(),
         })

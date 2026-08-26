@@ -158,6 +158,13 @@ Item {
   property double modelBusyBytes: 0
   property string modelsDirectory: ""
   property double modelsFreeBytes: 0
+  // Which `model list` run answered, and the first run a verb has not already
+  // overtaken. A list run reads the directory when it starts, while a download
+  // answers only after it has hashed and renamed a multi-gigabyte `.part` file,
+  // so a poll that fired during the hash lands afterwards still calling the row
+  // `partial`. An answer stamped below the floor is out of date and is dropped.
+  property int modelListSerial: 0
+  property int modelListFloor: 0
   // The note one failed verb left, from `ui/models.js`, or null.
   property var modelNote: null
   // The catalogue name a Remove confirm is waiting on, spec section 7.
@@ -546,7 +553,7 @@ Item {
     modelListProcess.running = true
   }
 
-  function onModelListOutput(text) {
+  function onModelListOutput(text, stamp) {
     var answer = ModelsJs.read(text)
     if (answer.error) {
       // A poll that failed says nothing new: the rows on screen are still the
@@ -554,7 +561,7 @@ Item {
       if (root.models.length === 0) root.modelNote = ModelsJs.note(answer.error.code, answer.error.message, "")
       return
     }
-    root.absorbModelReport(answer.report)
+    root.absorbModelReport(answer.report, stamp)
   }
 
   // The rows of one answer merged into the list. `list` answers every row and
@@ -567,14 +574,17 @@ Item {
   // animation, drop an open tooltip, and lose a press whose release came late.
   // The one number the poll is there to move rides on `modelBusyBytes`, which
   // the running row's bar and hint read instead of the list.
-  function absorbModelReport(report) {
-    var next = report.verb === "list"
-      ? report.models
-      : ModelsJs.merged(root.models, report.models)
+  //
+  // A poll answer older than the verb that has already answered says nothing at
+  // all, which `ModelsJs.absorbed` decides from the run's own stamp.
+  function absorbModelReport(report, stamp) {
+    var settled = ModelsJs.absorbed(root.models, report, stamp, root.modelListFloor)
+    if (!settled) return
+    var next = settled.models
     root.modelBusyBytes = ModelsJs.partialOf(next, root.modelBusy)
     if (!ModelsJs.sameRows(root.models, next, root.modelBusy)) root.models = next
-    root.modelsDirectory = report.directory
-    root.modelsFreeBytes = report.freeBytes
+    root.modelsDirectory = settled.directory
+    root.modelsFreeBytes = settled.freeBytes
   }
 
   // Spec section 5.3: one download at a time, so a second Download while a verb
@@ -667,6 +677,10 @@ Item {
   }
 
   function onModelActionOutput(text, name) {
+    // The verb has spoken about the directory, so every `list` run that started
+    // before now read it too early to know that. Raising the floor to the run
+    // after the last one started is what makes those answers lose.
+    root.modelListFloor = root.modelListSerial + 1
     var answer = ModelsJs.read(text)
     if (answer.error) {
       root.modelNote = ModelsJs.note(answer.error.code, answer.error.message, name)
@@ -1488,7 +1502,13 @@ Item {
   Process {
     id: modelListProcess
     property bool restartQueued: false
+    // When this run read the directory, which is the moment it started.
+    property int startedSerial: 0
 
+    onStarted: {
+      root.modelListSerial += 1
+      modelListProcess.startedSerial = root.modelListSerial
+    }
     onRunningChanged: {
       if (modelListProcess.running) return
       if (!modelListProcess.restartQueued) return
@@ -1497,7 +1517,7 @@ Item {
     }
     stdout: StdioCollector {
       waitForEnd: true
-      onStreamFinished: root.onModelListOutput(text)
+      onStreamFinished: root.onModelListOutput(text, modelListProcess.startedSerial)
     }
     stderr: StdioCollector {
       waitForEnd: true

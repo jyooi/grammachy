@@ -102,6 +102,29 @@ fn a_running_download_is_polled_once_a_second() {
         absorb.contains("root.modelBusyBytes = ModelsJs.partialOf("),
         "the one number the poll moves rides beside the list: {absorb}"
     );
+
+    // A poll run reads the directory when it starts, and a download answers
+    // only once it has hashed and renamed the `.part` file. So a poll that
+    // fired during the hash lands afterwards still calling the row `partial`,
+    // and taking it would leave a finished row reading "Part downloaded" for
+    // good. Every list run is stamped and an answer below the floor is dropped.
+    assert!(
+        absorb.contains("ModelsJs.absorbed(root.models, report, stamp, root.modelListFloor)"),
+        "an answer older than the last verb is dropped: {absorb}"
+    );
+    assert!(
+        source.contains("modelListProcess.startedSerial = root.modelListSerial"),
+        "every list run carries the stamp of the moment it started"
+    );
+    assert!(
+        source.contains("root.onModelListOutput(text, modelListProcess.startedSerial)"),
+        "the answer carries the stamp of the run that made it"
+    );
+    assert!(
+        function_body(&source, "onModelActionOutput")
+            .contains("root.modelListFloor = root.modelListSerial + 1"),
+        "a verb that has answered raises the floor over every run already out"
+    );
     assert!(
         read("ui/ModelsView.qml").contains("root.busyBytes"),
         "the running row's bar and hint read that number rather than the list"
