@@ -366,5 +366,9 @@ fn ready_line(facts: &Facts, engine: EngineSlug) -> String {
                 ),
             }
         }
+        EngineSlug::Openrouter => {
+            "Checks send text to openrouter.ai with the key in ~/.config/grammachy/openrouter-key."
+                .to_string()
+        }
     }
 }

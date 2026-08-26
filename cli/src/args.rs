@@ -36,15 +36,29 @@ pub enum Command {
 
 #[derive(Debug, Parser)]
 pub struct BenchArgs {
-    /// The engine the named models run on. v1 accepts openai only.
+    /// The engine the named models run on: openai (the default) or openrouter.
     ///
     /// This does not narrow the Engines table: one run prints the whole file.
     #[arg(long, value_enum)]
     pub engine: Option<EngineSlug>,
 
-    /// A model to evaluate, repeatable, one Models row each.
+    /// A model to evaluate on --engine, repeatable, one Models row each.
     #[arg(long = "model", value_name = "NAME")]
     pub models: Vec<String>,
+
+    /// A model to evaluate through openrouter, repeatable, one Models row
+    /// each, so one run holds local and cloud rows side by side.
+    #[arg(long = "cloud-model", value_name = "ID")]
+    pub cloud_models: Vec<String>,
+
+    /// The most the whole run may spend on openrouter, in USD. Required when
+    /// any row runs through openrouter, refused otherwise.
+    #[arg(long = "max-cost", value_name = "USD")]
+    pub max_cost: Option<f64>,
+
+    /// Write every Check's answer to <DIR>/checks.json, the input of the judge.
+    #[arg(long = "record", value_name = "DIR")]
+    pub record: Option<std::path::PathBuf>,
 }
 
 #[derive(Debug, Parser)]
@@ -104,6 +118,7 @@ pub enum EngineSlug {
     Languagetool,
     Openai,
     Harper,
+    Openrouter,
 }
 
 impl NativeLanguage {
@@ -161,6 +176,7 @@ impl EngineSlug {
             "languagetool" => Some(EngineSlug::Languagetool),
             "openai" => Some(EngineSlug::Openai),
             "harper" => Some(EngineSlug::Harper),
+            "openrouter" => Some(EngineSlug::Openrouter),
             _ => None,
         }
     }
@@ -170,7 +186,13 @@ impl EngineSlug {
             EngineSlug::Languagetool => "languagetool",
             EngineSlug::Openai => "openai",
             EngineSlug::Harper => "harper",
+            EngineSlug::Openrouter => "openrouter",
         }
+    }
+
+    /// Whether the engine sends the text off the machine (spec section 4).
+    pub fn is_cloud(self) -> bool {
+        matches!(self, EngineSlug::Openrouter)
     }
 }
 
@@ -188,6 +210,8 @@ pub struct CheckOptions {
     pub openai_base_url: String,
     pub openai_model: String,
     pub openai_api_key: String,
+    /// The model id the `openrouter` engine asks for. Empty is `bad_arguments`.
+    pub openrouter_model: String,
 }
 
 impl Default for CheckOptions {
@@ -199,6 +223,7 @@ impl Default for CheckOptions {
             openai_base_url: settings::DEFAULT_OPENAI_BASE_URL.to_string(),
             openai_model: settings::DEFAULT_OPENAI_MODEL.to_string(),
             openai_api_key: String::new(),
+            openrouter_model: settings::DEFAULT_OPENROUTER_MODEL.to_string(),
         }
     }
 }
@@ -224,6 +249,10 @@ impl CheckOptions {
                 .openai_api_key
                 .clone()
                 .unwrap_or(defaults.openai_api_key),
+            openrouter_model: stored
+                .openrouter_model
+                .clone()
+                .unwrap_or(defaults.openrouter_model),
         }
     }
 }
