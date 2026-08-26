@@ -54,6 +54,15 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   `--engine openai --model <name>` fills the Models table and does not narrow the Engines table.
   An engine the machine cannot reach is a skipped row, never an error, so a machine without llama.cpp still produces a valid file.
   `cli/src/bench/weights.rs` is the product rule for which models may be recommended (`docs/spec/evals.md` section 5).
+  `openrouter` is the cloud engine in `cli/src/engines/openrouter/`, and it reuses the `openai` request, prompt, and mapping.
+  A cloud row needs `--max-cost <usd>`, the cap on the whole run, and the flag is refused when no cloud row runs.
+  `--record <dir>` writes `checks.json`, one entry per engine, model, and item, which the judge of a later ticket reads.
+  That file is gitignored, because it is the only place model output text lands.
+  `cli/src/bench/fixture.rs` is the one loader and `cli/src/bench/metrics.rs` is the one metrics module.
+  Both sets share the item shape `{ id, native, text, edits[], expected_text }` of the evals spec.
+  Every metric of that spec has a unit test in `metrics.rs` that runs from recorded answers, so no test needs a live model.
+  `cli/tests/bench.rs` must seam every server the run can reach, LanguageTool and the OpenAI base URL both.
+  The OpenAI default is a fixed loopback port, so a machine that already runs llama.cpp there answers a case meant to find nothing.
 - `doctor` reports the install state and the one-line engine diagnosis the `engine_unavailable` card shows.
   `docs/doctor.md` documents its envelope, exit code, and hardware tiers.
   `cli/src/doctor/facts.rs` is the only place that reads the machine, so the report is a pure function of recorded `Facts` and no test reads real hardware.
