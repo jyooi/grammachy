@@ -9,6 +9,8 @@ use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::thread;
 
 use serde::Deserialize;
@@ -55,17 +57,48 @@ fn cloud_usage(cost: Option<f64>) -> Value {
 }
 
 /// A stub chat endpoint on a port the operating system picks.
-fn stub_server(answer: String) -> String {
+struct Stub {
+    address: String,
+    served: Arc<AtomicUsize>,
+}
+
+impl Stub {
+    fn url(&self) -> String {
+        format!("http://{}", self.address)
+    }
+
+    /// How many Checks reached this endpoint.
+    fn requests(&self) -> usize {
+        self.served.load(Ordering::SeqCst)
+    }
+}
+
+/// A stub that answers `answers` Checks and refuses every later one.
+///
+/// The refusal is HTTP 503, the answer llama.cpp gives before its weights are
+/// loaded, which the adapter reads as a server that cannot run a Check yet.
+/// That is how a case ends one row and leaves an earlier one measured.
+fn stub(answer: String, answers: usize) -> Stub {
     let listener = TcpListener::bind("127.0.0.1:0").expect("a loopback port is free");
     let address = listener
         .local_addr()
         .expect("the port is known")
         .to_string();
+    let served = Arc::new(AtomicUsize::new(0));
+    let counter = Arc::clone(&served);
 
     thread::spawn(move || {
         for stream in listener.incoming() {
             let Ok(mut stream) = stream else { break };
             read_request(&mut stream);
+            if counter.fetch_add(1, Ordering::SeqCst) >= answers {
+                let _ = write!(
+                    stream,
+                    "HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                );
+                let _ = stream.flush();
+                continue;
+            }
             let _ = write!(
                 stream,
                 "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{answer}",
@@ -75,7 +108,12 @@ fn stub_server(answer: String) -> String {
         }
     });
 
-    address
+    Stub { address, served }
+}
+
+/// The address of a stub that answers every Check.
+fn stub_server(answer: String) -> String {
+    stub(answer, usize::MAX).address
 }
 
 /// One entry of the record file, the shape the judge of HUF-205 reads.
@@ -625,6 +663,102 @@ fn a_cloud_answer_without_a_cost_ends_every_cloud_row() {
             "An answer that reported no cost stays out of that sum, so the figure is a lower bound."
         ),
         "{}",
+        run.stdout
+    );
+}
+
+/// A pair the Engines table reports as measured must never leave the record
+/// empty, whatever the Models row for the same model does afterwards.
+#[test]
+fn a_pair_the_engines_row_measured_stays_in_the_record_when_the_model_row_is_skipped() {
+    let ids = fixture_ids();
+    // The endpoint answers the Engines row's whole fixture and is gone by the
+    // first sentence of the Models row.
+    let endpoint = stub(answer_body(None), ids.len());
+    let settings = settings_file(
+        "record-skipped-model.json",
+        &format!(r#""openaiBaseUrl": "{}""#, endpoint.url()),
+    );
+    let directory = scratch_dir().join("record-skipped-model");
+    let _ = std::fs::remove_dir_all(&directory);
+
+    let run = bench(
+        &settings,
+        &[
+            "--engine",
+            "openai",
+            "--model",
+            DEFAULT_OPENAI_MODEL,
+            "--record",
+            directory.to_str().expect("the scratch path is UTF-8"),
+        ],
+    );
+
+    assert_eq!(run.status, 0, "{}", run.stderr);
+    assert!(
+        run.stdout.contains(&format!(
+            "- Model `{DEFAULT_OPENAI_MODEL}`: The model server is still loading"
+        )),
+        "the Models row was skipped:\n{}",
+        run.stdout
+    );
+    let engines = row(&run.stdout, "openai");
+    assert!(
+        engines.contains(" of 30 ("),
+        "the Engines row still measured the pair: {engines}"
+    );
+
+    let text =
+        std::fs::read_to_string(directory.join("checks.json")).expect("checks.json is written");
+    let checks: Vec<RecordedCheck> =
+        serde_json::from_str(&text).expect("the file is a list of Checks");
+    let recorded: Vec<String> = checks
+        .iter()
+        .filter(|check| check.engine == "openai" && check.model == DEFAULT_OPENAI_MODEL)
+        .map(|check| check.id.clone())
+        .collect();
+
+    assert_eq!(
+        recorded, ids,
+        "the measured pair is in the record exactly once"
+    );
+}
+
+/// The same model named twice is one fixture run, not two, so a cloud row that
+/// repeats is billed once.
+#[test]
+fn a_model_named_twice_runs_the_fixture_once() {
+    let endpoint = stub(answer_body(None), usize::MAX);
+    let settings = settings_file(
+        "plan-duplicate.json",
+        &format!(r#""openaiBaseUrl": "{}""#, endpoint.url()),
+    );
+
+    let run = bench(
+        &settings,
+        &[
+            "--engine",
+            "openai",
+            "--model",
+            "qwen3.5-4b",
+            "--model",
+            "qwen3.5-4b",
+        ],
+    );
+
+    assert_eq!(run.status, 0, "{}", run.stderr);
+    assert_eq!(
+        endpoint.requests(),
+        fixture_ids().len() * 2,
+        "the Engines row and one Models row, not two Models rows"
+    );
+    assert_eq!(
+        run.stdout
+            .lines()
+            .filter(|line| line.starts_with("| `qwen3.5-4b` |"))
+            .count(),
+        4,
+        "one row in each of the four Models tables:\n{}",
         run.stdout
     );
 }

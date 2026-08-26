@@ -40,6 +40,7 @@ pub mod metrics;
 pub mod report;
 pub mod weights;
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Instant;
@@ -92,14 +93,7 @@ pub fn run(args: &BenchArgs, stored: &StoredSettings) -> Result<Run, String> {
 
     let engines = ENGINES
         .iter()
-        .map(|slug| {
-            let record = if recorded_by_a_model_row(&plan, *slug, &base) {
-                None
-            } else {
-                Some(&mut checks)
-            };
-            engine_row(*slug, &base, &sentences, &mut spend, record)
-        })
+        .map(|slug| engine_row(*slug, &base, &sentences, &mut spend, &mut checks))
         .collect();
     let models = plan
         .rows
@@ -176,6 +170,16 @@ impl Plan {
             cloud.push((EngineSlug::Openrouter, model.clone()));
         }
         rows.extend(cloud);
+        // The same pair twice is one fixture run twice, and a cloud row billed
+        // twice, so only its first place in the order stays.
+        let mut planned: Vec<(EngineSlug, String)> = Vec::new();
+        rows.retain(|row| {
+            let fresh = !planned.contains(row);
+            if fresh {
+                planned.push(row.clone());
+            }
+            fresh
+        });
 
         let any_cloud = rows.iter().any(|(slug, _)| slug.is_cloud());
         match (any_cloud, args.max_cost) {
@@ -377,24 +381,12 @@ fn command_line(args: &BenchArgs) -> String {
     line
 }
 
-/// Whether a Models row already records the same Checks as one Engines row.
-///
-/// The Engines `openai` row runs the model the Settings name, so a `--model`
-/// row that names that model is the same Check run twice. The record file
-/// promises one entry per engine, model, and item, so only one row writes it.
-fn recorded_by_a_model_row(plan: &Plan, slug: EngineSlug, base: &CheckOptions) -> bool {
-    let model = row_model(slug, base);
-    plan.rows
-        .iter()
-        .any(|(row_slug, row_model)| *row_slug == slug && *row_model == model)
-}
-
 fn engine_row(
     slug: EngineSlug,
     base: &CheckOptions,
     sentences: &[Sentence],
     spend: &mut Spend,
-    checks: Option<&mut Vec<RecordedCheck>>,
+    checks: &mut Vec<RecordedCheck>,
 ) -> EngineRow {
     let options = CheckOptions {
         engine: slug,
@@ -441,7 +433,7 @@ fn model_row(
         model: model.to_string(),
         engine: slug.as_str().to_string(),
         weights,
-        outcome: measure(slug, &options, sentences, spend, Some(checks)),
+        outcome: measure(slug, &options, sentences, spend, checks),
     }
 }
 
@@ -457,7 +449,7 @@ fn measure(
     options: &CheckOptions,
     sentences: &[Sentence],
     spend: &mut Spend,
-    mut checks: Option<&mut Vec<RecordedCheck>>,
+    checks: &mut Vec<RecordedCheck>,
 ) -> Outcome {
     let Some(adapter) = engine::resolve(slug) else {
         return Outcome::Skipped(format!("This build has no {} adapter.", slug.as_str()));
@@ -507,21 +499,19 @@ fn measure(
         };
         spend.add(cost);
 
-        if let Some(checks) = checks.as_deref_mut() {
-            checks.push(RecordedCheck {
-                engine: slug.as_str().to_string(),
-                model: model.clone(),
-                id: sentence.id.clone(),
-                valid,
-                latency_ms,
-                cost,
-                prompt_tokens: usage.and_then(|usage| usage.prompt_tokens),
-                completion_tokens: usage.and_then(|usage| usage.completion_tokens),
-                prompt_ms: usage.and_then(|usage| usage.prompt_ms),
-                generation_ms: usage.and_then(|usage| usage.generation_ms),
-                issues: issues.clone(),
-            });
-        }
+        checks.push(RecordedCheck {
+            engine: slug.as_str().to_string(),
+            model: model.clone(),
+            id: sentence.id.clone(),
+            valid,
+            latency_ms,
+            cost,
+            prompt_tokens: usage.and_then(|usage| usage.prompt_tokens),
+            completion_tokens: usage.and_then(|usage| usage.completion_tokens),
+            prompt_ms: usage.and_then(|usage| usage.prompt_ms),
+            generation_ms: usage.and_then(|usage| usage.generation_ms),
+            issues: issues.clone(),
+        });
         if slug.is_cloud() && valid && cost.is_none() {
             return spend.exhaust(unpriced(&sentence.id));
         }
@@ -580,11 +570,39 @@ fn reason(id: &str, failure: EngineFailure) -> String {
 /// Write every Check of the run to the record file the plan opened.
 fn record(path: &Path, checks: &[RecordedCheck]) -> Result<(), String> {
     let pending = pending_path(path);
-    let text = serde_json::to_string_pretty(checks).expect("checks serialise");
+    let text = serde_json::to_string_pretty(&one_per_item(checks)).expect("checks serialise");
     std::fs::write(&pending, text)
         .map_err(|error| format!("--record: {} cannot be written: {error}", pending.display()))?;
     std::fs::rename(&pending, path)
         .map_err(|error| format!("--record: {} cannot be written: {error}", path.display()))
+}
+
+/// One entry per engine, model, and item, the promise of spec section 13.1.
+///
+/// The Engines `openai` row runs the model the Settings name, so a `--model`
+/// row that names that model is the same fixture run twice. A repeated key
+/// keeps the last entry, the later pass, and holds the first entry's place in
+/// the file. The decision waits until here rather than reading the plan,
+/// because a row that never ran pushed nothing, and a pair the report measured
+/// must never leave the record empty.
+fn one_per_item(checks: &[RecordedCheck]) -> Vec<&RecordedCheck> {
+    let mut kept: Vec<&RecordedCheck> = Vec::with_capacity(checks.len());
+    let mut place: HashMap<(&str, &str, &str), usize> = HashMap::new();
+    for check in checks {
+        let key = (
+            check.engine.as_str(),
+            check.model.as_str(),
+            check.id.as_str(),
+        );
+        match place.get(&key) {
+            Some(&index) => kept[index] = check,
+            None => {
+                place.insert(key, kept.len());
+                kept.push(check);
+            }
+        }
+    }
+    kept
 }
 
 /// What resident memory means for one engine, named under the table.
@@ -724,6 +742,74 @@ mod tests {
         let message = Plan::of(&cloud(&["gemma-4-e4b-it"], &[], Some(10.0)))
             .expect_err("a cap without cloud rows");
         assert!(message.contains("openrouter rows only"), "{message}");
+    }
+
+    #[test]
+    fn the_same_pair_twice_is_planned_once_so_it_runs_and_bills_once() {
+        let both_flags = Plan::of(&BenchArgs {
+            cloud_models: vec!["deepseek/deepseek-v4-flash-0731".to_string()],
+            max_cost: Some(1.0),
+            ..args(
+                Some(EngineSlug::Openrouter),
+                &["deepseek/deepseek-v4-flash-0731"],
+            )
+        })
+        .expect("a capped cloud run");
+        assert_eq!(
+            both_flags.rows,
+            [(
+                EngineSlug::Openrouter,
+                "deepseek/deepseek-v4-flash-0731".to_string()
+            )]
+        );
+
+        let repeated = Plan::of(&cloud(
+            &[],
+            &[
+                "deepseek/deepseek-v4-flash-0731",
+                "deepseek/deepseek-v4-flash-0731",
+            ],
+            Some(1.0),
+        ))
+        .expect("a capped cloud run");
+        assert_eq!(repeated.rows, both_flags.rows);
+
+        let mixed = Plan::of(&cloud(
+            &["gemma-4-e4b-it", "gemma-4-e4b-it"],
+            &["google/gemini-3.7-flash"],
+            Some(1.0),
+        ))
+        .expect("a capped cloud run");
+        assert_eq!(
+            mixed.rows,
+            [
+                (EngineSlug::Openai, "gemma-4-e4b-it".to_string()),
+                (
+                    EngineSlug::Openrouter,
+                    "google/gemini-3.7-flash".to_string()
+                ),
+            ],
+            "local rows still come before cloud rows"
+        );
+    }
+
+    #[test]
+    fn the_record_keeps_the_later_pass_of_a_pair_two_rows_both_ran() {
+        let mut first = recorded_check("zh-01");
+        first.engine = "openai".to_string();
+        first.model = "gemma-4-e4b-it".to_string();
+        first.latency_ms = 3451;
+        let mut later = first.clone();
+        later.latency_ms = 3230;
+        let other = recorded_check("zh-02");
+
+        let both_passes = [first, other.clone(), later.clone()];
+        let kept = one_per_item(&both_passes);
+
+        assert_eq!(kept.len(), 2);
+        assert_eq!(kept[0].latency_ms, 3230, "the later pass wins the key");
+        assert_eq!(kept[0].id, "zh-01", "and keeps the first entry's place");
+        assert_eq!(kept[1].id, other.id);
     }
 
     #[test]
