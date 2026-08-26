@@ -39,7 +39,9 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   Its prompt in `prompt.rs` is the wording HUF-181 measured, and the "shortest exact substring" rule is what makes the spans usable rather than whole-sentence rewrites.
   Thinking (spec section 4) travels on the request as `chat_template_kwargs.enable_thinking` and never on the unit.
   That is what makes a change of the Setting need no restart.
-  The unit only caps the think, with `--reasoning-budget`.
+  The unit only bounds and routes the think, with `--reasoning-budget` and `--reasoning-format deepseek`.
+  That format keeps the think in `message.reasoning_content`.
+  `response::parse_array` drops a leading think anyway, because `openaiBaseUrl` may name a server this adapter did not start.
   The default lives twice, in `settings::DEFAULT_LOCAL_THINKING` and in the `localThinking` descriptor of `ui/settings.js`.
   `cli/tests/overlay_thinking.rs` keeps the two equal and keeps the Toggle inside the group the engine hides.
 - `grammachy setup` lives in `cli/src/setup/`, spec section 10.
