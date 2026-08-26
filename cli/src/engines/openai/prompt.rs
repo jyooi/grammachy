@@ -92,6 +92,10 @@ pub fn request_body(text: &str, options: &CheckOptions) -> Value {
         // A Check is a classification, not a piece of writing.
         "temperature": 0,
         "max_tokens": MAX_TOKENS,
+        // A thinking model spends the whole answer budget before the first
+        // bracket: Qwen3.5-4B scored zero in the HUF-209 pilot that way.
+        // llama.cpp reads this; other servers ignore an unknown field.
+        "chat_template_kwargs": { "enable_thinking": false },
         "stream": false,
         "response_format": {
             "type": "json_schema",
@@ -130,6 +134,7 @@ mod tests {
 
         assert_eq!(body["model"], "gemma-4-e4b-it");
         assert_eq!(body["temperature"], 0);
+        assert_eq!(body["chat_template_kwargs"]["enable_thinking"], false);
         assert_eq!(body["response_format"]["type"], "json_schema");
         assert_eq!(
             body["response_format"]["json_schema"]["schema"]["items"]["required"],

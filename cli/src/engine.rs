@@ -31,6 +31,37 @@ pub struct Answer {
     pub issues: Vec<Issue>,
     /// `usage.cost` in USD, present only on a cloud engine that reported it.
     pub cost: Option<f64>,
+    /// Token counts and timings, when the server reported them.
+    pub usage: Option<Usage>,
+}
+
+/// What a model server said about one answer, beyond the Issues.
+///
+/// llama.cpp reports all four; OpenRouter reports the two token counts only,
+/// so a cloud row's throughput is measured around the whole request instead.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct Usage {
+    pub prompt_tokens: Option<u64>,
+    pub completion_tokens: Option<u64>,
+    /// Time spent on the prompt before the first output token, in ms.
+    pub prompt_ms: Option<f64>,
+    /// Time spent generating the output tokens, in ms.
+    pub generation_ms: Option<f64>,
+}
+
+impl Usage {
+    /// Read the OpenAI `usage` object and llama.cpp's `timings` extension.
+    pub fn from_response(raw: &serde_json::Value) -> Option<Usage> {
+        let number = |path: [&str; 2]| raw.get(path[0]).and_then(|v| v.get(path[1]));
+        let usage = Usage {
+            prompt_tokens: number(["usage", "prompt_tokens"]).and_then(serde_json::Value::as_u64),
+            completion_tokens: number(["usage", "completion_tokens"])
+                .and_then(serde_json::Value::as_u64),
+            prompt_ms: number(["timings", "prompt_ms"]).and_then(serde_json::Value::as_f64),
+            generation_ms: number(["timings", "predicted_ms"]).and_then(serde_json::Value::as_f64),
+        };
+        (usage != Usage::default()).then_some(usage)
+    }
 }
 
 pub trait Engine {
@@ -47,8 +78,11 @@ pub trait Engine {
     /// The Issues and the cost of one Check. A local engine has no cost, so
     /// only a cloud adapter overrides this.
     fn answer(&self, text: &str, options: &CheckOptions) -> Result<Answer, EngineFailure> {
-        self.check(text, options)
-            .map(|issues| Answer { issues, cost: None })
+        self.check(text, options).map(|issues| Answer {
+            issues,
+            cost: None,
+            usage: None,
+        })
     }
 }
 
