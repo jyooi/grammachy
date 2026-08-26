@@ -70,8 +70,20 @@ const ENGINES: [EngineSlug; 3] = [
 /// The file `--record` writes inside the directory it is given.
 const RECORD_FILE: &str = "checks.json";
 
+/// What one run produced.
+///
+/// The report and the record file are two separate promises. A `--record`
+/// write that fails after the rows ran keeps the report, because the run
+/// already paid for those numbers, and carries the failure beside it.
+pub struct Run {
+    /// The whole benchmark file, as Markdown.
+    pub report: String,
+    /// Why `--record` did not land, when the run reached the write.
+    pub record_failure: Option<String>,
+}
+
 /// Build the report of one run, or say why the arguments do not describe a run.
-pub fn run(args: &BenchArgs, stored: &StoredSettings) -> Result<String, String> {
+pub fn run(args: &BenchArgs, stored: &StoredSettings) -> Result<Run, String> {
     let plan = Plan::of(args)?;
     let base = base_options(stored);
     let sentences = fixture::sentences();
@@ -88,12 +100,13 @@ pub fn run(args: &BenchArgs, stored: &StoredSettings) -> Result<String, String> 
         .map(|(slug, model)| model_row(*slug, model, &base, &sentences, &mut spend, &mut checks))
         .collect();
 
-    if let Some(path) = &plan.record {
-        record(path, &checks)?;
-    }
+    let record_failure = plan
+        .record
+        .as_ref()
+        .and_then(|path| record(path, &checks).err());
 
     let (interference, clean) = counts(&sentences);
-    Ok(Report {
+    let report = Report {
         version: env!("CARGO_PKG_VERSION").to_string(),
         machine: Machine::here(),
         command: command_line(args),
@@ -106,7 +119,12 @@ pub fn run(args: &BenchArgs, stored: &StoredSettings) -> Result<String, String> 
         engines,
         models,
     }
-    .render())
+    .render();
+
+    Ok(Run {
+        report,
+        record_failure,
+    })
 }
 
 /// The Models rows one run evaluates, each on its engine, local rows first.

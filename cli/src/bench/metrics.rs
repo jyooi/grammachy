@@ -285,8 +285,10 @@ impl Throughput {
             .collect();
         outputs.sort_unstable();
 
-        // The server's own generation time when every priced answer has it,
-        // otherwise the whole request time around the same answers.
+        // The rate comes from the server's own generation time whenever any
+        // valid answer reports both its output tokens and that time.
+        // It comes from the whole request time around the answers when no
+        // valid answer reports the server's own time.
         let timed: Vec<(u64, f64)> = valid
             .iter()
             .filter_map(|sentence| {

@@ -17,6 +17,7 @@ use serde_json::{json, Value};
 struct Run {
     status: i32,
     stdout: String,
+    stderr: String,
 }
 
 /// A chat completion that finds the plural mistake of the fixture and nothing
@@ -207,6 +208,7 @@ fn bench_cloud(settings: &Path, arguments: &[&str], openrouter_url: &str) -> Run
     Run {
         status: output.status.code().expect("the binary exits with a code"),
         stdout: String::from_utf8(output.stdout).expect("stdout is UTF-8"),
+        stderr: String::from_utf8(output.stderr).expect("stderr is UTF-8"),
     }
 }
 
@@ -623,6 +625,40 @@ fn a_cloud_answer_without_a_cost_ends_every_cloud_row() {
         "{}",
         run.stdout
     );
+}
+
+/// A run that reaches the record write has already paid for its numbers, so a
+/// write that fails there must not take the report with it.
+#[test]
+fn a_record_write_that_fails_after_the_rows_still_prints_the_report() {
+    let settings = settings_file("record-blocked.json", r#""engine": "harper""#);
+    let directory = scratch_dir().join("record-blocked");
+    let _ = std::fs::remove_dir_all(&directory);
+    // A directory under the record file's own name lets the up-front probe of
+    // the pending file pass and fails only the rename at the end of the run.
+    std::fs::create_dir_all(directory.join("checks.json")).expect("the blocking directory is made");
+
+    let run = bench(
+        &settings,
+        &[
+            "--record",
+            directory.to_str().expect("the scratch path is UTF-8"),
+        ],
+    );
+
+    assert_eq!(run.status, 1, "the record failure is loud: {}", run.stderr);
+    assert!(
+        run.stdout.starts_with("# Grammachy benchmark "),
+        "the paid report survives on stdout:\n{}",
+        run.stdout
+    );
+    assert!(run.stdout.contains("## Engines"), "{}", run.stdout);
+    assert!(
+        run.stderr.contains("--record") && run.stderr.contains("cannot be written"),
+        "stderr names the record failure:\n{}",
+        run.stderr
+    );
+    let _ = std::fs::remove_dir_all(&directory);
 }
 
 /// The release habit of spec section 13.1: one file per version, produced by
