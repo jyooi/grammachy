@@ -37,6 +37,7 @@ const reviewing = inMode(Keymap.MODE_REVIEW)
 const idle = inMode(Keymap.MODE_IDLE)
 const editing = inMode(Keymap.MODE_COMPOSE_EDIT)
 const composeReview = inMode(Keymap.MODE_COMPOSE_REVIEW)
+const confirming = inMode(Keymap.MODE_MODEL_CONFIRM)
 
 test("every key of the map answers its own action", () => {
   assert.equal(reviewing(CODES.returnKey), Keymap.ACCEPT)
@@ -131,4 +132,36 @@ test("Compose review reviews with the popup keys", () => {
 test("Esc in Compose review goes back to the Draft rather than closing", () => {
   assert.equal(composeReview(CODES.escape), Keymap.BACK)
   assert.equal(composeReview(CODES.escape, CODES.alt), Keymap.BACK)
+})
+
+// Spec section 7: the Remove confirm of the Models list is one question, so
+// the mode carries the two answers to it and nothing else.
+test("the model confirm answers Remove and Keep and nothing else", () => {
+  assert.equal(confirming(CODES.returnKey), Keymap.REMOVE_MODEL)
+  assert.equal(confirming(CODES.enter), Keymap.REMOVE_MODEL)
+  assert.equal(confirming(CODES.escape), Keymap.KEEP_MODEL)
+})
+
+// The confirm sits over the Settings view, so a review key must not reach the
+// card behind it: Enter would otherwise accept an Issue nobody can see.
+test("no review key reaches the card behind the model confirm", () => {
+  for (const key of [CODES.space, CODES.up, CODES.down, CODES.a, CODES.c]) {
+    assert.equal(confirming(key), Keymap.NONE)
+  }
+  assert.equal(confirming(CODES.c, CODES.control), Keymap.NONE)
+})
+
+// Ctrl + Enter is Apply everywhere else, and it must not become a Remove that
+// the reader did not mean. Only a plain Enter answers the question.
+test("a modified Enter does not answer the model confirm", () => {
+  assert.equal(confirming(CODES.returnKey, CODES.control), Keymap.NONE)
+  assert.equal(confirming(CODES.returnKey, CODES.alt), Keymap.NONE)
+  assert.equal(confirming(CODES.returnKey, CODES.meta), Keymap.NONE)
+})
+
+// Esc leaves every card, and here it leaves the question rather than the
+// overlay, so a mistaken bin press costs one key.
+test("Esc answers the confirm rather than closing the overlay", () => {
+  assert.notEqual(confirming(CODES.escape), Keymap.CLOSE)
+  assert.equal(confirming(CODES.escape, CODES.alt), Keymap.KEEP_MODEL)
 })

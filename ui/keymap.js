@@ -54,10 +54,12 @@ function action(event, codes, mode) {
   var enter = key === codes.enter || key === codes.returnKey
 
   // The confirm is a question, so Esc answers it rather than leaving the card
-  // with the question still open behind it.
+  // with the question still open behind it. Only a bare Enter answers the
+  // other way: Ctrl + Enter is Apply on every other card, and a reader who
+  // pressed it out of habit did not ask for a model to be deleted.
   if (mode === MODE_MODEL_CONFIRM) {
     if (key === codes.escape) return KEEP_MODEL
-    if (foreign) return NONE
+    if (foreign || control) return NONE
     return enter ? REMOVE_MODEL : NONE
   }
 
