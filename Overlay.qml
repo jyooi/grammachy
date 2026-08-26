@@ -509,8 +509,8 @@ Item {
   // and `modelActionProcess` carries the one verb the user asked for. Both
   // answer the same envelope, so one reader serves them.
 
-  function modelCommand(arguments) {
-    return [root.binaryPath, "model"].concat(arguments)
+  function modelCommand(verbArgs) {
+    return [root.binaryPath, "model"].concat(verbArgs)
   }
 
   // The list as it is right now. It runs when Settings opens on the Local LLM
@@ -549,7 +549,7 @@ Item {
   // Spec section 5.3: one download at a time, so a second Download while one is
   // in flight is a no-op rather than a second transfer.
   function downloadModel(name) {
-    if (root.modelBusy.length > 0) return
+    if (root.modelBusy.length > 0 || modelActionProcess.running) return
     root.modelNote = null
     root.modelBusy = name
     root.runModelAction(["download", name])
@@ -573,7 +573,7 @@ Item {
   // Remove asks once when the setting resolves to this model, because the next
   // Check would then have nothing to load. Every other row goes straight out.
   function removeModel(name) {
-    if (root.modelBusy.length > 0) return
+    if (root.modelBusy.length > 0 || modelActionProcess.running) return
     root.modelNote = null
     if (String(root.setting("openaiModel")) !== name) {
       root.runModelAction(["remove", name])
@@ -605,9 +605,13 @@ Item {
     root.phaseBeforeModelConfirm = ""
   }
 
-  function runModelAction(arguments) {
-    modelActionProcess.verbName = arguments.length > 1 ? String(arguments[1]) : ""
-    modelActionProcess.command = root.modelCommand(arguments)
+  // One verb at a time. Setting `command` under a process that is already
+  // running would change what the answer on its way back belongs to, and
+  // setting `running` again is a no-op, so the second verb would vanish.
+  function runModelAction(verbArgs) {
+    if (modelActionProcess.running) return
+    modelActionProcess.verbName = verbArgs.length > 1 ? String(verbArgs[1]) : ""
+    modelActionProcess.command = root.modelCommand(verbArgs)
     modelActionProcess.launchPending = true
     modelActionProcess.running = true
   }
