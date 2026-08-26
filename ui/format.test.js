@@ -10,8 +10,9 @@ const Splice = require("./splice.js")
 const Limits = require("./limits.js")
 
 // The two limits of the CLI. `cli/tests/overlay_limit.rs` keeps the QML copies
-// of these equal to `check::MAX_UTF16_UNITS` and `chunk::MAX_DRAFT_UTF16_UNITS`.
-const CHECK_LIMIT = 5000
+// of these equal to `EngineSlug::check_limit_utf16` and
+// `chunk::MAX_DRAFT_UTF16_UNITS`.
+const CHECK_LIMIT = Limits.checkLimit("languagetool")
 const CAP = 50000
 
 test("a size over a thousand is grouped, so it can be read at a glance", () => {

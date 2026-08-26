@@ -115,8 +115,10 @@ Item {
   property bool chunkRun: false
   property bool chunkCancelled: false
   // The engine slug the Chunk list was packed for. The limit belongs to the
-  // Engine (spec section 4), so a Chunk list only fits the engine that sized
-  // it, and a Chunk packed for a wider Engine is refused by a narrower one.
+  // Engine (spec section 4), so a Chunk list only fits the size that Engine
+  // reads: a Chunk packed for a wider Engine is refused by a narrower one.
+  // Every Check of this run names it, so a setting changed mid-run reaches the
+  // next run rather than the Chunks already cut.
   property string chunkEngine: ""
   // Engine time from every Chunk that finished, which is what the result line
   // names, the same number the popup's does.
@@ -202,17 +204,24 @@ Item {
     root.applied = false
   }
 
-  // The engine an error card names, spec section 8: the display name of the
-  // current engine setting, which is the name the Settings dropdown shows.
-  function engineLabel() {
-    return Settings.labelOf(Settings.ENGINE_OPTIONS, root.setting("engine"))
+  // The engine an error card names, spec section 8: the display name of one
+  // engine slug, which is the name the Settings dropdown shows for it.
+  function engineLabel(engineSlug) {
+    return Settings.labelOf(Settings.ENGINE_OPTIONS, engineSlug)
   }
 
-  function checkCommand() {
+  // The Engine a Chunk run belongs to. The list is packed before the first
+  // Check, so a run in flight always has one; outside a run the setting is
+  // what the next Check will name.
+  function runEngine() {
+    return root.chunkEngine !== "" ? root.chunkEngine : root.setting("engine")
+  }
+
+  function checkCommand(engineSlug) {
     var command = [root.binaryPath, "check"]
     var nativeLanguage = root.setting("nativeLanguage")
     if (nativeLanguage !== "none") command.push("--native", nativeLanguage)
-    command.push("--engine", root.setting("engine"))
+    command.push("--engine", engineSlug)
     return command
   }
 
@@ -461,10 +470,10 @@ Item {
   // One `grammachy check` on this text. What the answer means belongs to the
   // caller: the quick popup checks the whole Selection, and the chunked run of
   // spec section 9 checks one Chunk of the Draft.
-  function launchCheck(text) {
+  function launchCheck(text, engineSlug) {
     checkProcess.generation = root.runGeneration
     checkProcess.stdinText = text
-    checkProcess.command = root.checkCommand()
+    checkProcess.command = root.checkCommand(engineSlug)
     // Writing to stdin closes it, so every run arms the channel again.
     checkProcess.stdinEnabled = true
     checkProcess.restartQueued = checkProcess.running
@@ -485,7 +494,7 @@ Item {
     root.errorCard = null
     root.errorDiagnosis = ""
     root.phase = "checking"
-    root.launchCheck(text)
+    root.launchCheck(text, root.setting("engine"))
   }
 
   // The `Check the first N only` button of the too-long card, spec section 8.
@@ -606,7 +615,9 @@ Item {
       root.finishChunkRun()
       return
     }
-    root.launchCheck(Splice.chunkText(root.draftText, root.chunks[root.chunkIndex]))
+    // The Chunk was cut to fit the Engine the list was packed for, so that is
+    // the Engine that reads it, whatever the setting says by now.
+    root.launchCheck(Splice.chunkText(root.draftText, root.chunks[root.chunkIndex]), root.runEngine())
   }
 
   // One Chunk's answer merged into the run, spec section 9. Every span moves by
@@ -667,19 +678,19 @@ Item {
     root.cardSerial += 1
     root.errorDiagnosis = ""
     root.errorCard = Errors.chunkCard(code, {
-      engineLabel: root.engineLabel(),
-      engineSlug: root.setting("engine"),
+      engineLabel: root.engineLabel(root.runEngine()),
+      engineSlug: root.runEngine(),
       message: message,
       hasPartial: root.issues.length > 0
     })
     root.phase = "error"
-    if (root.errorCard.needsDiagnosis) root.runDoctor()
+    if (root.errorCard.needsDiagnosis) root.runDoctor(root.runEngine())
   }
 
-  // A Chunk list fits only the Engine that sized it, because the limit belongs
+  // A Chunk list fits only the size it was packed to, because the limit belongs
   // to the Engine (spec section 4). A reader who opens Settings at the failure
-  // and picks a narrower Engine leaves every remaining Chunk too long for it,
-  // so that list ends here and the retry packs a new one from the whole Draft.
+  // and picks an Engine of another size leaves every remaining Chunk the wrong
+  // length, so that list ends here and the retry packs a new one.
   // The Issues of the finished Chunks go with it, or the Chunks that answer
   // again would report each of them twice.
   function dropChunkListForNewEngine() {
@@ -702,7 +713,13 @@ Item {
     root.errorCard = null
     root.errorDiagnosis = ""
     root.engineMessage = ""
-    if (root.chunkEngine !== root.setting("engine")) root.dropChunkListForNewEngine()
+    // The reader may have picked another Engine at the failure, and the retry
+    // is where that choice takes effect. A list packed to another size cannot
+    // be resumed and is packed again; one of the same size resumes on the new
+    // Engine and keeps the Issues the finished Chunks found.
+    if (Limits.checkLimit(root.chunkEngine) !== Limits.checkLimit(root.setting("engine")))
+      root.dropChunkListForNewEngine()
+    else root.chunkEngine = root.setting("engine")
     root.beginChunkAttempt()
     if (root.chunks.length === 0) root.runChunkList()
     else root.runChunk()
@@ -788,18 +805,18 @@ Item {
     root.cardSerial += 1
     root.errorDiagnosis = ""
     root.errorCard = Errors.card(settled, {
-      engineLabel: root.engineLabel(),
+      engineLabel: root.engineLabel(root.setting("engine")),
       engineSlug: root.setting("engine"),
       message: message
     })
     root.phase = "error"
-    if (root.errorCard.needsDiagnosis) root.runDoctor()
+    if (root.errorCard.needsDiagnosis) root.runDoctor(root.setting("engine"))
   }
 
   // Spec section 8: the `engine_unavailable` card shows the one-line diagnosis
-  // that `grammachy doctor` gives for the engine the setting names.
-  function runDoctor() {
-    doctorProcess.command = [root.binaryPath, "doctor", "--engine", root.setting("engine"), "--json"]
+  // that `grammachy doctor` gives for the engine the card names.
+  function runDoctor(engineSlug) {
+    doctorProcess.command = [root.binaryPath, "doctor", "--engine", engineSlug, "--json"]
     if (doctorProcess.running) {
       doctorProcess.restartQueued = true
       doctorProcess.running = false

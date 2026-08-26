@@ -36,7 +36,7 @@ fn int_property(source: &str, name: &str) -> usize {
         .find(&needle)
         .unwrap_or_else(|| panic!("the QML declares {name}"))
         + needle.len();
-    integer_after(rest_of(source, start), name)
+    integer_after(&source[start..], name)
 }
 
 /// The answer `Limits.checkLimit` gives each slug, read by running the module
@@ -71,10 +71,6 @@ fn node_check_limits(slugs: &[EngineSlug]) -> Option<Vec<usize>> {
         String::from_utf8_lossy(&output.stderr)
     );
     Some(serde_json::from_slice(&output.stdout).expect("node answered a list of numbers"))
-}
-
-fn rest_of(source: &str, start: usize) -> &str {
-    &source[start..]
 }
 
 /// The first `lines` lines of the binding `<name>:` in a QML file.

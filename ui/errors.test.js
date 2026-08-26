@@ -41,6 +41,7 @@ const {
 
 const { ENGINE_OPTIONS, labelOf } = require("./settings.js")
 const { chunkText, shiftIssues, mergeIssues, verifiedIssues } = require("./splice.js")
+const Limits = require("./limits.js")
 
 function languageToolCard(code, message) {
   return card(code, {
@@ -556,18 +557,21 @@ function packChunks(binary, draft, run, options) {
 }
 
 // The walk itself, resumed at the Chunk that stopped it. Every Check names the
-// Engine the settings hold now, the way `Overlay.checkCommand` does.
+// Engine the list was packed for, the way `Overlay.runChunk` names
+// `runEngine()`: the Chunk was cut to a size, and only that Engine reads it.
+// `settings.engine` is the live setting, which the reader can move while the
+// walk runs.
 function resumeChunked(binary, draft, run, options) {
   const settings = options || {}
-  const engine = settings.engine || DEFAULT_ENGINE
   run.card = null
   while (run.index < run.chunks.length) {
     const chunk = run.chunks[run.index]
-    const answer = readCheck(spawnSync(binary, ["check", "--engine", engine],
+    const answer = readCheck(spawnSync(binary, ["check", "--engine", run.chunkEngine],
       { input: chunkText(draft, chunk), encoding: "utf8" }).stdout)
 
     if (answer.error) {
-      run.card = chunkCardOf(engine, answer.error.code, answer.error.message, run.issues.length > 0)
+      run.card = chunkCardOf(
+        run.chunkEngine, answer.error.code, answer.error.message, run.issues.length > 0)
       return run
     }
 
@@ -576,6 +580,11 @@ function resumeChunked(binary, draft, run, options) {
     run.engine = String(answer.result.engine || run.engine)
     run.elapsedMs += Number(answer.result.elapsedMs || 0)
     run.index += 1
+
+    // The reader picks another Engine in the Settings view, which stays
+    // reachable while the Check runs.
+    if (settings.switchAfter && run.index === settings.switchAfter.chunks)
+      settings.engine = settings.switchAfter.to
 
     // Cancel stops the run after the Chunk in flight, spec section 9.
     if (settings.cancelAfter && run.index >= settings.cancelAfter) {
@@ -586,18 +595,21 @@ function resumeChunked(binary, draft, run, options) {
   return run
 }
 
-// `Retry remaining` as `Overlay.retryRemaining` drives it. A Chunk list packed
-// for another Engine no longer fits, so it is dropped and the Draft is packed
-// again; every other failure resumes at the Chunk that stopped the run.
+// `Retry remaining` as `Overlay.retryRemaining` drives it. The retry is where a
+// new Engine takes effect: a list packed to another size cannot be resumed and
+// is packed again, and one of the same size resumes on the new Engine with the
+// Issues the finished Chunks found still in hand.
 function retryRemaining(binary, draft, run, options) {
   const settings = options || {}
   const engine = settings.engine || DEFAULT_ENGINE
-  if (run.chunkEngine !== engine) {
+  if (Limits.checkLimit(run.chunkEngine) !== Limits.checkLimit(engine)) {
     run.chunks = []
     run.index = 0
     run.chunkEngine = ""
     run.elapsedMs = 0
     run.issues = []
+  } else {
+    run.chunkEngine = engine
   }
   if (run.chunks.length === 0) return packChunks(binary, draft, run, settings)
   return resumeChunked(binary, draft, run, settings)
@@ -718,6 +730,54 @@ test("Retry remaining on the same Engine resumes the Chunk list in hand", () => 
   assert.equal(resumed.chunks.length, CHUNK_COUNT)
   assert.equal(resumed.index, CHUNK_COUNT)
   assert.deepEqual(resumed.issues.map(issue => issue.start), WANTED_STARTS)
+})
+
+// A Chunk is cut to the size one Engine reads (spec section 4), so the Check
+// that reads it has to be that Engine. The Settings view stays reachable while
+// the run walks, so a reader can pick a narrower Engine mid-run; the Chunks in
+// hand are still the old size, and sending one of them to the new Engine would
+// answer text_too_long and blame the engine for a Chunk the shell sized.
+test("a run finishes on the Engine its Chunks were packed for when the setting moves mid-run", () => {
+  const binary = chunkedStub("chunked-switch-mid-run", 0, 0)
+  const live = { engine: "languagetool", switchAfter: { chunks: 1, to: "openai" } }
+  const run = runChunked(binary, DRAFT, live)
+
+  // The reader really did change the setting while the walk ran.
+  assert.equal(live.engine, "openai")
+  assert.notEqual(Limits.checkLimit("openai"), Limits.checkLimit("languagetool"))
+
+  assert.equal(run.card, null, "no Chunk was refused for its size")
+  assert.equal(run.chunkEngine, "languagetool")
+  // The stub names the engine each Check ran on, so this is the whole claim.
+  assert.equal(run.engine, "languagetool")
+  assert.equal(run.index, CHUNK_COUNT)
+  assert.deepEqual(run.issues.map(issue => issue.start), WANTED_STARTS)
+})
+
+// Two Engines that read the same number of units share a Chunk list, so the
+// size is what decides whether the retry can resume, not the slug. The retry is
+// also where the reader's new Engine takes effect, which is what makes the
+// Settings view a recovery from `engine_unavailable`.
+test("Retry remaining on an Engine of the same size resumes on it and keeps the partial Issues", () => {
+  const binary = chunkedStub("chunked-same-size-engine", 0, 3)
+  const run = runChunked(binary, DRAFT, { engine: "languagetool" })
+
+  assert.equal(run.card.code, ENGINE_UNAVAILABLE)
+  assert.equal(run.index, 2)
+  assert.deepEqual(run.issues.map(issue => issue.start), WANTED_STARTS.slice(0, 10))
+
+  // The reader picks Harper, which reads the same number of units.
+  assert.equal(Limits.checkLimit("harper"), Limits.checkLimit("languagetool"))
+  const resumed = retryRemaining(binary, DRAFT, run, { engine: "harper" })
+
+  assert.equal(resumed.card, null)
+  assert.equal(packCount("chunked-same-size-engine"), 1, "no second Chunk list was asked for")
+  assert.equal(resumed.index, CHUNK_COUNT)
+  // The two Chunks that finished are still in hand, and the rest ran on the
+  // Engine the reader picked.
+  assert.deepEqual(resumed.issues.map(issue => issue.start), WANTED_STARTS)
+  assert.equal(resumed.chunkEngine, "harper")
+  assert.equal(resumed.engine, "harper")
 })
 
 test("a chunk step that cannot answer stops the run before any Check", () => {
