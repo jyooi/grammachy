@@ -36,8 +36,10 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   A test that runs the binary must also point `openaiBaseUrl` away from the default `127.0.0.1:8080`, because a developer machine may answer there.
   `cli/tests/bench.rs` writes a dead address into every settings file for that reason.
   Live tests in `languagetool_live.rs`, `openai_live.rs`, and `interference_catch_rate.rs` skip when their port is silent, which keeps CI green without the packages.
-- llama.cpp binds its port before it has read the weights and answers HTTP 503 until it has, which is minutes for a 5 GB file.
-  `openai/mod.rs` maps that one status to `engine_unavailable`, so `start_and_retry` waits it out instead of calling the first Check of a session an engine error.
+- llama.cpp binds its port before it has read the weights.
+  Until they are loaded it answers HTTP 503, which is minutes for a 5 GB file.
+  `openai/mod.rs` maps that one status to `engine_unavailable`.
+  `start_and_retry` then waits it out rather than failing the first Check of a session.
 - The `openai` base URL host must be loopback, and `cli/src/engines/openai/endpoint.rs` is the only place that decides it.
   A remote host is `bad_arguments` and no request is made; that is a product guarantee, so keep it tested.
   Its prompt in `prompt.rs` is the wording HUF-181 measured, and the "shortest exact substring" rule is what makes the spans usable rather than whole-sentence rewrites.
@@ -49,12 +51,16 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   The default lives twice, in `settings::DEFAULT_LOCAL_THINKING` and in the `localThinking` descriptor of `ui/settings.js`.
   `cli/tests/overlay_thinking.rs` keeps the two equal and keeps the Toggle inside the group the engine hides.
 - `grammachy model` lives in `cli/src/model/`, spec section 5.3: `list`, `download`, and `remove` for the Local LLM weights, plus the `ensure` that `setup` still calls.
-  `setup/model.rs` moved here; `setup/mod.rs` calls `model::ensure` and owns nothing about weights any more.
-  The catalogue is `mod.rs` and every row is pinned twice, by sha256 and by byte size, both read from the Hugging Face `x-linked-etag` and `x-linked-size` of an unauthenticated request.
+  `setup/model.rs` moved here.
+  `setup/mod.rs` calls `model::ensure` and owns nothing about weights any more.
+  The catalogue is `mod.rs` and every row is pinned twice, by sha256 and by byte size.
+  Both numbers are the `x-linked-etag` and `x-linked-size` of an unauthenticated Hugging Face request.
   A row belongs there only when that request answers 200 without a token.
-  The three verbs agree on one pair of paths, the row's own pinned file name and its `.part`, so a hand-placed `.gguf` is never listed and never deleted.
-  The licence of a row comes from `bench::weights::of`, which is the one product rule of spec section 13.1.
-  `cancel.rs` is the whole cancel: the SIGTERM handler only sets a flag, and `curl` polls that flag so the child dies and the `.part` file stays.
+  The three verbs agree on one pair of paths, the row's pinned file name and its `.part`.
+  So a hand-placed `.gguf` is never listed and never deleted.
+  The licence of a row comes from `bench::weights::of`, the one product rule of spec section 13.1.
+  `cancel.rs` is the whole cancel.
+  The SIGTERM handler only sets a flag, and `curl` polls it so the child dies and the `.part` file stays.
   Seams are `GRAMMACHY_MODELS_DIR`, `GRAMMACHY_MODEL_BASE_URL`, `GRAMMACHY_MODEL_SHA256`, `GRAMMACHY_LLAMA_STOP`, plus the `Downloader` and `Stopper` values.
   `cli/tests/model_download.rs` and `cli/tests/model_cancel.rs` each own their whole binary, because one sets a digest for the process and the other takes the signal disposition over.
 - `grammachy setup` lives in `cli/src/setup/`, spec section 10.
@@ -136,9 +142,12 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   A plugin folder that is a symlink reloads as `docs/dev.md` step 4 says.
   A leaf card does run outside the shell: a scratch Quickshell config whose root directory holds `Commons` and `Ui` symlinks into `/usr/share/omarchy/shell` plus a `ui` symlink into the repo can instantiate `ComposeCard` or `QuickCard` in a `FloatingWindow`, which is the fastest way to see a layout change without installing the plugin.
 - The Models list of spec sections 5.3 and 7 is `ui/models.js` plus `ui/ModelsView.qml`, embedded by `SettingsView.qml` and shown for the `openai` engine only.
-  `models.js` owns the envelope reader, the row state rule, the byte formatting, the hint line, and which buttons a row carries; `ui/models.test.js` runs the whole route against a stub binary that answers all three verbs.
-  `Overlay.qml` owns the two processes and the one-second `modelPoll`: the CLI prints nothing while curl runs, so the `.part` length that `model list` reports is the only progress there is.
-  Cancel is `modelActionProcess.signal(15)` and never `running = false`, which would orphan curl; `resetRun` deliberately touches none of the model state, because closing the overlay must not cancel a download.
+  `models.js` owns the envelope reader, the row state rule, the byte formatting, the hint line, and the row buttons.
+  `ui/models.test.js` runs the whole route against a stub binary that answers all three verbs.
+  `Overlay.qml` owns the two processes and the one-second `modelPoll`.
+  The CLI prints nothing while curl runs, so the `.part` length `model list` reports is the only progress there is.
+  Cancel is `modelActionProcess.signal(15)` and never `running = false`, which would orphan curl.
+  `resetRun` deliberately touches none of the model state, because closing the overlay must not cancel a download.
   `confirmModel` is a `phase` with its own `Overlay.keyMode` entry, and `cli/tests/overlay_models.rs` keeps all of that in step.
   [ADR 0004](docs/adr/0004-model-downloads-run-through-the-cli.md) records why the download lives in the CLI.
 - `ui/anchor.js` owns both answers the source window of spec section 3 gives: where the quick popup opens (`placeCard`) and where Replace types (`focusCommand`, `isFocused`).
