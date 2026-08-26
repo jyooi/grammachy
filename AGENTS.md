@@ -43,11 +43,16 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 - The `openai` base URL host must be loopback, and `cli/src/engines/openai/endpoint.rs` is the only place that decides it.
   A remote host is `bad_arguments` and no request is made; that is a product guarantee, so keep it tested.
   Its prompt in `prompt.rs` is the wording HUF-181 measured, and the "shortest exact substring" rule is what makes the spans usable rather than whole-sentence rewrites.
+  That wording is one prompt for every engine, so a change to it moves the cloud rows too.
+  `prompt::request_body` takes a `Force`: llama-server gets the raw GBNF of `prompt::GRAMMAR`, which no rule lets emit whitespace between tokens, and a cloud provider gets the `json_schema` response format (HUF-219, evals spec section 6).
+  The grammar is the only thing that makes the answer compact, which is what drops a local Issue from about 56 output tokens to about 30.
   Thinking (spec section 4) travels on the request as `chat_template_kwargs.enable_thinking` and never on the unit.
   That is what makes a change of the Setting need no restart.
   The unit only bounds and routes the think, with `--reasoning-budget` and `--reasoning-format deepseek`.
   That format keeps the think in `message.reasoning_content`.
   `response::parse_array` drops a leading think anyway, because `openaiBaseUrl` may name a server this adapter did not start.
+  A raw grammar bounds the whole generation, so the `deepseek` parser sees no closing tag and files the answer under `message.reasoning_content` with an empty `content`.
+  `response::answer_of` reads it there, which is safe only because a grammar-bounded generation can hold no rejected draft.
   The default lives twice, in `settings::DEFAULT_LOCAL_THINKING` and in the `localThinking` descriptor of `ui/settings.js`.
   `cli/tests/overlay_thinking.rs` keeps the two equal and keeps the Toggle inside the group the engine hides.
 - `grammachy model` lives in `cli/src/model/`, spec section 5.3: `list`, `download`, and `remove` for the Local LLM weights, plus the `ensure` that `setup` still calls.

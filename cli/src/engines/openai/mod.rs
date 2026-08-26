@@ -211,7 +211,7 @@ impl Engine for Openai {
         let endpoint =
             endpoint::parse(&options.openai_base_url).map_err(EngineFailure::BadArguments)?;
 
-        let body = prompt::request_body(text, options).to_string();
+        let body = prompt::request_body(text, options, prompt::Force::Grammar).to_string();
 
         let answer = match self.request(&endpoint, options, &body) {
             Err(EngineFailure::Unavailable(message)) => {

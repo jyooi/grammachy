@@ -209,8 +209,8 @@ impl Report {
         out.push('\n');
 
         out.push_str("### Throughput\n\n");
-        out.push_str("| Model | Time to first token (p50) | Output tokens per second | Output tokens per Check (p50) |\n");
-        out.push_str("|---|---|---|---|\n");
+        out.push_str("| Model | Time to first token (p50) | Output tokens per second | Output tokens per Check (p50) | Output tokens per Issue |\n");
+        out.push_str("|---|---|---|---|---|\n");
         for row in &self.models {
             out.push_str(&format!(
                 "| `{}` | {} |\n",
@@ -218,7 +218,8 @@ impl Report {
                 throughput_cells(&row.outcome).join(" | ")
             ));
         }
-        out.push_str("\nTime to first token and the token rate come from the model server's own timings. A rate marked `whole request` is output tokens over the request time as seen from this machine, network included, because the provider reports no timings.\n\n");
+        out.push_str("\nTime to first token and the token rate come from the model server's own timings. A rate marked `whole request` is output tokens over the request time as seen from this machine, network included, because the provider reports no timings.\n");
+        out.push_str("Output tokens per Issue is the output tokens of the row over the Issues the same Checks answered, so it prices one Issue rather than one Check.\n\n");
 
         out.push_str("### Recall by native language\n\n");
         out.push_str(&format!("| Model | {} |\n", self.languages.join(" | ")));
@@ -411,10 +412,10 @@ fn quality_cells(outcome: &Outcome) -> Vec<String> {
     }
 }
 
-/// The three measured cells of one Throughput row.
+/// The four measured cells of one Throughput row.
 fn throughput_cells(outcome: &Outcome) -> Vec<String> {
     let Outcome::Measured(measurement) = outcome else {
-        return vec![SKIPPED.to_string(); 3];
+        return vec![SKIPPED.to_string(); 4];
     };
     let throughput = &measurement.tally.throughput;
     let unmeasured = || "not measured".to_string();
@@ -436,6 +437,10 @@ fn throughput_cells(outcome: &Outcome) -> Vec<String> {
         throughput
             .output_tokens_p50
             .map(|tokens| tokens.to_string())
+            .unwrap_or_else(unmeasured),
+        throughput
+            .tokens_per_issue
+            .map(|tokens| format!("{tokens:.1}"))
             .unwrap_or_else(unmeasured),
     ]
 }
@@ -737,6 +742,7 @@ mod tests {
             tokens_per_second: Some(25.3),
             whole_request: false,
             output_tokens_p50: Some(480),
+            tokens_per_issue: Some(30.4),
         };
         let mut cloud = tally(30, 29, 0, 40);
         cloud.throughput = crate::bench::metrics::Throughput {
@@ -744,6 +750,7 @@ mod tests {
             tokens_per_second: Some(31.0),
             whole_request: true,
             output_tokens_p50: Some(120),
+            tokens_per_issue: None,
         };
         report.models = vec![
             model(
@@ -763,12 +770,12 @@ mod tests {
         let rendered = report.render();
 
         assert!(
-            rendered.contains("| `gemma-4-e4b-it` | 510 ms | 25.3 | 480 |"),
+            rendered.contains("| `gemma-4-e4b-it` | 510 ms | 25.3 | 480 | 30.4 |"),
             "{rendered}"
         );
         assert!(
             rendered.contains(
-                "| `deepseek/deepseek-v4-flash-0731` | not measured | 31.0 (whole request) | 120 |"
+                "| `deepseek/deepseek-v4-flash-0731` | not measured | 31.0 (whole request) | 120 | not measured |"
             ),
             "{rendered}"
         );

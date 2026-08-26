@@ -111,7 +111,9 @@ Runner behaviour the pilot fixed or required ([HUF-209](https://linear.app/huffm
 
 The Engines table keeps its four columns.
 Models splits into three tables per set: Quality (Catch, Precision, Recall, F0.5, Exact fix, FP, Creep, Valid, Useful fix when present), Cost (Thinking, p50, p95, Memory, Cost / 1k, Licence, Recommended), and Recall by native language.
-A Throughput table (time to first token p50, output tokens per second, output tokens per Check p50) follows for local rows; cloud rows print whole-request rates because providers report no timings.
+A Throughput table follows for local rows: time to first token p50, output tokens per second, output tokens per Check p50, and output tokens per Issue.
+Cloud rows print whole-request rates, because providers report no timings.
+Output tokens per Issue is the number section 6 halves, so the file shows whether the compact answer landed.
 The Chunk table (section 1) prints wall time, validity, and recall per local row.
 Wall time per row and the run's cloud spend print under the tables.
 

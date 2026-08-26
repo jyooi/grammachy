@@ -33,6 +33,10 @@ pub struct Choice {
 pub struct Message {
     #[serde(default)]
     pub content: Option<String>,
+    /// Where `--reasoning-format deepseek` files the think, and where a
+    /// grammar-forced answer arrives whole. See [`answer_of`].
+    #[serde(default)]
+    pub reasoning_content: Option<String>,
 }
 
 /// One element of the array the model returns.
@@ -81,10 +85,31 @@ pub fn issues_from(text: &str, response: &ChatResponse) -> Result<Vec<Issue>, St
         .choices
         .first()
         .and_then(|choice| choice.message.as_ref())
-        .and_then(|message| message.content.as_deref())
+        .and_then(answer_of)
         .ok_or_else(|| "The model server answered with no message.".to_string())?;
 
     Ok(issues_from_content(text, content))
+}
+
+/// The answer text, wherever the server filed it.
+///
+/// llama.cpp applies a raw `grammar` to the whole generation, so a thinking
+/// chat template (spec section 4) and the grammar of [`super::prompt::GRAMMAR`]
+/// together leave `content` empty and the array under `reasoning_content`: the
+/// `deepseek` reasoning parser never sees a closing tag, because the grammar
+/// forbids one. Reading a think is otherwise wrong, which is what
+/// [`parse_array`] guards, but a generation the grammar bounds can hold nothing
+/// but the array, so there is no rejected draft here to mistake for the answer.
+fn answer_of(message: &Message) -> Option<&str> {
+    let content = message.content.as_deref();
+    if content.is_some_and(|text| !text.trim().is_empty()) {
+        return content;
+    }
+    message
+        .reasoning_content
+        .as_deref()
+        .filter(|text| !text.trim().is_empty())
+        .or(content)
 }
 
 /// Map the message content, whatever it is wrapped in, to Issues.
@@ -317,6 +342,39 @@ mod tests {
 
         assert_eq!(place(text, "book", &[], Some(30)), Some((30, 34)));
         assert_eq!(place(text, "book", &[(30, 34)], Some(30)), Some((11, 15)));
+    }
+
+    fn message(content: Option<&str>, reasoning: Option<&str>) -> Message {
+        Message {
+            content: content.map(str::to_string),
+            reasoning_content: reasoning.map(str::to_string),
+        }
+    }
+
+    /// The grammar forbids the closing think tag, so llama.cpp files the whole
+    /// grammar-forced answer as reasoning and leaves the content empty.
+    #[test]
+    fn a_grammar_forced_answer_is_read_from_the_reasoning_field() {
+        let answer =
+            r#"[{"original":"go","fix":"went","reason":"past tense","category":"grammar"}]"#;
+        let filed = message(Some(""), Some(answer));
+
+        assert_eq!(answer_of(&filed), Some(answer));
+    }
+
+    /// A think the model really wrote is never the answer, so a non-empty
+    /// content always wins (HUF-224).
+    #[test]
+    fn a_think_beside_a_real_answer_is_ignored() {
+        let filed = message(Some("[]"), Some("I could report \"go\" here."));
+
+        assert_eq!(answer_of(&filed), Some("[]"));
+    }
+
+    #[test]
+    fn a_message_with_neither_field_is_no_answer() {
+        assert_eq!(answer_of(&message(None, None)), None);
+        assert_eq!(answer_of(&message(Some(""), None)), Some(""));
     }
 
     #[test]

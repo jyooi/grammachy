@@ -108,6 +108,10 @@ pub struct Throughput {
     pub whole_request: bool,
     /// Median output tokens of one Check.
     pub output_tokens_p50: Option<u64>,
+    /// Output tokens of the row divided by the Issues those same Checks
+    /// answered. This is the number HUF-218 measured at about 56 and HUF-219
+    /// set out to halve, so it is what says whether the compact answer landed.
+    pub tokens_per_issue: Option<f64>,
 }
 
 impl Tally {
@@ -314,11 +318,25 @@ impl Throughput {
         let ms: f64 = pairs.iter().map(|(_, ms)| ms).sum();
         let tokens_per_second = (ms > 0.0).then(|| tokens as f64 / ms * 1_000.0);
 
+        // Both sides of the ratio come from the same Checks: a Check whose
+        // server reported no token count would otherwise put its Issues in the
+        // denominator with nothing in the numerator.
+        let counted: Vec<(u64, usize)> = valid
+            .iter()
+            .filter_map(|sentence| {
+                Some((sentence.usage?.completion_tokens?, sentence.issues.len()))
+            })
+            .collect();
+        let counted_tokens: u64 = counted.iter().map(|(tokens, _)| tokens).sum();
+        let counted_issues: usize = counted.iter().map(|(_, issues)| issues).sum();
+
         Throughput {
             ttft_p50_ms: (!ttft.is_empty()).then(|| nearest_rank(&ttft, 0.5)),
             tokens_per_second,
             whole_request: whole_request && tokens_per_second.is_some(),
             output_tokens_p50: (!outputs.is_empty()).then(|| nearest_rank(&outputs, 0.5)),
+            tokens_per_issue: (counted_issues > 0)
+                .then(|| counted_tokens as f64 / counted_issues as f64),
         }
     }
 }

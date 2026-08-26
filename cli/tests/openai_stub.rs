@@ -506,6 +506,33 @@ fn the_request_carries_the_prompt_the_model_and_the_key() {
 }
 
 #[test]
+fn the_request_carries_the_grammar_and_no_response_format() {
+    // HUF-219: llama-server is the one server that takes a raw GBNF, and the
+    // grammar is what forbids the whitespace the response format allowed.
+    let stub = Stub::serving(Answer::Json(ANSWER));
+    let starts = Starts::default();
+
+    adapter(Duration::from_secs(2), true, &starts)
+        .check(TEXT, &options(&stub.base_url()))
+        .expect("the stub answers");
+
+    let request = stub.requests().remove(0);
+    let body: serde_json::Value = serde_json::from_str(
+        request
+            .split_once("\r\n\r\n")
+            .expect("the request has a body")
+            .1,
+    )
+    .expect("the body is JSON");
+
+    assert_eq!(
+        body["grammar"],
+        serde_json::json!(grammachy::engines::openai::prompt::GRAMMAR)
+    );
+    assert!(body.get("response_format").is_none(), "{body}");
+}
+
+#[test]
 fn a_redirect_is_not_followed() {
     let target = Stub::serving(Answer::Json(ANSWER));
     let location = format!("{}/v1/chat/completions", target.base_url());
