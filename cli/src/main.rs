@@ -3,7 +3,7 @@ use std::process::ExitCode;
 
 use clap::Parser;
 
-use grammachy::args::{CheckArgs, CheckOptions, Cli, Command};
+use grammachy::args::{CheckArgs, CheckOptions, Cli, Command, EngineSlug};
 use grammachy::envelope::{Envelope, ErrorCode};
 use grammachy::settings::StoredSettings;
 use grammachy::setup::{Setup, SetupEnvelope};
@@ -98,12 +98,14 @@ fn run() -> Option<Output> {
             };
             Some(check::run(&text, &options).into())
         }
-        Command::Chunk => {
+        // Chunks are packed to the selected engine's Check size limit, so
+        // `chunk` resolves the engine the same way `check` does.
+        Command::Chunk(args) => {
             let text = match read_stdin() {
                 Ok(text) => text,
                 Err(message) => return Some(bad_stdin(message)),
             };
-            Some(chunk::run(&text).into())
+            Some(chunk::run(&text, engine_of(args.engine).check_limit_utf16()).into())
         }
         Command::Bench(args) => Some(match bench::run(&args, &StoredSettings::load()) {
             Ok(run) => {
@@ -158,6 +160,21 @@ fn run() -> Option<Output> {
             Some(envelope.into())
         }
     }
+}
+
+/// The engine a subcommand that takes no other Check flag runs with: the flag,
+/// then the stored entry, then the default (spec section 7).
+fn engine_of(flag: Option<EngineSlug>) -> EngineSlug {
+    CheckOptions::resolve(
+        &CheckArgs {
+            native: None,
+            target: None,
+            engine: flag,
+            thinking: None,
+        },
+        &StoredSettings::load(),
+    )
+    .engine
 }
 
 fn bad_stdin(message: String) -> Output {

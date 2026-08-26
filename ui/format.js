@@ -19,6 +19,15 @@ function units(count) {
   return grouped(count) + (count === 1 ? " unit" : " units")
 }
 
+// The note a first-N Check leaves on the hero, spec sections 6 and 8.
+//
+// `checked` is the size of the text the Check actually ran on, never the limit
+// it was cut to: the cut backs off a unit to keep a surrogate pair whole, and
+// the Engine that named the limit can be changed after the answer is on screen.
+function truncatedNote(checked, selected) {
+  return "First " + grouped(checked) + " of " + units(selected) + " checked"
+}
+
 // Why Compose will not run a Check on this Draft, or "" when it will.
 //
 // `cap` is the whole Draft limit of spec section 5.2. Anything under it that
@@ -52,6 +61,7 @@ if (typeof module !== "undefined" && module.exports) {
   module.exports = {
     grouped: grouped,
     units: units,
+    truncatedNote: truncatedNote,
     draftRefusal: draftRefusal,
     elapsed: elapsed,
     chunkProgress: chunkProgress

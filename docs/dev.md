@@ -220,6 +220,10 @@ Clear the Draft and repeat: with an empty Draft the selection lands straight awa
 
 The Compose button in the popup header carries the selection the same way, even a short one.
 
+The limit moves with the engine, so repeat the first half with the local LLM.
+Set Engine to `Local LLM` in Settings and select about 3,000 characters.
+Expected: the same too-long card, now reading `2,000 units per check` and `Check the first 2,000 only`.
+
 ## 9. Smoke item 5: a 20,000 unit Draft, with progress, Cancel, and a failure
 
 This is the item chunked checking exists for: a Draft that takes several Chunks, spec section 9.
@@ -241,8 +245,11 @@ The number climbs, the elapsed time counts up, and the bar under `Checking chunk
 `n` is what `grammachy chunk` answered; check it by hand with the same Draft:
 
 ```bash
-python3 -c "print(('I has two book and she go home every day. ' * 500)[:20000], end='')" | bin/grammachy chunk | jq '.chunks | length'
+python3 -c "print(('I has two book and she go home every day. ' * 500)[:20000], end='')" | bin/grammachy chunk --engine languagetool | jq '.chunks | length'
 ```
+
+The Chunks are packed to the selected engine's limit, so `--engine openai` answers ten Chunks for the same Draft.
+Without the flag the CLI reads the engine from the Settings entry, which is what the shell relies on.
 
 3. Let it finish.
 
@@ -531,7 +538,7 @@ The same three plugin checks CI runs, against the shell installed on this machin
 ```bash
 for file in $(find . -name '*.qml' | sort); do qmllint -I /usr/share/omarchy/shell "$file" || echo "FAILED $file"; done
 omarchy-plugin-validate .
-node --test ui/splice.test.js ui/tokens.test.js ui/settings.test.js ui/keymap.test.js ui/errors.test.js ui/format.test.js ui/anchor.test.js
+node --test ui/splice.test.js ui/tokens.test.js ui/settings.test.js ui/keymap.test.js ui/errors.test.js ui/format.test.js ui/anchor.test.js ui/limits.test.js
 ```
 
 The `qmllint` on `PATH` reports a syntax error through its exit status alone and prints nothing.

@@ -21,7 +21,7 @@ pub enum Command {
     Check(CheckArgs),
 
     /// Split the Draft on stdin into Chunks that each fit one Check.
-    Chunk,
+    Chunk(ChunkArgs),
 
     /// Run the interference fixture through every engine this machine reaches
     /// and print the benchmark file on stdout (spec section 13.1).
@@ -32,6 +32,16 @@ pub enum Command {
 
     /// Install the hotkeys, the menu entry, and the weights, without a password.
     Setup(SetupArgs),
+}
+
+#[derive(Debug, Parser)]
+pub struct ChunkArgs {
+    /// The engine whose Check size limit the Chunks are packed to.
+    ///
+    /// Omitted uses the stored entry, then the default, the same order one
+    /// Check resolves in (spec section 7).
+    #[arg(long, value_enum)]
+    pub engine: Option<EngineSlug>,
 }
 
 #[derive(Debug, Parser)]
@@ -213,6 +223,19 @@ impl EngineSlug {
     /// Whether the engine sends the text off the machine (spec section 4).
     pub fn is_cloud(self) -> bool {
         matches!(self, EngineSlug::Openrouter)
+    }
+
+    /// The size limit of one Check on this Engine, in UTF-16 code units.
+    ///
+    /// The limit belongs to the Engine (spec section 4): the local LLM reads
+    /// 2,000 units, because a longer Chunk cannot be answered inside the
+    /// timeout, and every other Engine reads 5,000. The match is exhaustive on
+    /// purpose, so a new slug has to name its own limit.
+    pub const fn check_limit_utf16(self) -> usize {
+        match self {
+            EngineSlug::Openai => 2_000,
+            EngineSlug::Languagetool | EngineSlug::Harper | EngineSlug::Openrouter => 5_000,
+        }
     }
 }
 

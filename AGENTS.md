@@ -33,6 +33,8 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   Every test settings file must name a silent `openaiBaseUrl` of its own.
   `cli/tests/bench.rs` adds one for any entry body that does not.
   The `openai` adapter takes its starter as a value, so `cli/tests/openai_stub.rs` covers the start behaviour with no systemd at all.
+  A test that runs the binary must also point `openaiBaseUrl` away from the default `127.0.0.1:8080`, because a developer machine may answer there.
+  `cli/tests/bench.rs` writes a dead address into every settings file for that reason.
   Live tests in `languagetool_live.rs`, `openai_live.rs`, and `interference_catch_rate.rs` skip when their port is silent, which keeps CI green without the packages.
 - The `openai` base URL host must be loopback, and `cli/src/engines/openai/endpoint.rs` is the only place that decides it.
   A remote host is `bad_arguments` and no request is made; that is a product guarantee, so keep it tested.
@@ -94,19 +96,26 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 - The chunked Check is the loop between `Overlay.startComposeCheck` and `Overlay.finishChunkRun`: one `grammachy chunk`, then `launchCheck` per Chunk, with `absorbChunk` moving each answer by that Chunk's `start` before `Splice.verifiedIssues` checks it against the whole Draft.
   `chunkRun` is what tells the shared `onCheckOutput` that this Check is a Chunk rather than a Selection.
   Cancel only sets `chunkCancelled`, which `absorbChunk` reads after the merge, so the Chunk in flight is always kept; a failure leaves `chunkIndex` on the Chunk that failed, which is what makes `Retry remaining` a resume rather than a restart.
+  `chunkEngine` records the Engine the Chunk list was packed for, and every Check of that run names it.
+  A setting changed mid-run therefore reaches the next run, not the Chunks already cut.
+  `retryRemaining` compares `Limits.checkLimit` rather than the slugs, so a list of another size re-packs through `dropChunkListForNewEngine`.
+  A list of the same size resumes on the Engine the reader picked at the failure.
   `ui/errors.js` owns both envelope readers and the inline card: `readChunks` for spec 5.2 and `chunkCard` for the two recovery buttons of section 9.
   `ui/errors.test.js` runs the whole loop against a stub binary that answers both subcommands, and `cli/tests/overlay_chunks.rs` is what keeps `Overlay.qml` on those same calls, because no QML test can.
 - Every Compose trigger that carries a text lands on `Overlay.composeWith`, which is the only route to the replace confirm of spec section 2; `showCompose` is the kept-Draft route that SUPER + SHIFT + G and the menu entry take.
   `ui/CardHero.qml` takes an `actions` list for its trailing edge, which is how the popup gets its Compose button and Compose gets its Cancel without the hero knowing either.
 - `manifest.json` version must equal the crate version; `cli/tests/manifest.rs` enforces that.
-  Both size limits live twice, in `check::MAX_UTF16_UNITS` and `chunk::MAX_DRAFT_UTF16_UNITS` and in the QML that draws the too-long card and refuses an oversize Draft; `cli/tests/overlay_limit.rs` keeps the copies equal.
+  The Check size limit belongs to the Engine: `EngineSlug::check_limit_utf16` in `cli/src/args.rs` is the Rust authority and `ui/limits.js` is the shell copy.
+  `check` and `chunk` both take that limit as an argument, so `chunk` has its own `--engine` and packs to the same number the Check will refuse at.
+  The Draft cap `chunk::MAX_DRAFT_UTF16_UNITS` is one number and lives twice, in Rust and in the QML that refuses an oversize Draft.
+  `cli/tests/overlay_limit.rs` keeps every copy equal.
 - The Omarchy plugin is the repo root: `manifest.json`, `BarWidget.qml`, `Overlay.qml`, and `ui/`.
   `Overlay.qml` owns capture, the CLI run, the key map dispatch, the Apply path, the review state, the Draft, and the settings storage.
   Every QML file in `ui/` only draws.
   `root.surface` is `"quick"` or `"compose"` and is what routes a summon (spec section 2); both surfaces share one `phase`, one Check, one review state, and one key map, so a change to either belongs in `Overlay.qml` rather than in a card.
   `Overlay.keyMode` is where a new `phase` has to be named, or its card silently inherits the review keys.
   `ui/QuickCard.qml` and `ui/ComposeCard.qml` are the two surfaces; `ui/CardHero.qml`, `ui/Inspector.qml`, `ui/ReviewCounts.qml`, `ui/MarkedText.qml`, `ui/ErrorCard.qml`, and `ui/SettingsView.qml` are shared parts, so a change to the hero, the inspector, or the counts reaches both at once.
-  `ui/splice.js`, `ui/tokens.js`, `ui/keymap.js`, `ui/format.js`, `ui/settings.js`, `ui/errors.js`, and `ui/anchor.js` are loaded by QML and by node, so they may use neither's API.
+  `ui/splice.js`, `ui/tokens.js`, `ui/keymap.js`, `ui/format.js`, `ui/settings.js`, `ui/errors.js`, `ui/anchor.js`, and `ui/limits.js` are loaded by QML and by node, so they may use neither's API.
   Their `*.test.js` siblings run under `node --test`; add a new one to `.github/workflows/ci.yml` and to `docs/dev.md`.
   `keymap.js` takes the Qt key codes as an argument, which is what lets node run it, and a mode string that says which card the press landed on.
   Anything worth a test belongs in one of those rather than in QML, because the repo has no QML test harness: `Overlay.qml` cannot be instantiated outside the shell's plugin loader, so a standalone Quickshell config hangs on it.
