@@ -59,9 +59,10 @@ pub struct Report {
     pub diagnosis: String,
     #[serde(rename = "hardwareTier")]
     pub hardware_tier: &'static str,
-    /// The ggml package that tier wants beside `llama-cpp`.
-    #[serde(rename = "backendPackage")]
-    pub backend_package: &'static str,
+    /// The ggml packages that tier wants beside `llama-cpp`, in the order the
+    /// install lines name them. Every tier wants `ggml-cpu`.
+    #[serde(rename = "backendPackages")]
+    pub backend_packages: Vec<&'static str>,
     pub checks: Vec<Check>,
 }
 
@@ -83,7 +84,7 @@ impl Report {
             ready,
             diagnosis,
             hardware_tier: tier.as_str(),
-            backend_package: tier.backend_package(),
+            backend_packages: tier.backend_packages(),
             checks,
         }
     }
@@ -91,6 +92,14 @@ impl Report {
     /// The pieces that are missing, in the order they were checked.
     pub fn missing(&self) -> impl Iterator<Item = &Check> {
         self.checks.iter().filter(|check| !check.ok)
+    }
+
+    /// The checks that carry a command, missing or merely improvable.
+    ///
+    /// The manual-step footer reads this rather than [`Report::missing`],
+    /// because an advisory line prints a command the user may still run.
+    pub fn commanded(&self) -> impl Iterator<Item = &Check> {
+        self.checks.iter().filter(|check| check.remedy.is_some())
     }
 
     /// Exit 0 when the chosen engine can run, exit 1 when it cannot.
@@ -218,7 +227,7 @@ fn llama_check(facts: &Facts, tier: HardwareTier) -> Check {
             engines: vec!["openai"],
         },
         // The llama-cpp package carries no compute backend of its own, so the
-        // tier of this machine decides the second package on the line.
+        // tier of this machine decides every other package on the line.
         None => Check {
             id: "llama.cpp",
             name: "llama.cpp server",
@@ -229,7 +238,7 @@ fn llama_check(facts: &Facts, tier: HardwareTier) -> Check {
             ),
             remedy: Some(format!(
                 "sudo pacman -S llama-cpp {}",
-                tier.backend_package()
+                tier.backend_packages().join(" ")
             )),
             engines: vec!["openai"],
         },
@@ -242,14 +251,37 @@ fn llama_check(facts: &Facts, tier: HardwareTier) -> Check {
 /// ggml package starts the unit and then gets no answer. That reads as a
 /// broken engine rather than as a missing package, which is why `doctor` looks
 /// at the backend libraries and not only at `/usr/bin/llama-server`.
+///
+/// `ggml-cpu` is the requirement and `ggml-vulkan` is the accelerator. A GPU
+/// machine that has the CPU backend alone runs the engine, only on the CPU, so
+/// that machine passes the check and reads the install line as advice. Failing
+/// it would hide the real cause, such as weights that are not downloaded yet.
 fn backend_check(facts: &Facts) -> Check {
     let missing = facts.missing_backends();
+    let installed: Vec<&str> = facts
+        .wanted_backends()
+        .into_iter()
+        .filter(|backend| !missing.contains(backend))
+        .map(Backend::package)
+        .collect();
+
+    if missing.iter().any(|backend| backend.required()) {
+        let packages: Vec<&str> = missing.iter().copied().map(Backend::package).collect();
+        return Check {
+            id: "backend",
+            name: "llama.cpp backend",
+            ok: false,
+            detail: format!(
+                "llama.cpp has no compute backend: {} {} not installed.",
+                packages.join(" and "),
+                if packages.len() == 1 { "is" } else { "are" }
+            ),
+            remedy: Some(format!("sudo pacman -S {}", packages.join(" "))),
+            engines: vec!["openai"],
+        };
+    }
+
     if missing.is_empty() {
-        let installed: Vec<&str> = facts
-            .wanted_backends()
-            .into_iter()
-            .map(Backend::package)
-            .collect();
         return Check {
             id: "backend",
             name: "llama.cpp backend",
@@ -260,17 +292,17 @@ fn backend_check(facts: &Facts) -> Check {
         };
     }
 
-    let packages: Vec<&str> = missing.iter().copied().map(Backend::package).collect();
+    let accelerators: Vec<&str> = missing.iter().copied().map(Backend::package).collect();
     Check {
         id: "backend",
         name: "llama.cpp backend",
-        ok: false,
+        ok: true,
         detail: format!(
-            "llama.cpp has no compute backend: {} {} not installed.",
-            packages.join(" and "),
-            if packages.len() == 1 { "is" } else { "are" }
+            "{} is installed, so llama.cpp runs on the CPU. {} runs it on the graphics processor.",
+            installed.join(", "),
+            accelerators.join(" and ")
         ),
-        remedy: Some(format!("sudo pacman -S {}", packages.join(" "))),
+        remedy: Some(format!("sudo pacman -S {}", accelerators.join(" "))),
         engines: vec!["openai"],
     }
 }

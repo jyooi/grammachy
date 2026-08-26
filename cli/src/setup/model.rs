@@ -72,11 +72,15 @@ pub enum Tier {
 }
 
 impl Tier {
-    /// The pacman package that makes `llama-server` run on this machine.
-    pub fn backend_package(self) -> &'static str {
+    /// The pacman packages that make `llama-server` run on this machine.
+    ///
+    /// `ggml-cpu` is what the server needs on every machine. A render device
+    /// earns `ggml-vulkan` beside it, which is the accelerator and not a
+    /// replacement, so the Vulkan tier names both.
+    pub fn backend_packages(self) -> &'static [&'static str] {
         match self {
-            Tier::Vulkan => "ggml-vulkan",
-            Tier::Cpu => "ggml-cpu",
+            Tier::Vulkan => &["ggml-cpu", "ggml-vulkan"],
+            Tier::Cpu => &["ggml-cpu"],
         }
     }
 }
@@ -402,8 +406,8 @@ mod tests {
         let empty = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
 
         assert_eq!(tier_of(&empty), Tier::Cpu);
-        assert_eq!(Tier::Cpu.backend_package(), "ggml-cpu");
-        assert_eq!(Tier::Vulkan.backend_package(), "ggml-vulkan");
+        assert_eq!(Tier::Cpu.backend_packages(), ["ggml-cpu"]);
+        assert_eq!(Tier::Vulkan.backend_packages(), ["ggml-cpu", "ggml-vulkan"]);
     }
 
     #[test]

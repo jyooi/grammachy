@@ -14,13 +14,15 @@
 //! which installs `/usr/bin/llama-server`. That package carries no compute
 //! backend of its own: `ggml-cpu` or `ggml-vulkan` is what makes it run.
 //! This adapter has no hardware facts, so [`INSTALL_LINE`] names both packages.
-//! `grammachy doctor` prints the package this machine's hardware tier wants.
+//! `grammachy doctor` prints the packages this machine's hardware tier wants.
 //!
 //! Three numbers are decisions rather than defaults:
 //!
 //! - `--ctx-size 4096`. One Check is at most 5,000 UTF-16 units, about 1,400
-//!   tokens of English, plus the prompt and up to 1,024 tokens of answer.
-//!   HUF-171 ran the benchmark at 2,048, which fits a sentence and not a Check.
+//!   tokens of English, plus about 250 tokens of prompt and the 2,048 tokens
+//!   the request asks for, which is the think and the answer together. That
+//!   comes to about 3,700 and leaves the rest as headroom. HUF-171 ran the
+//!   benchmark at 2,048, which fits a sentence and not a Check.
 //! - `--parallel 1`. One slot, because a Check is one request at a time and
 //!   every extra slot costs a KV cache. HUF-181 measured 7.3 GB resident for
 //!   the recommended model on one slot.
@@ -55,9 +57,10 @@ pub const PACKAGE_SERVER: &str = "/usr/bin/llama-server";
 
 /// The install line this adapter prints when the package is missing.
 /// It names CPU first and the Vulkan backend beside it, because the adapter
-/// has no hardware facts. `grammachy doctor` prints a tier-specific line
-/// instead (spec section 4). Both packages are in the official `extra`
-/// repository.
+/// has no hardware facts. `ggml-cpu` is the requirement and `ggml-vulkan` is
+/// the accelerator, so a GPU machine wants both. `grammachy doctor` prints a
+/// tier-specific line instead (spec section 4). Both packages are in the
+/// official `extra` repository.
 pub const INSTALL_LINE: &str =
     "sudo pacman -S llama-cpp ggml-cpu   (add ggml-vulkan for a GPU or an iGPU)";
 

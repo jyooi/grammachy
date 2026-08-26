@@ -51,7 +51,7 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   `model.rs` downloads the weights with `curl`, the tool `bin/bootstrap.sh` uses, because `curl` resumes an interrupted multi-gigabyte transfer.
   The catalogue file is `unsloth/gemma-4-E4B-it-GGUF` and is pinned by sha256.
   A failed model step still writes the hotkeys and menu.
-  Hardware tiers only name the llama.cpp backend package, because the weights file is the same on both (spec section 4).
+  Hardware tiers only name the llama.cpp backend packages, because the weights file is the same on both (spec section 4).
   Every path and both side effects are seams: `GRAMMACHY_BINDINGS_LUA`, `GRAMMACHY_MENU_JSONC`, `GRAMMACHY_MODELS_DIR`, `GRAMMACHY_HYPRCTL_RELOAD=never`, `GRAMMACHY_MODEL_BASE_URL`, `GRAMMACHY_MODEL_SHA256`, plus the `Reloader` and `Downloader` values.
   No test may touch a real config file, a real compositor, or the real weights host.
 - Settings resolve in `cli/src/settings.rs`: flags, then the plugin entry in `$HOME/.config/omarchy/shell.json`, then the defaults of spec section 7.
@@ -83,6 +83,8 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   `cli/src/doctor/facts.rs` is the only place that reads the machine, so the report is a pure function of recorded `Facts` and no test reads real hardware.
   The `backend` check reads the library names under `/usr/lib/ggml`, because `llama-cpp` carries no compute backend of its own.
   A server without one starts and then answers nothing, which reads as a broken engine rather than a missing package.
+  `ggml-cpu` is the requirement and `ggml-vulkan` is the accelerator, so a missing `ggml-cpu` fails the check and a missing `ggml-vulkan` is only a note.
+  `HardwareTier::backend_packages` is the single rule the llama.cpp remedy, the backend remedy, the human footer, and the `backendPackages` field all read.
 - Compose (spec section 9) keeps the Draft in `Overlay.draftText` and nowhere else: no file, no clipboard, no setting.
   `ui/DraftField.qml` is the text area; it forwards key presses to the overlay's key catcher through `Keys.forwardTo` with `Keys.priority: Keys.BeforeItem`, which is what lets Ctrl + Enter run the Check while every printable key still types.
   `Overlay.restoreFocus` is the one place that decides whether the Draft or the key catcher holds the keyboard.

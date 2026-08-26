@@ -176,6 +176,7 @@ Measured on the 890M: gemma-4-E4B-it writes 25 tokens per second; thinking raise
   Section 7 of this spec fixes that 30 s value for the cloud engine.
   The heavy 2,000-unit case with thinking finishes near 50 s on the 890M.
 - `doctor` checks `ggml-cpu` plus one backend package (`ggml-vulkan` or nothing more on the CPU tier), not only `/usr/bin/llama-server`.
+  A missing `ggml-cpu` fails the check, and a missing `ggml-vulkan` on a GPU tier is a note, because the server still runs on the CPU.
 
 ## 7. Cloud engine `openrouter`
 

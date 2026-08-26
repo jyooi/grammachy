@@ -80,7 +80,7 @@ fn pci_bus(address: &str) -> Option<&str> {
 /// What llama.cpp runs on, which is the one thing hardware decides.
 ///
 /// Spec section 4: hardware tiers affect only the install step, where `doctor`
-/// names the Vulkan or the CPU backend package for the machine.
+/// names the ggml backend packages this machine wants beside `llama-cpp`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HardwareTier {
     /// A graphics card on its own PCIe bus.
@@ -92,12 +92,29 @@ pub enum HardwareTier {
 }
 
 impl HardwareTier {
-    /// The ggml backend package that makes `llama-cpp` run on this tier.
-    pub fn backend_package(self) -> &'static str {
+    /// The backends this tier wants, in the order `doctor` names them.
+    ///
+    /// Every tier wants `ggml-cpu`, because llama.cpp runs on the CPU the
+    /// parts no other backend takes. A graphics processor wants `ggml-vulkan`
+    /// beside it, which is the accelerator rather than the requirement.
+    pub fn wanted_backends(self) -> Vec<Backend> {
         match self {
-            HardwareTier::DiscreteGpu | HardwareTier::IntegratedGpu => "ggml-vulkan",
-            HardwareTier::Cpu => "ggml-cpu",
+            HardwareTier::Cpu => vec![Backend::Cpu],
+            HardwareTier::DiscreteGpu | HardwareTier::IntegratedGpu => {
+                vec![Backend::Cpu, Backend::Vulkan]
+            }
         }
+    }
+
+    /// The pacman packages that carry those backends.
+    ///
+    /// This is the one rule the llama.cpp remedy, the backend remedy, the
+    /// human footer, and the envelope all read, so no two of them can drift.
+    pub fn backend_packages(self) -> Vec<&'static str> {
+        self.wanted_backends()
+            .into_iter()
+            .map(Backend::package)
+            .collect()
     }
 
     /// The value the JSON envelope carries.
@@ -171,6 +188,14 @@ impl Backend {
         }
     }
 
+    /// Whether `llama-server` needs this backend to answer at all.
+    ///
+    /// `ggml-cpu` is the requirement and `ggml-vulkan` is the accelerator: a
+    /// machine with the CPU backend alone runs the engine, only on the CPU.
+    pub fn required(self) -> bool {
+        matches!(self, Backend::Cpu)
+    }
+
     /// Whether one library file name belongs to this backend.
     fn owns(self, library: &str) -> bool {
         match self {
@@ -219,17 +244,9 @@ impl Facts {
         tier_of(&self.cards)
     }
 
-    /// The backends this tier wants, in the order `doctor` names them.
-    ///
-    /// Every tier wants `ggml-cpu`, because llama.cpp runs the parts no other
-    /// backend takes on the CPU. A graphics processor wants `ggml-vulkan` too.
+    /// The backends the tier of this machine wants.
     pub fn wanted_backends(&self) -> Vec<Backend> {
-        match self.tier() {
-            HardwareTier::Cpu => vec![Backend::Cpu],
-            HardwareTier::DiscreteGpu | HardwareTier::IntegratedGpu => {
-                vec![Backend::Cpu, Backend::Vulkan]
-            }
-        }
+        self.tier().wanted_backends()
     }
 
     /// The wanted backends this machine does not have.
@@ -340,7 +357,10 @@ mod tests {
         let cards = [card("amdgpu", Some("0000:65:00.0"))];
 
         assert_eq!(tier_of(&cards), HardwareTier::DiscreteGpu);
-        assert_eq!(tier_of(&cards).backend_package(), "ggml-vulkan");
+        assert_eq!(
+            tier_of(&cards).backend_packages(),
+            ["ggml-cpu", "ggml-vulkan"]
+        );
     }
 
     #[test]
@@ -349,7 +369,10 @@ mod tests {
         let cards = [card("i915", Some("0000:00:02.0"))];
 
         assert_eq!(tier_of(&cards), HardwareTier::IntegratedGpu);
-        assert_eq!(tier_of(&cards).backend_package(), "ggml-vulkan");
+        assert_eq!(
+            tier_of(&cards).backend_packages(),
+            ["ggml-cpu", "ggml-vulkan"]
+        );
     }
 
     #[test]
@@ -358,13 +381,13 @@ mod tests {
         let cards = [card("simpledrm", None)];
 
         assert_eq!(tier_of(&cards), HardwareTier::Cpu);
-        assert_eq!(tier_of(&cards).backend_package(), "ggml-cpu");
+        assert_eq!(tier_of(&cards).backend_packages(), ["ggml-cpu"]);
     }
 
     #[test]
     fn no_card_at_all_is_the_cpu_tier() {
         assert_eq!(tier_of(&[]), HardwareTier::Cpu);
-        assert_eq!(HardwareTier::Cpu.backend_package(), "ggml-cpu");
+        assert_eq!(HardwareTier::Cpu.backend_packages(), ["ggml-cpu"]);
     }
 
     #[test]
@@ -441,5 +464,8 @@ mod tests {
     fn every_backend_names_its_package() {
         assert_eq!(Backend::Cpu.package(), "ggml-cpu");
         assert_eq!(Backend::Vulkan.package(), "ggml-vulkan");
+        // ggml-cpu is what llama-server needs. ggml-vulkan only makes it fast.
+        assert!(Backend::Cpu.required());
+        assert!(!Backend::Vulkan.required());
     }
 }

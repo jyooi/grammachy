@@ -28,7 +28,7 @@ pub fn to_text(report: &Report) -> String {
     let tier_name = report.hardware_tier;
     out.push_str(&format!(
         "\nHardware tier {tier_name}, so llama.cpp wants {}.\n",
-        report.backend_package
+        report.backend_packages.join(" and ")
     ));
 
     let engine = &report.engine;
@@ -42,7 +42,7 @@ pub fn to_text(report: &Report) -> String {
         report.diagnosis
     ));
 
-    if report.missing().next().is_some() {
+    if report.commanded().next().is_some() {
         out.push_str("\nRun the commands above yourself. Doctor installs nothing.\n");
     }
     out
