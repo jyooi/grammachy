@@ -765,10 +765,15 @@ fn model_row(
     spend: &Mutex<Spend>,
 ) -> (ModelRow, Vec<RecordedCheck>) {
     let options = row.options(base);
-    let weights = if row.slug.is_cloud() {
-        weights::HOSTED
+    // A cloud row keeps no weights on this machine, so it takes neither a
+    // license nor a file size. Both are what the local bars of `weights` read.
+    let (weights, file_bytes) = if row.slug.is_cloud() {
+        (weights::HOSTED, None)
     } else {
-        weights::of(&row.model)
+        (
+            weights::of(&row.model),
+            crate::model::file_bytes(&row.model),
+        )
     };
     let (outcome, checks) = measure(row.slug, &options, sentences, spend, Pass::Sentences);
     (
@@ -778,6 +783,7 @@ fn model_row(
             thinking: row.thinking,
             server_use,
             weights,
+            file_bytes,
             outcome,
         },
         checks,

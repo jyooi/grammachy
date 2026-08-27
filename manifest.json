@@ -26,7 +26,7 @@
       "engine": "languagetool",
       "autoReplace": false,
       "openaiBaseUrl": "http://127.0.0.1:8080",
-      "openaiModel": "gemma-4-e4b-it",
+      "openaiModel": "qwen3.8-4b",
       "openaiApiKey": "",
       "localThinking": true
     },
@@ -83,7 +83,7 @@
         "key": "openaiModel",
         "type": "string",
         "label": "Local LLM model",
-        "defaultValue": "gemma-4-e4b-it"
+        "defaultValue": "qwen3.8-4b"
       },
       {
         "key": "openaiApiKey",

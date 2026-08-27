@@ -1,18 +1,32 @@
-//! What a model's weights may be used for, `docs/spec/evals.md` section 5.
+//! Which rows the recommendation may name, `docs/spec/evals.md` section 5.
 //!
 //! The Models table carries a weights license column, and the recommended model
 //! of the Settings defaults and the README is re-decided from that table on
-//! every tag. The spec fixes two rules:
+//! every tag. This module is the product rule behind that column and behind
+//! every other bar a local row must clear. `report.rs` measures the rows and
+//! ranks them. It never decides what a row is allowed to be.
 //!
-//! - The recommended model must be Apache-2.0 or MIT licensed.
-//! - A model with non-commercial weights may appear for reference but is never
-//!   recommended.
+//! The spec fixes four bars for the recommended local model:
+//!
+//! - The license is Apache-2.0 or MIT. A model with non-commercial weights may
+//!   appear for reference but is never recommended.
+//! - The weights file on disk is at or under [`FILE_CEILING_BYTES`], the
+//!   on-device target the captain fixed on 2026-08-27.
+//! - The measured resident memory is at or under [`TIER_MEMORY_BYTES`], the
+//!   tier the product targets.
+//! - The row ran with thinking on, because thinking on is the product default
+//!   and the Settings default must name a mode the product ships.
+//!
+//! A thinking-off row and an over-size row still print every number they
+//! measured. They are reference results, not candidates.
 //!
 //! So this table is a product rule, not a convenience. A model it does not know
 //! is `Unknown`, which is never recommended either: a license nobody checked is
 //! not a license that passed. A model reached through the cloud engine has no
-//! weights on this machine at all, so it is `Hosted` and competes only for the
-//! cloud recommendation line (HUF-206).
+//! weights on this machine at all, so it is `Hosted`. None of the three local
+//! bars applies to it: it competes for the cloud line alone, which takes the
+//! best row with no cost ceiling and names a value row beside it
+//! ([`VALUE_WINDOW_POINTS`], HUF-206).
 
 /// What one license allows, as far as the recommendation rule cares.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -51,6 +65,74 @@ impl Weights {
             Terms::NonCommercial => Some("never, the weights are non-commercial"),
             Terms::Unknown => Some("no, the license was not checked"),
         }
+    }
+}
+
+/// The largest weights file the on-device target allows, in whole gigabytes.
+///
+/// The captain fixed 4 GB on 2026-08-27: a model the user must download and
+/// keep on a laptop disk. `gemma-4-e4b-it` at 4.98 GB is over it, so the
+/// benchmark files keep its rows as a reference result and the rules never
+/// name it for v1.
+pub const FILE_CEILING_GB: u64 = 4;
+
+/// [`FILE_CEILING_GB`] in bytes, in the decimal gigabyte the tables print.
+pub const FILE_CEILING_BYTES: u64 = FILE_CEILING_GB * 1_000_000_000;
+
+/// The memory tier a recommended local row must fit, in whole gigabytes.
+///
+/// Spec section 5: the recommended local model fits the 8 GB tier by measured
+/// resident memory. It is the product target rather than the size of the
+/// machine the benchmark ran on, so a run on a larger machine recommends the
+/// same row a user on the target machine can run.
+pub const TIER_MEMORY_GB: u64 = 8;
+
+/// [`TIER_MEMORY_GB`] in bytes, in the decimal gigabyte the tables print.
+pub const TIER_MEMORY_BYTES: u64 = TIER_MEMORY_GB * 1_000_000_000;
+
+/// How far behind the recommended cloud row the value row may fall, in points
+/// of exact fix rate (spec section 5).
+///
+/// The cloud line takes quality with no cost ceiling. The value line keeps the
+/// cost trade-off visible beside it, so a reader sees what the cheaper row
+/// gives up.
+pub const VALUE_WINDOW_POINTS: f64 = 10.0;
+
+/// Why the size of the weights file keeps a local row out, or `None`.
+///
+/// A size nobody measured is an objection of its own, for the reason an
+/// unchecked license is: a file the run cannot size is a file the run cannot
+/// show is under the ceiling.
+pub fn file_objection(file_bytes: Option<u64>) -> Option<String> {
+    match file_bytes {
+        None => Some("no, the size of the weights file is not known".to_string()),
+        Some(bytes) if bytes > FILE_CEILING_BYTES => {
+            Some(format!("no, the weights file is over {FILE_CEILING_GB} GB"))
+        }
+        Some(_) => None,
+    }
+}
+
+/// Why the measured resident memory keeps a local row out, or `None`.
+pub fn tier_objection(resident_bytes: Option<u64>) -> Option<String> {
+    match resident_bytes {
+        None => Some("no, the resident memory was not measured".to_string()),
+        Some(bytes) if bytes > TIER_MEMORY_BYTES => {
+            Some(format!("no, over the {TIER_MEMORY_GB} GB tier"))
+        }
+        Some(_) => None,
+    }
+}
+
+/// Why the thinking mode keeps a local row out, or `None`.
+///
+/// A cloud row carries no mode and takes no objection here. A local row that
+/// ran with thinking off measured a mode the product does not ship, so it is a
+/// reference result rather than a candidate (HUF-217).
+pub fn thinking_objection(thinking: Option<bool>) -> Option<String> {
+    match thinking {
+        Some(false) => Some("no, thinking off is not the product default".to_string()),
+        Some(true) | None => None,
     }
 }
 
@@ -304,6 +386,62 @@ mod tests {
 
         assert_eq!(weights.license, "unknown");
         assert_eq!(weights.terms, Terms::Unknown);
+    }
+
+    /// The captain decision of 2026-08-27: 4 GB on disk is the on-device
+    /// target, and the shipped reference row is over it.
+    #[test]
+    fn a_weights_file_over_four_gigabytes_is_never_recommended() {
+        assert_eq!(
+            file_objection(Some(4_977_171_584)),
+            Some("no, the weights file is over 4 GB".to_string()),
+            "gemma-4-e4b-it at 4.98 GB is over the ceiling"
+        );
+        assert_eq!(file_objection(Some(2_783_446_304)), None, "qwen3.8-4b fits");
+        assert_eq!(file_objection(Some(FILE_CEILING_BYTES)), None, "4 GB fits");
+        assert_eq!(
+            file_objection(Some(FILE_CEILING_BYTES + 1)),
+            Some("no, the weights file is over 4 GB".to_string())
+        );
+    }
+
+    /// A file the run could not size is not a file the run showed to be small.
+    #[test]
+    fn an_unsized_weights_file_is_not_recommended_either() {
+        assert_eq!(
+            file_objection(None),
+            Some("no, the size of the weights file is not known".to_string())
+        );
+    }
+
+    #[test]
+    fn a_row_over_the_tier_is_never_recommended() {
+        assert_eq!(tier_objection(Some(2_200_000_000)), None, "2.2 GB fits");
+        assert_eq!(tier_objection(Some(TIER_MEMORY_BYTES)), None, "8 GB fits");
+        assert_eq!(
+            tier_objection(Some(TIER_MEMORY_BYTES + 1)),
+            Some("no, over the 8 GB tier".to_string())
+        );
+        assert_eq!(
+            tier_objection(None),
+            Some("no, the resident memory was not measured".to_string())
+        );
+    }
+
+    /// HUF-217 and the captain decision of 2026-08-27: thinking on is the
+    /// product default, so a thinking-off row is a reference result.
+    #[test]
+    fn a_thinking_off_row_never_competes_for_the_local_line() {
+        assert_eq!(
+            thinking_objection(Some(false)),
+            Some("no, thinking off is not the product default".to_string())
+        );
+        assert_eq!(thinking_objection(Some(true)), None);
+        assert_eq!(
+            thinking_objection(None),
+            None,
+            "a cloud row carries no mode"
+        );
     }
 
     #[test]

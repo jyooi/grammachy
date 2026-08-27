@@ -265,6 +265,32 @@ pub fn weights(model: &str) -> Option<Weights> {
     })
 }
 
+/// The pinned size of one catalogue row, in bytes.
+///
+/// It reads the row and no seam, unlike [`weights`], because the recommendation
+/// rule of `bench::weights` is a product rule. A test that shrinks a transfer
+/// with `GRAMMACHY_MODEL_SIZE_BYTES` must not move what the report recommends.
+pub fn catalogue_size_bytes(model: &str) -> Option<u64> {
+    CATALOGUE
+        .iter()
+        .find(|row| row.name.eq_ignore_ascii_case(model.trim()))
+        .map(|row| row.size_bytes)
+}
+
+/// The size of the weights file one model name stands for on this machine.
+///
+/// The on-device ceiling of `bench::weights` is about the file the user keeps
+/// on disk, so the file itself is the first answer. A name with no file here
+/// falls back to the size its catalogue row pins, which is the size that file
+/// would have. A name that is neither is `None`, and the ceiling refuses it.
+pub fn file_bytes(model: &str) -> Option<u64> {
+    let on_disk = directory()
+        .and_then(|directory| unit::model_file(&directory, model).ok())
+        .and_then(|path| std::fs::metadata(path).ok())
+        .map(|meta| meta.len());
+    on_disk.or_else(|| catalogue_size_bytes(model))
+}
+
 /// Every catalogue name, in the order the Models list draws them.
 pub fn names() -> Vec<&'static str> {
     CATALOGUE.iter().map(|row| row.name).collect()

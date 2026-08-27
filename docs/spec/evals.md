@@ -159,17 +159,26 @@ Two lines, re-decided from the eval-set tables on every tag ([HUF-205](https://l
   The file states the gate result and the ranking result in two sentences, and the second one names why the column does not rank.
   A run that measured a thinking-off row adds one sentence, because the judge never grades that row.
 - Floors: a row with more false positives than the default engine, or validity under 95%, is never recommended.
-- Recommended local model, the Settings default and the README line: the best local row that is Apache-2.0 or MIT and fits the 8 GB tier by measured resident memory.
-  Any thinking mode may win; the README names the mode the row ran under.
+- Recommended local model, the Settings default and the README line: the best local row that clears four bars.
+  It is Apache-2.0 or MIT.
+  Its weights file on disk is at or under 4 GB, the on-device target the captain fixed on 2026-08-27.
+  It fits the 8 GB tier by measured resident memory.
+  It ran with thinking on, the product default, so a thinking-off row stays in the tables and never competes.
+  The README names the mode the row ran under, which is always `on`.
+  A row over the file ceiling, such as gemma-4-E4B-it at 4.98 GB, keeps its rows and its catalogue entry as a reference result.
 - Recommended cloud model, the `openrouterModel` line of the README: the best `openrouter` row by the ranking above, with no cost ceiling.
   A second line names the value cloud model: the cheapest row within 10 points of exact fix of the recommended one, when one exists, so the cost trade-off stays visible.
+  A row inside that window that costs no less than the recommended one is no value line, because it saves the reader nothing.
+  With no value line the file says so, rather than staying silent.
 - Cloud is never the default engine.
+- `cli/src/bench/weights.rs` is the one place these bars live, and `cli/src/bench/report.rs` only ranks what clears them.
 
 ### 5.1 Cloud placeholder
 
 No cost ceiling: the captain chose quality over cost for the cloud line on 2026-08-26.
-On the pilot numbers Gemini 3.7 Flash (0.34 USD per 1,000 Checks, 90% exact fix) is the recommended line and DeepSeek V4 Flash (0.02 USD, 70 to 83%) is the value line.
-The `openrouterModel` placeholder in Settings is `google/gemini-3.7-flash` until the first full run replaces it.
+On the pilot numbers Gemini 3.7 Flash (0.34 USD per 1,000 Checks, 90% exact fix) is the recommended line.
+DeepSeek V4 Flash (0.02 USD, 70 to 83%) is the value candidate, and whether it takes the value line depends on the run: `docs/benchmarks/pilot-2026-08.md` puts it 13.3 points behind, which is outside the window, and `docs/benchmarks/pilot-2026-08-compact.md` puts it 3.3 points behind, which is inside it.
+The `openrouterModel` default in Settings is `google/gemini-3.7-flash` until the first full run replaces it.
 
 ## 6. Local engine changes
 
@@ -226,7 +235,7 @@ Local rows, Q4_K_M GGUF, sha256 pinned in the runner:
 
 | Row | Size | Licence | Note |
 |---|---|---|---|
-| gemma-4-e4b-it | 4.98 GB | Apache-2.0 | Shipped default; 87% exact fix with thinking on the fixture |
+| gemma-4-e4b-it | 4.98 GB | Apache-2.0 | 87% exact fix with thinking on the fixture; over the 4 GB file ceiling of section 5, so it is a reference row and never the default |
 | qwen3.5-9b | 5.68 GB | Apache-2.0 | |
 | qwen3.5-4b | 2.74 GB | Apache-2.0 | Needs the answer cap of section 6 to score with thinking |
 | phi-4-mini-instruct | 2.49 GB | MIT | No successor |

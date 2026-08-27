@@ -23,9 +23,9 @@ fn ready() -> Facts {
         languagetool_address: "127.0.0.1:8081".to_string(),
         llama_server: Some(PathBuf::from("/usr/bin/llama-server")),
         models_directory: Some(PathBuf::from("/home/u/.local/share/grammachy/models")),
-        model: "gemma-4-e4b-it".to_string(),
+        model: "qwen3.8-4b".to_string(),
         model_file: Some(PathBuf::from(
-            "/home/u/.local/share/grammachy/models/gemma-4-e4b-it-Q4_K_M.gguf",
+            "/home/u/.local/share/grammachy/models/Qwen3.8-4B-Q4_K_M.gguf",
         )),
         openai_endpoint: Ok("127.0.0.1:8080".to_string()),
         openrouter_key: KeyState::Ready {
@@ -266,7 +266,7 @@ fn a_missing_accelerator_never_hides_the_real_cause() {
     assert!(!report.ready);
     assert_eq!(
         report.diagnosis,
-        "No weights for gemma-4-e4b-it in /home/u/.local/share/grammachy/models. Run: grammachy model download gemma-4-e4b-it"
+        "No weights for qwen3.8-4b in /home/u/.local/share/grammachy/models. Run: grammachy model download qwen3.8-4b"
     );
 }
 
@@ -346,9 +346,9 @@ fn missing_weights_point_at_the_download_verb_and_never_at_pacman() {
     let text = text_of(&facts, EngineSlug::Openai);
 
     assert_eq!(missing_lines(&text).len(), 1, "{text}");
-    assert!(text.contains("No weights for gemma-4-e4b-it"), "{text}");
+    assert!(text.contains("No weights for qwen3.8-4b"), "{text}");
     assert!(
-        text.contains("Run: grammachy model download gemma-4-e4b-it"),
+        text.contains("Run: grammachy model download qwen3.8-4b"),
         "{text}"
     );
 }

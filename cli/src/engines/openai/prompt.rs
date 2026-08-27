@@ -230,7 +230,7 @@ mod tests {
             Force::Grammar,
         );
 
-        assert_eq!(body["model"], "gemma-4-e4b-it");
+        assert_eq!(body["model"], "qwen3.8-4b");
         assert_eq!(body["temperature"], 0);
         assert_eq!(body["grammar"], GRAMMAR);
         assert!(body.get("response_format").is_none());

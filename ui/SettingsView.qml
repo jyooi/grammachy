@@ -18,7 +18,7 @@ ColumnLayout {
   property string engine: "languagetool"
   property bool autoReplace: false
   property string openaiBaseUrl: "http://127.0.0.1:8080"
-  property string openaiModel: "gemma-4-e4b-it"
+  property string openaiModel: "qwen3.8-4b"
   property bool localThinking: true
 
   // The Models list of spec section 5.3. Everything it needs arrives from
