@@ -109,7 +109,16 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   A cloud row needs `--max-cost <usd>`, the cap on the whole run, and the flag is refused when no cloud row runs.
   `Spend` in `cli/src/bench/mod.rs` owns both ways a cloud row ends and what the report prints as the run's spend, because a row the cap ended carries no tally.
   A cloud answer with no `usage.cost` ends its row and every later cloud row, because a run that cannot measure its spend cannot hold the cap.
-  `--record <dir>` writes `checks.json`, one entry per engine, model, and item.
+  `--thinking off|on|both` owns the mode of every local row, and the default is the product default `on`.
+  The flag, not the stored `localThinking`, is what a row's request carries, so a benchmark file is the output of the Command line it prints.
+  `both` expands each local model into two rows, kept next to each other so the two share one llama.cpp server start.
+  The bench never starts that server: the `openai` adapter starts it, and only when a request finds the port silent.
+  So no wall time claims a server start, because a hand-run server on the port means no start happened.
+  `bench::server_use` is the one rule for what a row may say, and the run loop carries its `ServerUse` onto the row.
+  Only the Cost table names a mode, so the prose under the tables names the mode too when a run holds both.
+  The Engines table keeps its four columns, so its `openai` row runs once, in the mode `--thinking` names.
+  Only `both` leaves that row on the product default, because the flag names two modes and the table holds one.
+  `--record <dir>` writes `checks.json`, one entry per engine, model, thinking mode, and item.
   Every entry carries the item beside the answer, because that pair is the whole input of the judge.
   `Plan::of` proves the directory holds that file before the first row, so a directory the run cannot write never discards a report it already paid for.
   The run writes `checks.json.pending` and renames it, so the record of an earlier run stays whole until this run has one of its own.
@@ -136,8 +145,9 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   `cli/bench/judge.py` grades a recorded run, and `cli/src/bench/judge.rs` reads the answer into the Useful fix column.
   Both select nearly the same sample: a valid Check on an item with edits, where an Issue touches an expected span.
   The applied Fixes of that Check must also not reproduce `expected_text`.
-  `judge.py` also drops a thinking-off local row, and `RecordedCheck` carries no `thinking` field yet.
-  The Rust half needs that same predicate when HUF-217 adds the field.
+  Both drop a thinking-off local row, because `RecordedCheck::hit` answers `None` for one.
+  The Useful fix cell of that row then says it is not the product default rather than printing a count.
+  `judge::RowKey` carries the mode, so the two rows of one model never share a Useful fix count.
   An item nothing touched is a plain miss and is never judged, because the writer is offered nothing to accept.
   Both files nest the key, item id then result text, which needs no delimiter and folds two models that answered alike onto one judgement.
   `cli/tests/fixtures/judge-labels.json` holds the 17 committed hand labels of HUF-210 and is compiled in.

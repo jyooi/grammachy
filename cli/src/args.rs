@@ -104,6 +104,61 @@ pub struct BenchArgs {
     /// judge agrees with the committed hand labels on at least 80% of them.
     #[arg(long = "judgements", value_name = "FILE")]
     pub judgements: Option<std::path::PathBuf>,
+
+    /// The thinking mode the local rows run in: `off`, `on`, or `both`.
+    ///
+    /// It decides the mode of every local row, so a benchmark file is the
+    /// output of its own Command line and the stored `localThinking` never
+    /// moves the numbers. `both` runs every local row twice and prints both.
+    #[arg(long, value_enum, default_value = "on")]
+    pub thinking: BenchThinking,
+}
+
+/// The `bench --thinking` flag of `docs/spec/evals.md` section 4.1.
+///
+/// It is the run's own choice rather than one Check's, so it holds a third
+/// value the Check flag has no meaning for: `both`, one benchmark file that
+/// carries every local model in each mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, ValueEnum)]
+pub enum BenchThinking {
+    Off,
+    #[default]
+    On,
+    Both,
+}
+
+impl BenchThinking {
+    /// The modes every local Models row runs in, in the order they print.
+    ///
+    /// `on` comes first under `both`, because it is the product default and
+    /// the row a reader looks for.
+    pub fn modes(self) -> &'static [bool] {
+        match self {
+            BenchThinking::Off => &[false],
+            BenchThinking::On => &[true],
+            BenchThinking::Both => &[true, false],
+        }
+    }
+
+    /// The mode the Engines table's `openai` row runs in.
+    ///
+    /// That table keeps its four columns (evals spec section 4.2), so it has
+    /// nowhere to name a mode and runs once. Under `both` it takes the product
+    /// default, which is the engine a release is measured as shipping.
+    pub fn engine_mode(self) -> bool {
+        match self {
+            BenchThinking::Off => false,
+            BenchThinking::On | BenchThinking::Both => true,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            BenchThinking::Off => "off",
+            BenchThinking::On => "on",
+            BenchThinking::Both => "both",
+        }
+    }
 }
 
 #[derive(Debug, Parser)]

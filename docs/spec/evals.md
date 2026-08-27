@@ -77,7 +77,7 @@ One loader, one metrics module.
 | Resident memory | Measured on the device for a llama-server row: the DRM fdinfo of that process, which reports the memory one DRM client holds. A card names its card memory, an integrated processor names the system memory it maps, and the two pools are never added together. A server with no DRM client, such as a CPU-only build, keeps the RSS of its process, and so does every other server engine. RSS alone is wrong for GPU rows (HUF-209). llama-server `/metrics` is not the source: it is off unless the server runs with `--metrics`, and it carries no memory gauge. The report names the source of every measured row under the table, and a skipped row names none. |
 | Cost per 1,000 Checks | Sum of `usage.cost` / priced Checks x 1,000, USD to two decimals. Local rows print `0.00 (local)`; a cloud answer without `usage.cost` prints `n/a` and is logged. |
 | Recall by native language | A separate table, one column per language present; a language with fewer than 10 edits prints the raw count. |
-| Useful fix | From the judgements file (section 4.4): useful / judged non-exact hits. Printed only with `--judgements`. |
+| Useful fix | From the judgements file (section 4.4): useful / judged non-exact hits. Printed only with `--judgements`. A thinking-off local row prints `not the product default`, because the judge grades the product default alone. |
 | Thinking | Local rows only: `on` or `off`, the mode the row ran under (section 4.1). Cloud rows print `-`. |
 
 Rounding: rates to one decimal, counts as `n of m (rate)`, latency integer ms, memory whole MB below a gigabyte and one decimal above it, cost two decimals.
@@ -92,7 +92,7 @@ Rounding: rates to one decimal, counts as `n of m (rate)`, latency integer ms, m
 | `--model <name>` | Repeatable, for `openai`. |
 | `--cloud-model <id>` | Repeatable, for `openrouter`. |
 | `--max-cost <usd>` | Whole-run cap on the sum of `usage.cost`; required when any `openrouter` row runs, refused otherwise. When the next Check would pass it, the current row ends as `skipped: cost cap <usd> USD reached after N sentences` and the remaining rows skip with the same reason. Cloud rows run beside each other, so a run may pass the cap by at most one Check for each cloud row in flight. |
-| `--thinking off\|on\|both` | Local rows only. Default `on`, the product default. `both` runs every local row twice and prints both with a Thinking column. The eval run uses `both`. [HUF-217](https://linear.app/huffman/issue/HUF-217) |
+| `--thinking off\|on\|both` | Local rows only. Default `on`, the product default. The flag decides every local row, so the stored `localThinking` never moves the numbers. `both` runs every local row twice and prints both with a Thinking column. The eval run uses `both`. [HUF-217](https://linear.app/huffman/issue/HUF-217) |
 | `--record <dir>` | Writes every Check's answer to `<dir>/checks.json` (section 4.3). |
 | `--judgements <file>` | Adds the Useful fix column from a judgements file (section 4.4). |
 | `--eval-set` | Runs the eval set tables beside the fixture tables; skipped with a reason when the cache is absent. |
@@ -150,6 +150,7 @@ Two lines, re-decided from the eval-set tables on every tag ([HUF-205](https://l
   One uncovered row would compete on a smaller measure than a graded one, so the whole table keeps the raw ranking.
   It also needs one measured row the file grades a hit of, so a table of skipped rows never claims a measure that ranked nothing.
   The file states the gate result and the ranking result in two sentences, and the second one names why the column does not rank.
+  A run that measured a thinking-off row adds one sentence, because the judge never grades that row.
 - Floors: a row with more false positives than the default engine, or validity under 95%, is never recommended.
 - Recommended local model, the Settings default and the README line: the best local row that is Apache-2.0 or MIT and fits the 8 GB tier by measured resident memory.
   Any thinking mode may win; the README names the mode the row ran under.

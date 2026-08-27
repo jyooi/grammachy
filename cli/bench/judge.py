@@ -2,11 +2,12 @@
 """Grade the non-exact hits of a recorded bench run, evals spec section 4.4.
 
 One run of `grammachy bench --record <dir>` writes `<dir>/checks.json`, one
-entry per engine, model, and item, carrying the item and the answer. This
-script reads that file, keeps every non-exact hit, folds the identical answers
-of two models onto one item, and asks Claude Fable 5 one question per folded
-item. It writes `judgements.json` beside the record, keyed by item id and then
-result text, which is what `grammachy bench --judgements <file>` reads.
+entry per engine, model, thinking mode, and item, carrying the item and the
+answer. This script reads that file, keeps every non-exact hit, folds the
+identical answers of two models onto one item, and asks Claude Fable 5 one
+question per folded item. It writes `judgements.json` beside the record, keyed
+by item id and then result text, which is what `grammachy bench --judgements
+<file>` reads.
 
 A non-exact hit is a valid Check on an item that carries a mistake, where at
 least one Issue touches a span the item expects and applying every Fix does not

@@ -17,11 +17,22 @@ use std::io::Write;
 use std::net::{SocketAddr, TcpStream};
 use std::path::Path;
 use std::process::{Command, Stdio};
+use std::sync::Mutex;
 use std::time::Duration;
 
 use serde_json::Value;
 
 const ADDRESS: &str = "127.0.0.1:8080";
+
+/// One Check at a time, because the server has one slot.
+///
+/// The unit runs llama-server with `--parallel 1`, so two Checks queue rather
+/// than run. Cargo runs these cases side by side, and a queued Check spends
+/// the wait inside the adapter's own 90 s timeout, which turns a slow model
+/// into a failure that has nothing to do with the answer. Taking this lock
+/// around the run is what keeps the cases measuring the model rather than
+/// each other.
+static ONE_AT_A_TIME: Mutex<()> = Mutex::new(());
 
 /// Whether a model server answers on the default base URL of spec section 7.
 fn server_answers() -> bool {
@@ -49,6 +60,9 @@ fn check(name: &str, text: &str, base_url: Option<&str>) -> Value {
         }
     }
 
+    let _slot = ONE_AT_A_TIME
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let mut child = Command::new(env!("CARGO_BIN_EXE_grammachy"))
         .args(["check", "--engine", "openai"])
         .env("GRAMMACHY_SHELL_JSON", &settings)
