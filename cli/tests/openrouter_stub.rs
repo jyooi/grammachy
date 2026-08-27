@@ -237,8 +237,11 @@ fn an_empty_model_id_is_bad_arguments_before_anything_is_sent() {
         .answer(TEXT, &options)
         .expect_err("no model, no request");
 
+    // The shell tells this one refusal from every other `bad_arguments` by the
+    // trailing reason word, the same shape every cloud failure carries.
     assert!(
-        matches!(failure, EngineFailure::BadArguments(_)),
+        matches!(&failure, EngineFailure::BadArguments(message)
+            if message.contains("(reason: no_model)")),
         "{failure:?}"
     );
     assert!(stub.requests().is_empty());

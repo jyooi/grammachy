@@ -60,6 +60,7 @@ Item {
 
   // Quick: "capturing", "checking", "result", "error", "notice", or "toolong".
   // Compose: "editing", "confirm", "checking", "result", "error", or "notice".
+  // Both: "cloudConsent", the card in front of the first cloud Check.
   property string phase: "capturing"
   // The whole capture, spec section 3. Every Check runs on this or on its head.
   property string capturedText: ""
@@ -75,8 +76,17 @@ Item {
   // Apply has run on the Corrected text as it stands.
   property bool applied: false
   property string noticeTitle: ""
-  property string noticeBody: ""
   property string noticeMeta: ""
+  // The body a notice was raised with. A notice that ends by naming the Engine
+  // keeps only the words before the name here, because the name is read at the
+  // moment the card is drawn: `cancelCloudCheck` runs when the reader opens
+  // Settings from the consent card, and they may pick another Engine before
+  // they read the notice behind it.
+  property string noticeBodyText: ""
+  property bool noticeNamesEngine: false
+  readonly property string noticeBody: root.noticeNamesEngine
+    ? root.noticeBodyText + root.engineLabel(root.setting("engine")) + "."
+    : root.noticeBodyText
   property bool settingsOpen: false
   property string engineMessage: ""
 
@@ -115,6 +125,11 @@ Item {
   property int chunkIndex: 0
   property bool chunkRun: false
   property bool chunkCancelled: false
+  // The failure a `Retry remaining` left behind, or null. The retry clears the
+  // error card before the first Chunk goes out, and the cloud consent card can
+  // stand in front of that Chunk. The Issues the finished Chunks found are
+  // reachable from that card alone, so Cancel has to put it back.
+  property var chunkResume: null
   // The engine slug the Chunk list was packed for. The limit belongs to the
   // Engine (spec section 4), so a Chunk list only fits the size that Engine
   // reads: a Chunk packed for a wider Engine is refused by a narrower one.
@@ -167,6 +182,23 @@ Item {
   property int modelListFloor: 0
   // The note one failed verb left, from `ui/models.js`, or null.
   property var modelNote: null
+  // The cloud consent card of `docs/spec/evals.md` section 7. The cloud engine
+  // is the one engine that sends text off this machine, so the first Check on
+  // it waits here with its own text in hand until the reader answers.
+  //
+  // `cloudConsentGiven` is the answer for this session. The stored key is the
+  // answer that outlives it, and both are read, because `updateEntryInline`
+  // takes a moment to come back through `shell.shellConfig` and a chunked run
+  // must not ask again between two Chunks of one Draft.
+  property string cloudPendingText: ""
+  property string cloudPendingEngine: ""
+  property bool cloudConsentGiven: false
+
+  // The OpenRouter key state of `docs/spec/evals.md` section 7, read out of one
+  // `grammachy doctor --json` report. The key is a 0600 file the CLI owns, so
+  // no QML ever touches it. Null until the report lands.
+  property var cloudKey: null
+
   // The catalogue name a Remove confirm is waiting on, spec section 7.
   property string modelConfirm: ""
   // The phase the card comes back to once the confirm is answered. The confirm
@@ -234,6 +266,46 @@ Item {
   onShowsModelsChanged: {
     if (root.showsModels) root.refreshModels()
     else if (root.phase === "confirmModel") root.closeModelConfirm()
+  }
+
+  // The cloud model field carries a key hint, and only `doctor` knows the state
+  // of that file. Reading it when the group appears is what keeps a Settings
+  // view on another engine from paying for the run.
+  readonly property bool showsCloudSettings: root.settingsOpen
+    && String(root.setting("engine")) === Settings.CLOUD_ENGINE
+
+  onShowsCloudSettingsChanged: if (root.showsCloudSettings) root.refreshCloudKey()
+
+  // A question that is off the screen must never still be answerable, the same
+  // rule `onShowsModelsChanged` keeps for the Remove confirm. The consent card
+  // is not drawn over the Settings view, and the hero gear is reachable from
+  // every phase, so opening Settings cancels the Check that waited on the card.
+  // Nothing was sent, and the next Check asks again.
+  onSettingsOpenChanged: {
+    if (root.settingsOpen && root.phase === "cloudConsent") root.cancelCloudCheck()
+  }
+
+  function refreshCloudKey() {
+    keyProcess.command = [root.binaryPath, "doctor", "--engine", Settings.CLOUD_ENGINE, "--json"]
+    if (keyProcess.running) {
+      keyProcess.restartQueued = true
+      keyProcess.running = false
+      return
+    }
+    keyProcess.running = true
+  }
+
+  function onCloudKeyOutput(text) {
+    var report = null
+    try {
+      report = JSON.parse(text)
+    } catch (error) {
+      report = null
+    }
+    // A doctor that cannot answer leaves the hint as it was rather than
+    // claiming a state it did not read.
+    if (!Util.isPlainObject(report) || report.contractVersion !== 1) return
+    root.cloudKey = Settings.keyState(report)
   }
 
   // Persist on change, spec section 7: no Save button, and the Issues on
@@ -317,8 +389,16 @@ Item {
     root.phase = "notice"
     root.errorCard = null
     root.noticeTitle = title
-    root.noticeBody = body
+    root.noticeBodyText = body
+    root.noticeNamesEngine = false
     root.noticeMeta = meta === undefined ? "" : meta
+  }
+
+  // A notice whose last words are the Engine name. `body` ends where the name
+  // starts, and the binding above finishes the sentence from the setting.
+  function showEngineNotice(title, body, meta) {
+    root.showNotice(title, body, meta)
+    root.noticeNamesEngine = true
   }
 
   // Every summon starts from the same clean state: nothing of the last one is
@@ -368,6 +448,9 @@ Item {
     // confirm is a question about a card that is gone, so it goes.
     root.modelConfirm = ""
     root.phaseBeforeModelConfirm = ""
+    // A consent card is a question about a Check that is gone, so it goes with
+    // it. The answer stays: `cloudConsentGiven` outlives every summon.
+    root.clearCloudConsent()
     root.clearChunkRun()
     // End the last borrow.
     if (root.clipboardBorrowed && !restoreClipboard.running)
@@ -702,10 +785,133 @@ Item {
 
   // ------------------------------------------------------------------ check
 
+  // ---------------------------------------------------------- cloud consent
+  //
+  // `docs/spec/evals.md` section 7. The cloud engine is the one engine that
+  // sends text off this machine, so the first Check on it asks first.
+  //
+  // The gate sits on `launchCheck`, which is the one place a Check leaves for
+  // the CLI: the quick popup, one Chunk of a Draft, and every retry all pass
+  // through it, so none of them can go round the card. Picking the engine in
+  // the dropdown never asks, because nothing has been sent yet.
+
+  // Whether the card is due for a Check on this engine. The session answer is
+  // read first, because the stored one comes back through the shell a moment
+  // after it is written and a chunked run must not ask twice.
+  function needsCloudConsent(engineSlug) {
+    if (root.cloudConsentGiven) return false
+    return Settings.needsCloudConsent(engineSlug, root.entry)
+  }
+
+  // The card's own text, from `ui/settings.js` so that a node test owns the
+  // wording. The model id is what the pending Check would ask openrouter for.
+  function cloudConsentCard() {
+    return Settings.cloudConsentCard(String(root.setting("openrouterModel")))
+  }
+
+  function askCloudConsent(text, engineSlug) {
+    root.cloudPendingText = text
+    root.cloudPendingEngine = String(engineSlug)
+    root.pauseChunkClock()
+    root.phase = "cloudConsent"
+  }
+
+  // The reader's decision time is not engine time. A chunked Check reaches the
+  // card with the progress clock already running, so the card stops it and
+  // Continue starts it again from what the run had spent, the way
+  // `retryRemaining` starts the clock again after a failure.
+  function pauseChunkClock() {
+    if (!root.chunkRun) return
+    root.chunkTickMs = Date.now() - root.chunkStartedAt
+    chunkTicker.stop()
+  }
+
+  function resumeChunkClock() {
+    if (!root.chunkRun) return
+    root.chunkStartedAt = Date.now() - root.chunkTickMs
+    chunkTicker.start()
+  }
+
+  // Continue: the answer is kept and the Check that waited on it runs.
+  //
+  // `cloudConsentGiven` is set before the write, because the stored value comes
+  // back through the shell a moment later and the Check goes out now.
+  function continueCloudCheck() {
+    if (root.phase !== "cloudConsent") return
+    var text = root.cloudPendingText
+    var engineSlug = root.cloudPendingEngine
+    root.cloudConsentGiven = true
+    root.persistSetting("cloudConsent", true)
+    root.clearCloudConsent()
+    root.chunkResume = null
+    root.phase = "checking"
+    root.resumeChunkClock()
+    root.launchCheck(text, engineSlug)
+  }
+
+  // Cancel: nothing is sent. The engine setting stays as it is, so the next
+  // Check asks again rather than quietly running on another engine.
+  function cancelCloudCheck() {
+    if (root.phase !== "cloudConsent") return
+    root.clearCloudConsent()
+    // Nothing is in flight and nothing is going to be, so a late answer from an
+    // earlier run must not land on the card this leaves behind.
+    root.runGeneration += 1
+    // Spec section 9: a run that stops keeps what the engine already answered.
+    // The Chunk list and the Chunk index stay with it, so `Retry remaining`
+    // resumes at the Chunk that stopped the run.
+    if (root.surface === "compose" && root.issues.length > 0) {
+      root.stopChunkRun()
+      root.backToChunkStop()
+      Qt.callLater(root.restoreFocus)
+      return
+    }
+    root.clearChunkRun()
+    if (root.surface === "compose") {
+      root.phase = "editing"
+      Qt.callLater(root.restoreFocus)
+      return
+    }
+    // The quick popup has no card behind this one: the Selection was captured
+    // for a Check that is not going to run.
+    root.showEngineNotice("Nothing was sent",
+      "The check was cancelled, so no text left this machine. The engine is still ",
+      "cancelled, nothing sent")
+  }
+
+  function clearCloudConsent() {
+    root.cloudPendingText = ""
+    root.cloudPendingEngine = ""
+  }
+
+  // Back to the card the consent card stood in front of: the failure the retry
+  // came from, or the partial result when the run reached the card any other
+  // way. Both keep every Issue the finished Chunks found.
+  function backToChunkStop() {
+    if (root.chunkResume) {
+      root.errorCard = root.chunkResume.card
+      root.errorDiagnosis = root.chunkResume.diagnosis
+      root.engineMessage = root.chunkResume.message
+      root.chunkResume = null
+      root.phase = "error"
+      return
+    }
+    root.focusIndex = 0
+    root.elapsedMs = root.chunkElapsedMs
+    root.phase = "result"
+  }
+
   // One `grammachy check` on this text. What the answer means belongs to the
   // caller: the quick popup checks the whole Selection, and the chunked run of
   // spec section 9 checks one Chunk of the Draft.
+  //
+  // The cloud consent card of `docs/spec/evals.md` section 7 stands here, so a
+  // Check that has not been consented to never reaches the process below.
   function launchCheck(text, engineSlug) {
+    if (root.needsCloudConsent(engineSlug)) {
+      root.askCloudConsent(text, engineSlug)
+      return
+    }
     checkProcess.generation = root.runGeneration
     checkProcess.stdinText = text
     checkProcess.command = root.checkCommand(engineSlug)
@@ -795,14 +1001,21 @@ Item {
 
   // No run is in flight and nothing of one is left behind.
   function clearChunkRun() {
-    chunkTicker.stop()
-    root.chunkRun = false
-    root.chunkCancelled = false
+    root.stopChunkRun()
+    root.chunkResume = null
     root.chunks = []
     root.chunkIndex = 0
     root.chunkEngine = ""
     root.chunkElapsedMs = 0
     root.chunkTickMs = 0
+  }
+
+  // The run stops where it stands. The Chunk list and the Chunk index stay, so
+  // `Retry remaining` still resumes at the Chunk that stopped it.
+  function stopChunkRun() {
+    chunkTicker.stop()
+    root.chunkRun = false
+    root.chunkCancelled = false
   }
 
   function runChunkList() {
@@ -945,6 +1158,11 @@ Item {
   function retryRemaining() {
     if (root.surface !== "compose" || root.phase !== "error") return
     root.runGeneration += 1
+    root.chunkResume = root.errorCard ? {
+      card: root.errorCard,
+      diagnosis: root.errorDiagnosis,
+      message: root.engineMessage
+    } : null
     root.errorCard = null
     root.errorDiagnosis = ""
     root.engineMessage = ""
@@ -1280,7 +1498,13 @@ Item {
     // The Remove confirm sits over the Settings view and is one question, so it
     // takes the keyboard from every other card while it is up.
     if (root.phase === "confirmModel") return Keymap.MODE_MODEL_CONFIRM
+    // Settings hides the consent card, so Settings answers the keyboard first.
+    // `onSettingsOpenChanged` already cancels the pending Check, and this order
+    // is what makes a hidden card unanswerable whatever the phase says.
     if (root.settingsOpen) return Keymap.MODE_IDLE
+    // The consent card stands in front of a Check on either surface, so it
+    // answers the keyboard before the surface does.
+    if (root.phase === "cloudConsent") return Keymap.MODE_CLOUD_CONSENT
     if (root.surface === "compose") {
       if (root.phase === "editing") return Keymap.MODE_COMPOSE_EDIT
       if (root.phase === "result" || root.phase === "notice") return Keymap.MODE_COMPOSE_REVIEW
@@ -1308,6 +1532,8 @@ Item {
     else if (action === Keymap.COPY) root.copyCorrected()
     else if (action === Keymap.APPLY) root.applyCorrected()
     else if (action === Keymap.REMOVE_MODEL) root.confirmRemoveModel(root.modelConfirm)
+    else if (action === Keymap.CLOUD_CONTINUE) root.continueCloudCheck()
+    else if (action === Keymap.CLOUD_CANCEL) root.cancelCloudCheck()
     else if (action === Keymap.KEEP_MODEL) root.keepModel()
 
     event.accepted = true
@@ -1601,6 +1827,28 @@ Item {
     }
   }
 
+  // The OpenRouter key hint of the Settings view, `docs/spec/evals.md` section
+  // 7. It is its own run rather than a share of `doctorProcess`, because that
+  // one belongs to an error card and answers only for the card that started it.
+  Process {
+    id: keyProcess
+    property bool restartQueued: false
+    onRunningChanged: {
+      if (keyProcess.running) return
+      if (!keyProcess.restartQueued) return
+      keyProcess.restartQueued = false
+      keyProcess.running = true
+    }
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root.onCloudKeyOutput(text)
+    }
+    stderr: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: if (text.length > 0) console.warn("grammachy doctor:", text)
+    }
+  }
+
   Process {
     id: copyProcess
     property string text: ""
@@ -1794,6 +2042,9 @@ Item {
         openaiBaseUrl: root.setting("openaiBaseUrl")
         openaiModel: root.setting("openaiModel")
         localThinking: root.setting("localThinking") === true
+        openrouterModel: root.setting("openrouterModel")
+        cloudKey: root.cloudKey
+        consentCard: root.phase === "cloudConsent" ? root.cloudConsentCard() : null
 
         models: root.models
         modelBusy: root.modelBusy
@@ -1813,6 +2064,8 @@ Item {
 
         onSettingsToggled: root.settingsOpen = !root.settingsOpen
         onSettingChanged: function(name, value) { root.persistSetting(name, value) }
+        onCloudContinueRequested: root.continueCloudCheck()
+        onCloudCancelRequested: root.cancelCloudCheck()
         onAccepted: function(index) { root.decide(index, true) }
         onSkipped: function(index) { root.decide(index, false) }
         onAcceptAllRequested: root.acceptAllOpen()
@@ -1872,6 +2125,9 @@ Item {
         openaiBaseUrl: root.setting("openaiBaseUrl")
         openaiModel: root.setting("openaiModel")
         localThinking: root.setting("localThinking") === true
+        openrouterModel: root.setting("openrouterModel")
+        cloudKey: root.cloudKey
+        consentCard: root.phase === "cloudConsent" ? root.cloudConsentCard() : null
 
         models: root.models
         modelBusy: root.modelBusy
@@ -1891,6 +2147,8 @@ Item {
 
         onSettingsToggled: root.settingsOpen = !root.settingsOpen
         onSettingChanged: function(name, value) { root.persistSetting(name, value) }
+        onCloudContinueRequested: root.continueCloudCheck()
+        onCloudCancelRequested: root.cancelCloudCheck()
         onDraftEdited: function(text) { root.editDraft(text) }
         onClearRequested: root.clearDraft()
         onCheckRequested: root.startComposeCheck()

@@ -105,7 +105,23 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   It never reaches `shell.json`, a process list, a log, or a `doctor` report: `cli/src/setup/key.rs` and `doctor::facts::KeyState` both record the state of the file and never its contents.
   Every cloud failure carries its reason word in the message, and `cli/tests/openrouter_stub.rs` maps each one from a recorded response.
   `ui/errors.js` parses that trailing `(reason: <word>)` to pick the card body, so a change to the message wording moves the card too.
+  The unset-model `bad_arguments` carries `(reason: no_model)` in that same shape, and it is the one `bad_arguments` whose card names the Settings field rather than the companion tool.
+  The arm is picked from the message and never from the engine slug, so a cloud failure for any other reason keeps the general card.
   The `engine_unavailable` card sets `needsDiagnosis` false for this slug alone, because `doctor` reads no piece of this machine that a cloud failure is about.
+  `openrouterModel` has no built-in default: `settings::DEFAULT_OPENROUTER_MODEL` is the empty string, so a blank field, a blank flag, and an absent entry all answer `bad_arguments` in the adapter.
+  `settings::non_empty` is the one fallback rule the file reader and the flags share, and `settings::OPENROUTER_MODEL_PLACEHOLDER` is what the empty field shows and never a value.
+  The cloud surface of `docs/spec/evals.md` section 7 lives in `ui/settings.js`: the `Cloud LLM (OpenRouter)` row, the `openrouterModel` and `cloudConsent` descriptors, `needsCloudConsent`, `cloudConsentCard`, and the `keyState`/`keyHint` pair the Settings hint draws.
+  The consent gate sits on `Overlay.launchCheck`, the one route out to the CLI, so the quick popup, every Chunk of a Draft, and every retry pass through it and the card can never be gone round.
+  `Overlay.cloudConsentGiven` answers for the session beside the stored key, because `updateEntryInline` comes back a moment later and a chunked run must not ask twice.
+  Neither card draws the consent over the Settings view, so `onSettingsOpenChanged` cancels the pending Check and `keyMode` answers for `settingsOpen` before the `cloudConsent` phase.
+  That is the same rule `onShowsModelsChanged` keeps for the Models Remove confirm: a question that is off the screen must never still be answerable.
+  `Overlay.pauseChunkClock` and `Overlay.resumeChunkClock` keep the reader's decision time out of the compose progress line, because a chunked Check reaches the card with that clock already running.
+  Cancel keeps a partial chunked review: `Overlay.stopChunkRun` leaves the Chunk list and the index for `Retry remaining`, and `Overlay.chunkResume` is the failure `retryRemaining` cleared, which `backToChunkStop` puts back.
+  `Overlay.refreshCloudKey` is the only reader of the key state, through `doctor --engine openrouter --json`; no QML may open the key file.
+  The `key` check of the `doctor` envelope carries a `state` word, documented in `docs/doctor.md`, and `ui/settings.js` reads that rather than the prose of `detail`.
+  A key file that exists but cannot be used reads as `loose` or `empty`, which the hint labels apart from a missing key.
+  `BarWidget.qml` draws the cloud glyph from `settings`, the inline entry the bar host re-assigns on every write, so the glyph moves with no reload.
+  `cli/tests/overlay_cloud.rs` keeps `Overlay.qml`, both cards, `ui/SettingsView.qml`, and the bar widget on those calls, and `ui/settings.test.js` runs the rules and the gate against a counting stub.
 - `grammachy setup` lives in `cli/src/setup/`, spec section 10.
   It prints one JSON envelope (`SetupEnvelope`).
   Exit 1 uses `setup_failed`.
@@ -192,7 +208,7 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   `draw.rs` draws with a fixed seed, and `sidecar.rs` is the committed text-free selection.
   A cache the machine cannot fill is a skipped table with a reason, never an error.
   Redraw `cli/tests/fixtures/eval-set.sidecar.json` with `cargo test --test evalset_sidecar -- --ignored`, which needs a filled cache.
-  `docs/dev.md` section 16 has the steps.
+  `docs/dev.md` section 17 has the steps.
   No test may fetch the corpus: the seams are `GRAMMACHY_EVAL_CACHE`, `GRAMMACHY_EVAL_FETCH=never`, `GRAMMACHY_EVAL_BASE_URL`, and `GRAMMACHY_EVAL_SHA256`.
 - The judge of `docs/spec/evals.md` section 4.4 is two halves that must agree on one rule.
   `cli/bench/judge.py` grades a recorded run, and `cli/src/bench/judge.rs` reads the answer into the Useful fix column.

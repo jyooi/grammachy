@@ -182,7 +182,8 @@ Two lines, re-decided from the eval-set tables on every tag ([HUF-205](https://l
 No cost ceiling: the captain chose quality over cost for the cloud line on 2026-08-26.
 On the pilot numbers Gemini 3.7 Flash (0.34 USD per 1,000 Checks, 90% exact fix) is the recommended line.
 DeepSeek V4 Flash (0.02 USD, 70 to 83%) is the value candidate, and whether it takes the value line depends on the run: `docs/benchmarks/pilot-2026-08.md` puts it 13.3 points behind, which is outside the window, and `docs/benchmarks/pilot-2026-08-compact.md` puts it 3.3 points behind, which is inside it.
-The `openrouterModel` default in Settings is `google/gemini-3.7-flash` until the first full run replaces it.
+The `openrouterModel` placeholder in Settings is `google/gemini-3.7-flash` until the first full run replaces it.
+It stays a placeholder: `openrouterModel` has no built-in default, the rule v1 section 7 states.
 
 ## 6. Local engine changes
 
@@ -227,10 +228,15 @@ Contract: [HUF-206](https://linear.app/huffman/issue/HUF-206); key placement: [H
   Timeout 30 s, kept equal in Rust and `ui/errors.js` by test.
   Cost stays inside Rust as `cost: Option<f64>` on the engine result; the 5.1 envelope is unchanged.
 - Settings: `openrouterModel` (text, placeholder of section 5.1) and file-only `cloudConsent`; dropdown label "Cloud LLM (OpenRouter)"; empty model id is `bad_arguments`.
+  The placeholder is never a fallback: `openrouterModel` has no built-in default, which v1 section 7 states as the one resolved rule.
 - Key: `~/.config/grammachy/openrouter-key`, directory 0700, file 0600, written by `printf '%s' "$KEY" | grammachy setup --openrouter-key`, removed by `setup --remove`, never in `shell.json`, never through QML.
 - Consent card "Send text to OpenRouter?" gates the first Check in `Overlay`; Continue stores `cloudConsent`, Cancel sends nothing.
+  Cancel keeps the engine setting, so the next Check asks again.
+  The quick popup then shows a notice that nothing was sent, and Compose returns to the Draft, or to what the finished Chunks already found.
   The bar widget draws the cloud glyph with the tooltip "Grammachy: cloud engine, text is sent to OpenRouter".
 - Failures map onto the six codes with a `reason` word (`no_key`, `unreachable`, `rejected_key`, `no_credit`, `rate_limited`) and the card shows the envelope message.
+  An unset model adds a sixth reason word, `no_model`, which comes with `bad_arguments`.
+  Section 8 of v1 holds the card it picks.
 - `doctor` gains offline `binary` and `key` checks and a `docs/doctor.md` row.
 - TLS is in the binary (`ureq` with `rustls`).
 - ADR 0002, one opt-in cloud engine through OpenRouter only, as drafted on HUF-206.

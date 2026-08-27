@@ -155,6 +155,102 @@ test("bad_arguments blames the companion tool and offers Setup", () => {
   assert.equal(model.primary, SETUP)
 })
 
+// `openrouterModel` has no built-in default (spec section 7), so an empty
+// field is the ordinary first run of the cloud engine. Setup fixes nothing
+// there: the reader has one text field to fill.
+test("an unset cloud model names the field and offers Settings", () => {
+  // The message is the one `cli/src/engines/openrouter/mod.rs` prints.
+  const model = card(BAD_ARGUMENTS, {
+    engineLabel: "Cloud LLM",
+    engineSlug: "openrouter",
+    message: "The cloud model is not set. Type one in Settings. (reason: no_model)"
+  })
+
+  assert.equal(model.title, "No cloud model is set")
+  assert.equal(model.meta, "no cloud model")
+  assert.equal(model.body,
+    "The Cloud model field in Settings is empty. Type a model id there, then run the check again.")
+  // Settings is what fixes it, so it stays the primary button. Retry is what
+  // runs the Check the reader just fixed, without leaving the card first.
+  assert.deepEqual(model.buttons, [CLOSE, RETRY, SETTINGS])
+  assert.equal(model.primary, SETTINGS)
+  assert.ok(!model.buttons.includes(SETUP), "Setup fixes no empty field")
+})
+
+// Every cloud card a reader can fix in Settings offers the same way back to
+// the Check, so no card leaves them with Close as their only offer.
+test("every cloud card Settings can fix offers Retry beside it", () => {
+  const cards = [
+    card(BAD_ARGUMENTS, {
+      engineLabel: "Cloud LLM",
+      engineSlug: "openrouter",
+      message: "The cloud model is not set. Type one in Settings. (reason: no_model)"
+    }),
+    card(ENGINE_UNAVAILABLE, {
+      engineLabel: "Cloud LLM",
+      engineSlug: "openrouter",
+      message: "Cloud LLM has no key. (reason: no_key)"
+    })
+  ]
+
+  for (const model of cards) {
+    assert.ok(model.buttons.includes(SETTINGS), model.title)
+    assert.ok(model.buttons.includes(RETRY), model.title)
+  }
+})
+
+// Compose wraps every failure in the Chunk card of spec section 9, which sets
+// its own buttons. The quick popup's Retry must not reach that surface.
+test("the Chunk card keeps its own buttons for an unset cloud model", () => {
+  const context = {
+    engineLabel: "Cloud LLM",
+    engineSlug: "openrouter",
+    message: "The cloud model is not set. Type one in Settings. (reason: no_model)"
+  }
+
+  const fresh = chunkCard(BAD_ARGUMENTS, context)
+  assert.equal(fresh.title, "No cloud model is set")
+  assert.deepEqual(fresh.buttons, [CLOSE, RETRY_REMAINING, SETTINGS])
+  assert.equal(fresh.primary, RETRY_REMAINING)
+  assert.ok(!fresh.buttons.includes(RETRY), "Compose resumes the run rather than re-running one Chunk")
+
+  const partial = chunkCard(BAD_ARGUMENTS, Object.assign({ hasPartial: true }, context))
+  assert.deepEqual(partial.buttons, [RETRY_REMAINING, REVIEW_PARTIAL])
+})
+
+// The arm is picked from what the CLI said, never from the engine slug, so a
+// cloud failure for any other reason keeps the general card.
+test("every other bad_arguments keeps the companion tool card", () => {
+  const messages = [
+    "",
+    "The cloud model is not set.",
+    "Cloud LLM has no key. (reason: no_key)",
+    "--native is not a language. (reason: something_else)"
+  ]
+
+  for (const message of messages) {
+    const model = card(BAD_ARGUMENTS, {
+      engineLabel: "Cloud LLM",
+      engineSlug: "openrouter",
+      message: message
+    })
+
+    assert.equal(model.title, "Grammachy could not run the check", message)
+    assert.equal(model.body, "The companion tool is missing or out of date.", message)
+    assert.deepEqual(model.buttons, [CLOSE, SETUP], message)
+  }
+})
+
+// A local engine never carries that reason word, but the rule is the message
+// and not the slug, so this proves the two are not tied together.
+test("the cloud model arm follows the message and not the engine", () => {
+  const model = languageToolCard(BAD_ARGUMENTS,
+    "The cloud model is not set. Type one in Settings. (reason: no_model)")
+
+  assert.equal(model.title, "No cloud model is set")
+  assert.deepEqual(model.buttons, [CLOSE, RETRY, SETTINGS])
+})
+
 // The too-long card of spec section 6 has a size bar and a `Check the first N
 // only` button, so it is the quick popup's own card and not one of these.
 test("text_too_long has no card here", () => {

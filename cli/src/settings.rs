@@ -30,9 +30,19 @@ pub const DEFAULT_OPENAI_BASE_URL: &str = "http://127.0.0.1:8080";
 /// reference row of the benchmark files and is never the default.
 pub const DEFAULT_OPENAI_MODEL: &str = "qwen3.8-4b";
 
-/// The recommended cloud model, the best `openrouter` row with no cost ceiling
-/// (HUF-206, evals spec section 5.1).
-pub const DEFAULT_OPENROUTER_MODEL: &str = "google/gemini-3.7-flash";
+/// Spec section 7: `openrouterModel` has no built-in default.
+///
+/// The cloud engine is the one engine that sends text off this machine, so a
+/// model nobody chose is never asked for: a blank field, a blank flag, and a
+/// missing key all resolve to this, and the adapter answers `bad_arguments`.
+pub const DEFAULT_OPENROUTER_MODEL: &str = "";
+
+/// What the `openrouterModel` field shows while it is empty, the recommended
+/// cloud model of `docs/spec/evals.md` section 5.1 (HUF-206).
+///
+/// It is a placeholder and never a value: nothing reads it as a fallback.
+/// `cli/tests/overlay_cloud.rs` keeps the copy in `ui/settings.js` equal to it.
+pub const OPENROUTER_MODEL_PLACEHOLDER: &str = "google/gemini-3.7-flash";
 
 /// Spec section 4: thinking is on by default for the local engine, everywhere.
 pub const DEFAULT_LOCAL_THINKING: bool = true;
@@ -86,12 +96,12 @@ impl StoredSettings {
             native: string(entry, "nativeLanguage").and_then(NativeLanguage::from_stored),
             target: string(entry, "targetEnglish").and_then(TargetEnglish::from_stored),
             engine: string(entry, "engine").and_then(EngineSlug::from_stored),
-            openai_base_url: non_empty(entry, "openaiBaseUrl"),
-            openai_model: non_empty(entry, "openaiModel"),
+            openai_base_url: stored_text(entry, "openaiBaseUrl"),
+            openai_model: stored_text(entry, "openaiModel"),
             // The empty string is the default of the API key and also a
             // meaningful stored value, so it is kept as it stands.
             openai_api_key: string(entry, "openaiApiKey").map(str::to_string),
-            openrouter_model: non_empty(entry, "openrouterModel"),
+            openrouter_model: stored_text(entry, "openrouterModel"),
             local_thinking: boolean(entry, "localThinking"),
         }
     }
@@ -145,9 +155,17 @@ fn boolean(entry: &Value, key: &str) -> Option<bool> {
 
 /// A stored text field that carries something, so a blank field reads as the
 /// default instead of as an address or a model name that cannot work.
-fn non_empty(entry: &Value, key: &str) -> Option<String> {
-    string(entry, key)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
+fn stored_text(entry: &Value, key: &str) -> Option<String> {
+    non_empty(string(entry, key).unwrap_or_default()).map(str::to_string)
+}
+
+/// The one fallback rule every text setting shares: a value that carries
+/// something, or `None`.
+///
+/// A blank flag, a blank field, and a missing key are the same answer, so the
+/// layer above never has to tell them apart. `CheckOptions::resolve` reads the
+/// flags through this and `stored_text` reads the file through it.
+pub fn non_empty(value: &str) -> Option<&str> {
+    let value = value.trim();
+    (!value.is_empty()).then_some(value)
 }

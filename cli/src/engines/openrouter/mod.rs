@@ -331,7 +331,7 @@ impl Engine for Openrouter {
     fn answer(&self, text: &str, options: &CheckOptions) -> Result<Answer, EngineFailure> {
         if options.openrouter_model.trim().is_empty() {
             return Err(EngineFailure::BadArguments(
-                "The cloud model is not set.".to_string(),
+                "The cloud model is not set. Type one in Settings. (reason: no_model)".to_string(),
             ));
         }
         // Before anything is sent: no key means no request.

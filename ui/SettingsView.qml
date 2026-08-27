@@ -20,6 +20,12 @@ ColumnLayout {
   property string openaiBaseUrl: "http://127.0.0.1:8080"
   property string openaiModel: "qwen3.8-4b"
   property bool localThinking: true
+  property string openrouterModel: ""
+
+  // The OpenRouter key state, read by Overlay.qml out of one `grammachy doctor
+  // --json` report. Null until that report lands. The key file itself is never
+  // read here: `docs/spec/evals.md` section 7 keeps it out of QML entirely.
+  property var cloudKey: null
 
   // The Models list of spec section 5.3. Everything it needs arrives from
   // Overlay.qml, which is the only thing that runs `grammachy model`.
@@ -41,6 +47,11 @@ ColumnLayout {
   signal modelKeepRequested()
 
   readonly property bool showsOpenai: root.engine === "openai"
+  readonly property bool showsOpenrouter: root.engine === Settings.CLOUD_ENGINE
+
+  // Spec section 7 keeps `cloudConsent` out of this view: only the consent card
+  // writes it, so there is no control for it here.
+  readonly property string cloudKeyHint: Settings.keyHint(root.cloudKey)
 
   // How long a text field waits after the last keystroke before it persists.
   readonly property int commitDelayMs: 500
@@ -50,6 +61,7 @@ ColumnLayout {
   // become the default in shell.json.
   property bool baseUrlDirty: false
   property bool modelDirty: false
+  property bool cloudModelDirty: false
 
   // Keep on screen exactly what the user is typing, but never store a value
   // the CLI would ignore: an emptied field stores the default.
@@ -86,6 +98,17 @@ ColumnLayout {
     }
   }
 
+  Timer {
+    id: cloudModelTimer
+    interval: root.commitDelayMs
+    onTriggered: {
+      if (!root.cloudModelDirty)
+        return
+      root.cloudModelDirty = false
+      root.commit("openrouterModel", cloudModelField, cloudModelTimer)
+    }
+  }
+
   // Dropdown writes its own `value` when the user picks a row, which drops the
   // declarative binding. Re-asserting it on every change of the stored value
   // is what keeps the view live for a write from outside, such as
@@ -96,6 +119,7 @@ ColumnLayout {
   // an outside write lands only while the field is idle.
   onOpenaiBaseUrlChanged: if (!baseUrlField.activeFocus) baseUrlField.text = root.openaiBaseUrl
   onOpenaiModelChanged: if (!modelField.activeFocus) modelField.text = root.openaiModel
+  onOpenrouterModelChanged: if (!cloudModelField.activeFocus) cloudModelField.text = root.openrouterModel
 
   spacing: Style.spacing.lg
 
@@ -262,6 +286,71 @@ ColumnLayout {
       onRemove: function(name) { root.modelRemoveRequested(name) }
       onConfirmRemove: function(name) { root.modelRemoveConfirmed(name) }
       onKeepModel: root.modelKeepRequested()
+    }
+  }
+
+  // `docs/spec/evals.md` section 7 shows the cloud model field for the Cloud
+  // LLM engine only. The field has no built-in default, so an empty one stays
+  // empty and the placeholder alone names the recommended model: a Check with
+  // nothing here answers `bad_arguments` rather than reaching a model the user
+  // never chose.
+  //
+  // `cloudConsent` has no control. Only the consent card in front of the first
+  // cloud Check writes it.
+  ColumnLayout {
+    Layout.fillWidth: true
+    visible: root.showsOpenrouter
+    spacing: Style.spacing.labelGap
+
+    Text {
+      text: "Cloud model"
+      color: Qt.darker(Color.popups.text, 1.4)
+      font.family: Style.font.family
+      font.pixelSize: Style.font.caption
+      font.bold: true
+    }
+
+    TextField {
+      id: cloudModelField
+
+      Layout.fillWidth: true
+      text: root.openrouterModel
+      placeholderText: Settings.OPENROUTER_MODEL_PLACEHOLDER
+      foreground: Color.popups.text
+      onTextEdited: {
+        root.cloudModelDirty = true
+        cloudModelTimer.restart()
+      }
+      onEditingFinished: {
+        if (root.cloudModelDirty) {
+          root.cloudModelDirty = false
+          root.commitAndSettle("openrouterModel", cloudModelField, cloudModelTimer)
+        } else {
+          cloudModelField.text = Settings.normalised("openrouterModel", cloudModelField.text)
+        }
+      }
+    }
+
+    Text {
+      Layout.fillWidth: true
+      text: "This engine sends the text you check to openrouter.ai. No other engine sends it off this machine."
+      color: Color.muted
+      wrapMode: Text.Wrap
+      font.family: Style.font.family
+      font.pixelSize: Style.font.caption
+    }
+
+    // The key lives in a 0600 file the CLI owns, so `doctor` reports its state
+    // and names the command that writes it. Nothing here reads the key itself.
+    Text {
+      Layout.fillWidth: true
+      Layout.topMargin: Style.spacing.sm
+      visible: root.cloudKeyHint.length > 0
+      text: root.cloudKeyHint
+      color: root.cloudKey && root.cloudKey.present ? Color.muted : Color.urgent
+      wrapMode: Text.Wrap
+      font.family: "monospace"
+      font.pixelSize: Style.font.caption
     }
   }
 }

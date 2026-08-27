@@ -670,6 +670,38 @@ Checks send text to openrouter.ai."
     );
 }
 
+/// Spec section 7: `openrouterModel` has no built-in default, so the ready
+/// line names that case rather than an empty model id.
+#[test]
+fn a_ready_cloud_engine_with_no_model_asks_for_one() {
+    let mut facts = ready();
+    facts.openrouter_model = String::new();
+
+    let report = Report::new(&facts, EngineSlug::Openrouter);
+
+    assert!(report.ready, "{report:?}");
+    assert_eq!(report.exit_code(), 0);
+    assert_eq!(
+        report.diagnosis,
+        "The key is in place. Set the cloud model in Settings before a Check."
+    );
+}
+
+/// A field of blanks is a field nobody filled in, and `settings::non_empty` is
+/// the one rule that says so.
+#[test]
+fn a_blank_cloud_model_reads_as_no_model_at_all() {
+    let mut facts = ready();
+    facts.openrouter_model = "   ".to_string();
+
+    let report = Report::new(&facts, EngineSlug::Openrouter);
+
+    assert_eq!(
+        report.diagnosis,
+        "The key is in place. Set the cloud model in Settings before a Check."
+    );
+}
+
 #[test]
 fn a_missing_key_names_the_command_that_stores_one() {
     let mut facts = ready();
@@ -755,6 +787,63 @@ fn a_loose_key_file_fails_the_check_and_asks_for_chmod() {
         "{}",
         report.diagnosis
     );
+}
+
+/// The shell tells a missing key from a key it found but cannot use, and
+/// `detail` is prose and no contract, so the envelope carries a state word.
+#[test]
+fn the_key_check_carries_one_state_word_per_key_state() {
+    let cases = [
+        (
+            KeyState::Ready {
+                path: key_path(),
+                mode: 0o600,
+            },
+            "ready",
+        ),
+        (KeyState::Missing(key_path()), "missing"),
+        (KeyState::Empty(key_path()), "empty"),
+        (
+            KeyState::Loose {
+                path: key_path(),
+                mode: 0o644,
+            },
+            "loose",
+        ),
+        (KeyState::NoHome, "noHome"),
+    ];
+
+    for (state, word) in cases {
+        let mut facts = ready();
+        facts.openrouter_key = state;
+
+        let json = doctor::run(&facts, EngineSlug::Openrouter, true).text;
+        let value: Value = serde_json::from_str(&json).expect("the envelope is one JSON object");
+        let key = value["checks"]
+            .as_array()
+            .expect("checks is an array")
+            .iter()
+            .find(|check| check["id"] == "key")
+            .expect("the report carries the key check")
+            .clone();
+
+        assert_eq!(key["state"], word, "{key}");
+    }
+}
+
+/// Only the `key` check has states the shell must tell apart, so no other
+/// check may grow a word the shell would then have to read.
+#[test]
+fn no_other_check_carries_a_state_word() {
+    let json = doctor::run(&ready(), EngineSlug::Openrouter, true).text;
+    let value: Value = serde_json::from_str(&json).expect("the envelope is one JSON object");
+
+    for check in value["checks"].as_array().expect("checks is an array") {
+        if check["id"] == "key" {
+            continue;
+        }
+        assert!(check.get("state").is_none(), "{check}");
+    }
 }
 
 /// The report says the state of the key file and never a byte of the key.

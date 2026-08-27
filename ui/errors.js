@@ -95,6 +95,12 @@ var CLOUD_REASONS = {
   }
 }
 
+// The one `bad_arguments` the reader fixes in Settings rather than by a Setup.
+// `openrouterModel` has no built-in default (spec section 7), so an empty field
+// is the ordinary first run of the cloud engine. The CLI names it with the same
+// trailing reason word every cloud failure carries.
+var NO_MODEL = "no_model"
+
 // What a cloud message with no readable reason word shows, which has to be true
 // of every one of the five.
 var CLOUD_FALLBACK = {
@@ -236,6 +242,20 @@ function card(code, options) {
   }
 
   if (settled === BAD_ARGUMENTS) {
+    // An empty cloud model is a field the reader fills, not a tool they
+    // reinstall, so this arm names the field and Settings is what it offers.
+    // Every other `bad_arguments`, cloud or not, keeps the general card.
+    if (reasonWord(message) === NO_MODEL) {
+      model.title = "No cloud model is set"
+      model.meta = "no cloud model"
+      model.body = "The Cloud model field in Settings is empty."
+        + " Type a model id there, then run the check again."
+      // Settings is what fixes it, and Retry is what runs the Check the reader
+      // just fixed. Retry re-runs the Selection in hand and captures nothing.
+      model.buttons = [CLOSE, RETRY, SETTINGS]
+      model.primary = SETTINGS
+      return model
+    }
     model.title = "Grammachy could not run the check"
     model.meta = "the check did not run"
     model.body = "The companion tool is missing or out of date."
