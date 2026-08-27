@@ -20,6 +20,10 @@
 //! already holds are the weights every Check gets. The adapter therefore reads
 //! what the server serves before its first Check and never measures or checks
 //! against another model (HUF-236). [`served`] holds that rule.
+//!
+//! A named mismatch reloads the unit, and a port that no reload can free is
+//! [`mismatch`], the one refusal of that guard. It names both models, because
+//! only a person can settle which of the two is wrong.
 
 pub mod endpoint;
 pub mod prompt;
@@ -440,7 +444,7 @@ impl Openai {
                 Ok(Confirmed::named(id))
             }
             Served::Id(id) if on_mismatch == Mismatch::Refuse => {
-                Err(mismatch(endpoint, &id, &options.openai_model))
+                Err(mismatch(endpoint, &id, &options.openai_model, None))
             }
             Served::Id(id) => self.reload(endpoint, options, &id),
             Served::Silent | Served::Unknown => Ok(Confirmed::open()),
@@ -452,19 +456,28 @@ impl Openai {
     ///
     /// The reload is the stop alone. The start path already knows how to bring
     /// the server up for `openaiModel`, so this only has to free the port and
-    /// wait for that to take. A port that still answers with the wrong weights
-    /// after the stop belongs to a server this adapter did not start, and no
-    /// stop of the unit can reload one of those.
+    /// wait for that to take.
+    ///
+    /// Three things end a reload, and all three are the one refusal of
+    /// [`mismatch`]. The stop is forbidden, the stop did not run, or the port
+    /// still holds the wrong weights after it. A transient unit that is not
+    /// running is not loaded either, so `systemctl --user stop` on it fails,
+    /// which is what a hand-run server and an Ollama on the base URL both look
+    /// like. None of the three is a machine that is broken, and each one leaves
+    /// the same two model names for a person to settle.
     fn reload(
         &self,
         endpoint: &Endpoint,
         options: &CheckOptions,
         was: &str,
     ) -> Result<Confirmed, EngineFailure> {
+        let refuse = |why: Option<String>| mismatch(endpoint, was, &options.openai_model, why);
         if !self.config.start_unit {
-            return Err(mismatch(endpoint, was, &options.openai_model));
+            return Err(refuse(None));
         }
-        (self.stopper)(unit::UNIT_NAME).map_err(EngineFailure::Unavailable)?;
+        if let Err(why) = (self.stopper)(unit::UNIT_NAME) {
+            return Err(refuse(Some(why)));
+        }
 
         let deadline = Instant::now() + RELOAD_BUDGET;
         loop {
@@ -476,9 +489,7 @@ impl Openai {
                 // What it loads is still unconfirmed, so the question stays
                 // open until that server answers.
                 Served::Silent => return Ok(Confirmed::open()),
-                _ if Instant::now() >= deadline => {
-                    return Err(mismatch(endpoint, was, &options.openai_model))
-                }
+                _ if Instant::now() >= deadline => return Err(refuse(None)),
                 _ => sleep(PROBE_INTERVAL),
             }
         }
@@ -514,10 +525,18 @@ impl Openai {
 ///
 /// It is `bad_arguments` rather than an engine error, because nothing about
 /// this machine is broken: the base URL and the model setting disagree, and
-/// only a person can settle which of the two is wrong.
-fn mismatch(endpoint: &Endpoint, served: &str, requested: &str) -> EngineFailure {
+/// only a person can settle which of the two is wrong. Every port the guard
+/// cannot reload ends here, so `why` carries what stopped the reload when
+/// there is something a person can act on.
+fn mismatch(
+    endpoint: &Endpoint,
+    served: &str,
+    requested: &str,
+    why: Option<String>,
+) -> EngineFailure {
+    let why = why.map_or_else(String::new, |why| format!(" The reload did not run: {why}"));
     EngineFailure::BadArguments(format!(
-        "The model server on {} serves {served}, and this Check asks for {requested}. Stop the {} unit, or point openaiBaseUrl at a server that holds {requested}.",
+        "The model server on {} serves {served}, and this Check asks for {requested}.{why} Stop the {} unit, or point openaiBaseUrl at a server that holds {requested}.",
         endpoint.address(),
         unit::UNIT_NAME,
     ))

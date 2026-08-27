@@ -453,8 +453,9 @@ pub fn stopper() -> Stopper {
 
 /// Stop one transient user unit.
 ///
-/// A unit that is not running is the outcome this call wanted, and `systemctl`
-/// says so with exit 0, so only a real failure comes back as an error.
+/// A transient unit is collected when it stops, so a unit that is not running
+/// is not loaded either and `systemctl` exits 5 on it. That reads as an error
+/// here, and each caller decides what a stop it could not run means to it.
 pub fn stop_unit(unit: &str) -> Result<(), String> {
     let output = Command::new("systemctl")
         .arg("--user")

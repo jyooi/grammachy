@@ -42,7 +42,9 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   `start_and_retry` then waits it out rather than failing the first Check of a session.
 - llama-server ignores the `model` field of the request, so the weights it already holds answer every Check.
   `cli/src/engines/openai/served.rs` is the whole guard against that (HUF-236): the adapter reads `GET /v1/models` and then `GET /props` once, before its first Check, and `served::matches` compares what the server named with `openaiModel` on the prefix rule `unit::model_file` uses.
-  A named mismatch stops the unit through the `Stopper` value and lets the start path load the right weights; a port that still holds the wrong model is `bad_arguments` naming both.
+  A named mismatch stops the unit through the `Stopper` value and lets the start path load the right weights.
+  Every port the guard cannot reload is one `bad_arguments` naming both models: the stop is forbidden, the stop did not run, or the port still holds the wrong weights after it.
+  A transient unit that is not running is not loaded either, so `systemctl --user stop` on it fails, which is what a hand-run server on the base URL looks like.
   A server that names no model is checked as before, because `openaiBaseUrl` accepts any OpenAI-compatible server.
   `served::from_models` reads the whole `data` list and prefers an entry that matches, because Ollama and LM Studio list every model they can serve.
   Only a named answer settles the question: a silent port and a port that answers HTTP 503 while it reads its weights both leave it open.

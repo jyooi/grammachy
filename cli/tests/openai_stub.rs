@@ -9,7 +9,7 @@ use std::net::{TcpListener, TcpStream};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use grammachy::args::CheckOptions;
 use grammachy::engine::{Engine, EngineFailure};
@@ -32,6 +32,9 @@ type ServedModel = Option<&'static str>;
 /// The model the recorded fixture's Settings ask for, which is what a server
 /// has to hold for a Check to run at all.
 const REQUESTED: &str = "qwen3.8-4b";
+
+/// How long a stub waits for a port another case holds to come free again.
+const REBIND_BUDGET: Duration = Duration::from_secs(5);
 
 /// How the stub answers one request.
 #[derive(Clone, Copy)]
@@ -67,9 +70,22 @@ impl Stub {
 
     /// The same stub on a port a test already knows, which is how a starter
     /// brings a server up on a port that was silent a moment ago.
+    ///
+    /// Cargo runs the cases of this binary beside each other and several of
+    /// them ask the operating system for a port. So the port this one released
+    /// may belong to another case for a moment, and the bind waits it out
+    /// rather than failing the build over a lost race.
     fn on_port(port: u16, answer: Answer, served: ServedModel) -> Stub {
-        let listener =
-            TcpListener::bind(("127.0.0.1", port)).expect("the silent port is free again");
+        let deadline = Instant::now() + REBIND_BUDGET;
+        let listener = loop {
+            match TcpListener::bind(("127.0.0.1", port)) {
+                Ok(listener) => break listener,
+                Err(error) if Instant::now() >= deadline => {
+                    panic!("port {port} stayed taken for the whole budget: {error}")
+                }
+                Err(_) => thread::sleep(Duration::from_millis(20)),
+            }
+        };
         Stub::on(listener, answer, served)
     }
 
@@ -1025,4 +1041,54 @@ fn a_server_that_finished_loading_another_model_refuses_the_check() {
         other => panic!("expected bad_arguments, got {other:?}"),
     }
     assert_eq!(adapter.served_weights(), None);
+}
+
+/// A transient unit that is not running is not loaded either, so
+/// `systemctl --user stop` on it fails. That is what a hand-run llama-server,
+/// an Ollama, or an LM Studio on the base URL looks like to the guard. The
+/// reload cannot happen, so the Check ends on the one refusal that names both
+/// models rather than on an engine error about a machine that works.
+#[test]
+fn a_stop_that_cannot_run_still_names_both_models() {
+    let stub = Stub::holding(Answer::Json(ANSWER), Some("granite-4.2-3b-Q4_K_M.gguf"));
+    let starts = Starts::default();
+    let started = Arc::clone(&starts.0);
+    let adapter = Openai::with_server_control(
+        Config {
+            timeout: Duration::from_secs(2),
+            start_unit: true,
+            startup_budget: Duration::from_millis(0),
+        },
+        Box::new(move |_model: &str, _endpoint: &Endpoint| {
+            started.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }),
+        Box::new(|unit: &str| {
+            Err(format!(
+                "systemctl could not stop {unit}: Unit {unit}.service not loaded."
+            ))
+        }),
+    );
+
+    let failure = adapter
+        .check(TEXT, &options(&stub.base_url()))
+        .expect_err("the port holds another model and no stop can free it");
+
+    match failure {
+        EngineFailure::BadArguments(message) => {
+            assert!(message.contains("granite-4.2-3b-Q4_K_M.gguf"), "{message}");
+            assert!(message.contains(REQUESTED), "{message}");
+            assert!(
+                message.contains("not loaded"),
+                "the refusal keeps what the stop said: {message}"
+            );
+        }
+        other => panic!("expected bad_arguments, got {other:?}"),
+    }
+    assert!(
+        stub.checks().is_empty(),
+        "nothing is checked against the wrong model: {:?}",
+        stub.requests()
+    );
+    assert_eq!(starts.count(), 0, "a refused Check starts nothing");
 }
