@@ -465,17 +465,10 @@ impl Report {
             .filter(|other| other.model == row.model)
             .count()
             > 1;
-        match (shared, row.thinking) {
-            (true, Some(on)) => format!("`{}` with thinking {}", row.model, mode_word(on)),
-            _ => format!("`{}`", row.model),
-        }
+        prose_label(&row.model, row.thinking, shared)
     }
 
     /// The name the prose under the tables gives one row.
-    ///
-    /// `--thinking both` prints one model twice, and the Model column of every
-    /// table is the bare name (evals spec section 4.2), so a line that names a
-    /// row on its own has to say which of the two it means.
     fn row_label(&self, set: &SetTables, row: &ModelRow) -> String {
         let shared = set
             .models
@@ -483,10 +476,7 @@ impl Report {
             .filter(|other| other.model == row.model)
             .count()
             > 1;
-        match (shared, row.thinking) {
-            (true, Some(on)) => format!("`{}` with thinking {}", row.model, mode_word(on)),
-            _ => format!("`{}`", row.model),
-        }
+        prose_label(&row.model, row.thinking, shared)
     }
 
     /// The measured cells of one Quality row, in table order.
@@ -900,6 +890,19 @@ fn memory_source_line(name: &str, outcome: &Outcome) -> String {
             "Resident memory of {name} is {}.\n",
             measurement.memory.source.line()
         ),
+    }
+}
+
+/// The name any prose line under a table gives one row.
+///
+/// `--thinking both` prints one model twice, and the Model column of every
+/// table is the bare name (evals spec section 4.2), so a line that names a row
+/// on its own has to say which of the two it means. `shared` is whether that
+/// line's own table holds the model more than once.
+fn prose_label(model: &str, thinking: Option<bool>, shared: bool) -> String {
+    match (shared, thinking) {
+        (true, Some(on)) => format!("`{model}` with thinking {}", mode_word(on)),
+        _ => format!("`{model}`"),
     }
 }
 

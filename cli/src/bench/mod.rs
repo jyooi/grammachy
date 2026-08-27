@@ -716,6 +716,18 @@ impl Pass {
             Pass::Chunk => " chunk",
         }
     }
+
+    /// What a skipped row calls the item it stopped at.
+    ///
+    /// The sentence pass runs either sentence set, so it names the plain item.
+    /// A Chunk item is a Draft of several paragraphs, and that word would
+    /// misname it.
+    fn item_word(self) -> &'static str {
+        match self {
+            Pass::Sentences => "item",
+            Pass::Chunk => "Draft",
+        }
+    }
 }
 
 fn engine_row(
@@ -879,13 +891,16 @@ fn measure(
         let (issues, cost, usage, valid) = match answer {
             Ok(answer) => (answer.issues, answer.cost, answer.usage, true),
             Err(failure) if index == 0 && ends_the_row(&failure) => {
-                return (Outcome::Skipped(reason(&sentence.id, failure)), checks);
+                return (
+                    Outcome::Skipped(reason(pass, &sentence.id, failure)),
+                    checks,
+                );
             }
             Err(failure) => {
                 eprintln!(
                     "grammachy bench: {label} on {}: {}",
                     sentence.id,
-                    reason(&sentence.id, failure)
+                    reason(pass, &sentence.id, failure)
                 );
                 (Vec::new(), None, None, false)
             }
@@ -1033,14 +1048,14 @@ fn ends_the_row(failure: &EngineFailure) -> bool {
 }
 
 /// The one sentence a skipped row carries.
-fn reason(id: &str, failure: EngineFailure) -> String {
+fn reason(pass: Pass, id: &str, failure: EngineFailure) -> String {
     let message = match failure {
         EngineFailure::Unavailable(message)
         | EngineFailure::Timeout(message)
         | EngineFailure::Failed(message)
         | EngineFailure::BadArguments(message) => message,
     };
-    format!("{message} (at item {id})")
+    format!("{message} (at {} {id})", pass.item_word())
 }
 
 /// Write every Check of the run to the record file the plan opened.
@@ -1472,6 +1487,7 @@ mod tests {
     #[test]
     fn a_failed_engine_names_the_sentence_it_stopped_at() {
         let skipped = reason(
+            Pass::Sentences,
             "zh-01",
             EngineFailure::Unavailable("No LanguageTool answered on 127.0.0.1:8081".to_string()),
         );
@@ -1479,6 +1495,20 @@ mod tests {
         assert_eq!(
             skipped,
             "No LanguageTool answered on 127.0.0.1:8081 (at item zh-01)"
+        );
+    }
+
+    #[test]
+    fn a_failed_chunk_pass_names_the_draft_it_stopped_at() {
+        let skipped = reason(
+            Pass::Chunk,
+            "chunk-zh",
+            EngineFailure::Unavailable("No model server answered on 127.0.0.1:8080".to_string()),
+        );
+
+        assert_eq!(
+            skipped,
+            "No model server answered on 127.0.0.1:8080 (at Draft chunk-zh)"
         );
     }
 
