@@ -127,7 +127,10 @@ Run the whole key map of spec section 6 on the same card:
 
 Ctrl + C and Ctrl + Enter stay off until one Fix is accepted, the same as the Apply button.
 
-Finish the item on the placement, which is the half two windows are here for (spec sections 3 and 6):
+Finish the item on the placement, which is the half two windows are here for (spec sections 3 and 6).
+Every repeat below that expects a Check needs different text, or a different window.
+The same text from the same window is stale (spec section 3), and the popup then shows the nothing-new state.
+So change one word in the sentence before you highlight it again.
 
 - **Every bar position.** Move the bar with `omarchy bar position bottom`, then `left`, `right`, and back to `top`, running the item once at each.
   The card follows the source window every time and never lands under the bar or off an edge.

@@ -344,7 +344,10 @@ fn a_replace_holds_the_release_back_until_it_has_typed() {
     let closed = exited
         .find("root.close()")
         .expect("the Replace closes the popup");
-    assert!(armed < closed, "the wait is armed before the close: {exited}");
+    assert!(
+        armed < closed,
+        "the wait is armed before the close: {exited}"
+    );
 
     // The keystroke is what ends it, and a Replace that never types must not
     // leave the release waiting for ever.
