@@ -144,6 +144,42 @@ fn the_primary_selection_is_released_when_the_popup_closes() {
     );
 }
 
+/// Spec section 3: Clear is the other exit of a run, so it holds the same
+/// invariant the close does. `checkLastAgain` reaches a result on a summon that
+/// captured nothing, and the reader owns the highlight that summon found stale,
+/// so a Clear there must take no selection away.
+#[test]
+fn clear_releases_only_what_this_run_captured_and_only_once() {
+    let source = read("Overlay.qml");
+    let clear = function_body(&source, "clearCapture");
+
+    let asked = clear
+        .find("if (root.runCaptured)")
+        .expect("Clear asks whether this run captured");
+    let released = clear
+        .find("root.releasePrimary()")
+        .expect("Clear releases the selection the run took");
+    let dropped = clear
+        .find("root.runCaptured = false")
+        .expect("Clear drops the claim once it has released");
+    assert!(
+        asked < released && asked < dropped,
+        "the release and the drop both sit behind that one question: {clear}"
+    );
+    assert!(
+        released < dropped,
+        "the claim goes only once the release is out, so the close after a Clear \
+         releases no second time: {clear}"
+    );
+
+    // `checkLastAgain` runs the kept text inside the summon that is open, so it
+    // must not claim a capture that summon never took.
+    assert!(
+        !function_body(&source, "checkLastAgain").contains("root.runCaptured = true"),
+        "the kept text is no capture, so it claims no selection"
+    );
+}
+
 /// Spec sections 2 and 3: Compose captures nothing, so a Compose that closes
 /// owns no primary selection to release and no capture to record. `resetRun`
 /// drops the source window and leaves the text of the run before it in place,

@@ -688,7 +688,10 @@ Item {
       root.restoreBorrowedClipboard()
     root.borrowedClipboard = ""
     root.clipboardBorrowed = false
-    root.releasePrimary()
+    if (root.runCaptured) {
+      root.releasePrimary()
+      root.runCaptured = false
+    }
     root.showNothingNew()
     Qt.callLater(root.restoreFocus)
   }

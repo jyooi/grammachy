@@ -201,16 +201,19 @@ function check(binary, text, run) {
   return run
 }
 
-// `Overlay.checkLastAgain`: the kept text with no capture at all.
-function checkLastAgain(binary, box) {
+// `Overlay.checkLastAgain`: the kept text with no capture at all. It runs
+// inside the summon that is already open, so it leaves that run's record of
+// what it took exactly as it found it.
+function checkLastAgain(binary, box, previous) {
+  const before = previous || {}
   const run = {
     phase: "checking",
     surface: "quick",
     capturedText: box.last.text,
-    address: "",
-    captured: false,
+    address: before.address === undefined ? "" : before.address,
+    captured: before.captured === true,
     issues: null,
-    released: 0
+    released: before.released === undefined ? 0 : before.released
   }
   if (box.last.text.length === 0) return nothingNew(run)
   return check(binary, box.last.text, run)
@@ -223,9 +226,13 @@ function clearCapture(box, run) {
   run.issues = null
   run.focusIndex = 0
   run.applied = false
-  // Clear ends a quick run that did capture, so the selection it came from
-  // goes the same way a close releases it.
-  release(box, run)
+  // Clear ends the run, so a run that took a Selection releases it the same
+  // way a close does. A run that took none owns none, so it takes none away,
+  // and the close after it releases no second time.
+  if (run.captured) {
+    release(box, run)
+    run.captured = false
+  }
   return nothingNew(run)
 }
 
@@ -431,9 +438,60 @@ test("Clear lands on the empty state and keeps the Draft", () => {
   assert.equal(box.last.text, "Their going to the park.")
   assert.equal(checkCount("clear"), 1)
 
-  const again = checkLastAgain(binary, box)
+  const again = checkLastAgain(binary, box, cleared)
   assert.equal(again.phase, "result")
   assert.equal(checkCount("clear"), 2)
+})
+
+// Spec section 3: a run that took a Selection hands it back once, and the
+// close that follows the Clear does not ask for it a second time.
+test("Clear on a run that captured releases once and no more", () => {
+  const binary = stub("clear-once")
+  const box = machine({ primary: "Their going to the park." })
+
+  const run = summon(binary, box)
+  assert.equal(run.captured, true)
+
+  const cleared = clearCapture(box, run)
+  assert.equal(cleared.released, 1, "the run that took the selection hands it back")
+  assert.equal(box.primary, "")
+
+  closePopup(box, cleared)
+  assert.equal(cleared.released, 1, "and the close after the Clear releases no second time")
+})
+
+// The harm: the kept record holds the words the reader has highlighted again
+// in the same window. That summon takes nothing, because it finds the capture
+// stale, so the highlight on screen is still the reader's own. `Check last
+// text again` runs the kept text, and a Clear there must not drop it.
+test("Clear after a stale summon releases a selection it never took", () => {
+  const binary = stub("clear-stale")
+  const box = machine({ primary: "Their going to the park." })
+
+  // One run captures, checks, and closes, which fills the kept record.
+  closePopup(box, summon(binary, box))
+  assert.equal(box.primary, "")
+
+  // The reader highlights the same words in the same window again.
+  box.primary = "Their going to the park."
+  const stale = summon(binary, box)
+  assert.equal(stale.phase, "empty")
+  assert.equal(stale.captured, false, "a stale summon takes nothing")
+  assert.equal(checkCount("clear-stale"), 1)
+
+  const again = checkLastAgain(binary, box, stale)
+  assert.equal(again.phase, "result")
+  assert.equal(again.captured, false, "and the kept text is no capture either")
+
+  const cleared = clearCapture(box, again)
+  assert.equal(cleared.released, 0, "Clear takes no selection this run never held")
+  assert.equal(box.primary, "Their going to the park.",
+    "the highlight the reader still owns is there")
+
+  // The close after it takes none either.
+  closePopup(box, cleared)
+  assert.equal(cleared.released, 0)
+  assert.equal(box.primary, "Their going to the park.")
 })
 
 // ------------------------------------------------------------- the two rules
