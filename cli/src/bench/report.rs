@@ -1357,7 +1357,9 @@ mod tests {
             languages: vec!["zh".to_string(), "es".to_string()],
             engines: vec![
                 EngineRow {
-                    engine: "languagetool".to_string(),
+                    // The default engine since HUF-237, so this is the row
+                    // the false-positive floor and the regression rule read.
+                    engine: "harper".to_string(),
                     outcome: measured(tally(10, 5, 0, 40), Some(731_000_000)),
                 },
                 EngineRow {
@@ -1383,7 +1385,7 @@ mod tests {
                 ram_gb: 27,
             },
             command: "grammachy bench".to_string(),
-            default_engine: "languagetool".to_string(),
+            default_engine: "harper".to_string(),
             max_cost: None,
             cloud_spend_usd: 0.0,
             sets: vec![fixture_set()],
@@ -1402,7 +1404,7 @@ mod tests {
         let rendered = report().render();
 
         assert!(
-            rendered.contains("| `languagetool` | 10 of 30 (33.3%) | 0 of 10 | 20 ms | 731 MB |"),
+            rendered.contains("| `harper` | 10 of 30 (33.3%) | 0 of 10 | 20 ms | 731 MB |"),
             "{rendered}"
         );
     }
@@ -1590,7 +1592,7 @@ mod tests {
             "{rendered}"
         );
         assert!(
-            rendered.contains("must not drop the catch rate of the default engine, `languagetool`"),
+            rendered.contains("must not drop the catch rate of the default engine, `harper`"),
             "{rendered}"
         );
     }
@@ -1630,7 +1632,7 @@ mod tests {
             "the row names the pool it was measured in: {rendered}"
         );
         assert!(
-            !rendered.contains("Resident memory of `languagetool`"),
+            !rendered.contains("Resident memory of `harper`"),
             "a skipped row measured nothing, so it names no source: {rendered}"
         );
     }
@@ -1741,7 +1743,7 @@ mod tests {
 
         assert!(rendered.contains("| `qwen3.8-4b` | on | 20 ms | 50 ms | 3.0 GB | 0.00 (local) | Apache-2.0 | recommended |"), "{rendered}");
         assert!(rendered.contains("| `granite-4.2-3b` | on | 20 ms | 50 ms | 3.0 GB | 0.00 (local) | Apache-2.0 | eligible |"), "{rendered}");
-        assert!(rendered.contains("| `phi-4-mini` | on | 20 ms | 50 ms | 3.0 GB | 0.00 (local) | MIT | no, more false positives than `languagetool` |"), "{rendered}");
+        assert!(rendered.contains("| `phi-4-mini` | on | 20 ms | 50 ms | 3.0 GB | 0.00 (local) | MIT | no, more false positives than `harper` |"), "{rendered}");
         assert!(rendered.contains("| `deepseek/deepseek-v4-flash-0731` | - | 20 ms | 50 ms | not measured | 0.02 USD | hosted | recommended cloud model |"), "{rendered}");
         assert!(rendered.contains("| `google/gemini-3.7-flash` | - | 20 ms | 50 ms | not measured | 0.02 USD | hosted | no, validity under 95% |"), "{rendered}");
         assert!(
@@ -2263,7 +2265,7 @@ mod tests {
     fn a_skipped_default_engine_drops_the_false_positive_floor_and_says_so() {
         let mut report = report();
         only(&mut report).engines[0].outcome =
-            Outcome::Skipped("LanguageTool did not answer".to_string());
+            Outcome::Skipped("Harper did not answer".to_string());
         only(&mut report).models = vec![model(
             "qwen3.8-4b",
             "openai",

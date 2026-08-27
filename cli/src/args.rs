@@ -35,6 +35,33 @@ pub enum Command {
 
     /// See, fetch, and delete the Local LLM weights this machine keeps.
     Model(ModelArgs),
+
+    /// See, install, and remove the optional engine components, without sudo.
+    Engine(EngineArgs),
+}
+
+#[derive(Debug, Parser)]
+pub struct EngineArgs {
+    #[command(subcommand)]
+    pub verb: EngineVerb,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum EngineVerb {
+    /// One row per optional component, with what it has on disk.
+    List,
+
+    /// Fetch and unpack one component, resuming a part file it already has.
+    Install(EngineNameArgs),
+
+    /// Delete one component's installed tree, its archive, and its part file.
+    Remove(EngineNameArgs),
+}
+
+#[derive(Debug, Parser)]
+pub struct EngineNameArgs {
+    /// The engine slug, as `grammachy engine list` prints it.
+    pub slug: String,
 }
 
 #[derive(Debug, Parser)]
@@ -376,7 +403,7 @@ impl Default for CheckOptions {
         CheckOptions {
             native: NativeLanguage::None,
             target: TargetEnglish::EnUs,
-            engine: EngineSlug::Languagetool,
+            engine: EngineSlug::Harper,
             openai_base_url: settings::DEFAULT_OPENAI_BASE_URL.to_string(),
             openai_model: settings::DEFAULT_OPENAI_MODEL.to_string(),
             openai_api_key: String::new(),

@@ -9,6 +9,11 @@ A missing package carries the exact command that installs it.
 Doctor never installs anything.
 pacman steps stay manual.
 
+A piece the machine simply has not added reads `optional` rather than `missing`.
+LanguageTool is the one such piece today (HUF-237): it is an engine the user adds in Settings, Engines, so a fresh install that never asked for it is not a broken install.
+Its line names `grammachy engine install languagetool`, which writes one directory under HOME and needs no password.
+`ok` still answers the engine question, so `doctor --engine languagetool` on such a machine still exits 1.
+
 Missing weights are the one piece a user fixes without a terminal.
 Settings, Models downloads, picks, and removes any catalogue model (spec section 5.3).
 `grammachy model download <name>` is the same step from a shell.
@@ -30,7 +35,7 @@ grammachy doctor [--engine <slug>] [--json]
 ```
 
 `--engine` picks the engine the diagnosis is about.
-Omitted, it resolves the same way a Check does: the flag, then the plugin entry in `shell.json`, then the default `languagetool` (spec section 7).
+Omitted, it resolves the same way a Check does: the flag, then the plugin entry in `shell.json`, then the default `harper` (spec section 7).
 
 ## Exit code
 
@@ -46,8 +51,8 @@ A user who checks with LanguageTool owes nothing to llama.cpp, so a missing llam
 Grammachy doctor
 
   ok       Grammachy CLI       grammachy 0.1.0 at /home/u/plugin/bin/grammachy
-  ok       LanguageTool        /usr/bin/languagetool
-  ok       Java runtime        /usr/lib/jvm/default/bin/java
+  optional LanguageTool        LanguageTool is optional and is not installed. Add it in Settings, Engines. Run: grammachy engine install languagetool
+  optional Java runtime        No Java runtime: JAVA_HOME is not set and no default JVM is installed. Run: sudo pacman -S jre-openjdk
   missing  llama.cpp server    llama.cpp is not installed: /usr/bin/llama-server does not exist. Run: sudo pacman -S llama-cpp ggml-cpu ggml-vulkan
   missing  llama.cpp backend   llama.cpp is missing the ggml-cpu and ggml-vulkan backends. It needs ggml-cpu to answer at all. Run: sudo pacman -S ggml-cpu ggml-vulkan
   missing  Model weights       No weights for qwen3.8-4b in /home/u/.local/share/grammachy/models. Run: grammachy model download qwen3.8-4b
@@ -57,8 +62,8 @@ Grammachy doctor
   ok       llama.cpp unit      grammachy-llama is not running. The next Check starts it.
 
 Hardware tier discrete-gpu, so llama.cpp wants ggml-cpu and ggml-vulkan.
-Engine languagetool is ready.
-  LanguageTool is installed. The next Check starts it on 127.0.0.1:8081, which takes a moment.
+Engine harper is ready.
+  Harper runs inside the companion binary and needs nothing installed.
 
 Run the commands above yourself. Doctor installs nothing.
 ```
@@ -108,9 +113,10 @@ Check fields:
 - `id`: stable across releases, never shown to a user. The ids are `binary`, `languagetool`, `java`, `llama.cpp`, `backend`, `model`, `endpoint`, `key`, `unit:languagetool`, and `unit:llama`.
 - `name`: the display name.
 - `ok`: whether the piece is in place.
+- `optional`: whether a piece that is not `ok` is one the machine simply has not added rather than one it is missing. Only the `languagetool` and `java` checks are ever `true`, and only while LanguageTool is absent.
 - `detail`: one sentence saying what was found, or what is missing.
 - `remedy`: the exact command that fixes it. The key is absent when there is nothing to run. An `ok` check carries one only as advice, as the backend check does for `ggml-vulkan`.
-- `state`: the stable word for which state that piece is in. Only the `key` check carries one, and the field is absent everywhere else.
+- `state`: the stable word for which state that piece is in. The `key` and `languagetool` checks carry one, and the field is absent everywhere else.
 - `engines`: the slugs that need this piece. `harper` needs only `binary`, because it runs in process.
 
 The `key` check reads the state of the OpenRouter key file and never its contents.
@@ -130,6 +136,14 @@ It is what the shell reads, because `detail` is prose and no contract.
 
 A reader that gets no `state` word falls back to the pair `ok` names.
 An older binary then degrades rather than breaks.
+
+The `languagetool` state word says which of the two routes put LanguageTool on this machine, because only one of them is one `grammachy engine remove` can take away again.
+
+| `state` | `ok` | `optional` | What it says |
+|---|---|---|---|
+| `installed` | true | false | `grammachy engine install languagetool` unpacked it under `~/.local/share/grammachy/engines/languagetool/`. This is the one the adapter runs and the one Remove deletes. |
+| `package` | true | false | The Arch `languagetool` package supplies it. Grammachy never installs it and never removes it. |
+| `absent` | false | true | Neither is here. The remedy adds it without a password. |
 
 ## The engine diagnosis
 

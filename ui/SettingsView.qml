@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Layouts
 import qs.Commons
 import qs.Ui
+import "engines.js" as EnginesJs
 import "settings.js" as Settings
 
 // The Settings view of the quick popup, spec section 7. The gear in the hero
@@ -15,7 +16,7 @@ ColumnLayout {
 
   // The stored values, already resolved through the spec section 7 defaults.
   property string nativeLanguage: "none"
-  property string engine: "languagetool"
+  property string engine: "harper"
   property bool autoReplace: false
   property string openaiBaseUrl: "http://127.0.0.1:8080"
   property string openaiModel: "qwen3.8-4b"
@@ -26,6 +27,17 @@ ColumnLayout {
   // --json` report. Null until that report lands. The key file itself is never
   // read here: `docs/spec/evals.md` section 7 keeps it out of QML entirely.
   property var cloudKey: null
+
+  // The Engines list of spec section 5.4. Everything it needs arrives from
+  // Overlay.qml, which is the only thing that runs `grammachy engine`.
+  property var engines: []
+  property string engineBusy: ""
+  property double engineBusyBytes: 0
+  property bool enginesBusy: false
+  property string engineConfirm: ""
+  property string enginesDirectory: ""
+  property double enginesFreeBytes: 0
+  property var engineNote: null
 
   // The Models list of spec section 5.3. Everything it needs arrives from
   // Overlay.qml, which is the only thing that runs `grammachy model`.
@@ -39,6 +51,11 @@ ColumnLayout {
   property var modelNote: null
 
   signal settingChanged(string name, var value)
+  signal engineInstallRequested(string slug)
+  signal engineCancelRequested()
+  signal engineRemoveRequested(string slug)
+  signal engineRemoveConfirmed(string slug)
+  signal engineKeepRequested()
   signal modelDownloadRequested(string name)
   signal modelCancelRequested()
   signal modelUseRequested(string name)
@@ -115,6 +132,10 @@ ColumnLayout {
   // `omarchy-shell shell setBarWidget <id> engine '"harper"'`.
   onNativeLanguageChanged: nativeLanguageDropdown.value = root.nativeLanguage
   onEngineChanged: engineDropdown.value = root.engine
+  // The option list narrows as the Engines list lands, and a Dropdown that
+  // has written its own `value` once no longer follows the binding, so the
+  // value is re-asserted when the rows move as well as when the setting does.
+  onEnginesChanged: engineDropdown.value = root.engine
   // A text field the user is typing in must not be yanked from under them, so
   // an outside write lands only while the field is idle.
   onOpenaiBaseUrlChanged: if (!baseUrlField.activeFocus) baseUrlField.text = root.openaiBaseUrl
@@ -148,12 +169,14 @@ ColumnLayout {
       onChanged: function(value) { root.settingChanged("nativeLanguage", Settings.normalised("nativeLanguage", value)) }
     }
 
+    // Spec section 7 and HUF-237: only an engine this machine has is offered.
+    // The Engines list below is where a missing one is added.
     Dropdown {
       id: engineDropdown
 
       Layout.fillWidth: true
       label: "Engine"
-      options: Settings.ENGINE_OPTIONS
+      options: Settings.engineOptions(EnginesJs.unavailable(root.engines), root.engine)
       value: root.engine
       foreground: Color.popups.text
       background: Color.popups.background
@@ -170,6 +193,29 @@ ColumnLayout {
     checked: root.autoReplace
     foreground: Color.popups.text
     onClicked: root.settingChanged("autoReplace", !root.autoReplace)
+  }
+
+  // Spec section 5.4: the optional engine components this machine keeps. It is
+  // drawn whatever engine is selected, because the whole point is to add one
+  // the dropdown above cannot offer yet.
+  EnginesView {
+    Layout.fillWidth: true
+
+    engines: root.engines
+    busy: root.engineBusy
+    busyBytes: root.engineBusyBytes
+    working: root.enginesBusy
+    confirmSlug: root.engineConfirm
+    selected: root.engine
+    directory: root.enginesDirectory
+    freeBytes: root.enginesFreeBytes
+    note: root.engineNote
+
+    onInstall: function(slug) { root.engineInstallRequested(slug) }
+    onCancel: root.engineCancelRequested()
+    onRemove: function(slug) { root.engineRemoveRequested(slug) }
+    onConfirmRemove: function(slug) { root.engineRemoveConfirmed(slug) }
+    onKeepEngine: root.engineKeepRequested()
   }
 
   // Spec section 7 shows the two OpenAI fields for the Local LLM engine only.

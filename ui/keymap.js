@@ -24,6 +24,9 @@ var CLEAR = "clear"
 // The Remove confirm of the Models list, spec section 7.
 var REMOVE_MODEL = "removeModel"
 var KEEP_MODEL = "keepModel"
+// The Remove confirm of the Engines list, spec sections 5.4 and 7.
+var REMOVE_ENGINE = "removeEngine"
+var KEEP_ENGINE = "keepEngine"
 // The cloud consent card, `docs/spec/evals.md` section 7.
 var CLOUD_CONTINUE = "cloudContinue"
 var CLOUD_CANCEL = "cloudCancel"
@@ -44,6 +47,10 @@ var MODE_QUICK_CLEAR = "quickClear"
 // Settings view, which owns every other key, so this mode carries the two
 // answers to that one question and nothing else.
 var MODE_MODEL_CONFIRM = "modelConfirm"
+// The Remove confirm of the Engines list, spec sections 5.4 and 7. It is the
+// same question about a different thing, so it answers the same two keys and
+// keeps its own names: the overlay must never send a model answer to an engine.
+var MODE_ENGINE_CONFIRM = "engineConfirm"
 // The cloud consent card of `docs/spec/evals.md` section 7. It stands in front
 // of the first cloud Check, so it carries the two answers to that one question
 // and nothing else.
@@ -75,6 +82,14 @@ function action(event, codes, mode) {
     if (key === codes.escape) return KEEP_MODEL
     if (foreign || control) return NONE
     return enter ? REMOVE_MODEL : NONE
+  }
+
+  // The engine question is the model question about another thing, so Esc and
+  // a bare Enter answer it the same way and Ctrl + Enter still does nothing.
+  if (mode === MODE_ENGINE_CONFIRM) {
+    if (key === codes.escape) return KEEP_ENGINE
+    if (foreign || control) return NONE
+    return enter ? REMOVE_ENGINE : NONE
   }
 
   // The consent card is a question too, and it is answered the same way: Esc
@@ -134,6 +149,8 @@ if (typeof module !== "undefined" && module.exports) {
     CLEAR: CLEAR,
     REMOVE_MODEL: REMOVE_MODEL,
     KEEP_MODEL: KEEP_MODEL,
+    REMOVE_ENGINE: REMOVE_ENGINE,
+    KEEP_ENGINE: KEEP_ENGINE,
     CLOUD_CONTINUE: CLOUD_CONTINUE,
     CLOUD_CANCEL: CLOUD_CANCEL,
     MODE_IDLE: MODE_IDLE,
@@ -142,6 +159,7 @@ if (typeof module !== "undefined" && module.exports) {
     MODE_COMPOSE_REVIEW: MODE_COMPOSE_REVIEW,
     MODE_QUICK_CLEAR: MODE_QUICK_CLEAR,
     MODE_MODEL_CONFIRM: MODE_MODEL_CONFIRM,
+    MODE_ENGINE_CONFIRM: MODE_ENGINE_CONFIRM,
     MODE_CLOUD_CONSENT: MODE_CLOUD_CONSENT
   }
 }

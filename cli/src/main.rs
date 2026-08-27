@@ -4,6 +4,7 @@ use std::process::ExitCode;
 use clap::Parser;
 
 use grammachy::args::{CheckArgs, CheckOptions, Cli, Command, EngineSlug};
+use grammachy::engines::install::{self as engine_install, EngineEnvelope};
 use grammachy::envelope::{Envelope, ErrorCode};
 use grammachy::model::{self, ModelEnvelope};
 use grammachy::settings::StoredSettings;
@@ -17,8 +18,8 @@ use grammachy::{bench, check, chunk, doctor};
 /// when its arguments do not describe a run. A `--record` write that fails
 /// after the rows ran keeps the report on stdout and exits 1.
 /// `doctor` renders its report (spec section 10).
-/// `setup` renders its JSON envelope (spec section 10), and so does `model`
-/// (spec section 5.3).
+/// `setup` renders its JSON envelope (spec section 10), and so do `model`
+/// (spec section 5.3) and `engine` (spec section 5.4).
 struct Output {
     text: String,
     exit_code: i32,
@@ -53,6 +54,15 @@ impl From<doctor::DoctorOutput> for Output {
 
 impl From<ModelEnvelope> for Output {
     fn from(envelope: ModelEnvelope) -> Self {
+        Output {
+            text: envelope.to_json(),
+            exit_code: envelope.exit_code(),
+        }
+    }
+}
+
+impl From<EngineEnvelope> for Output {
+    fn from(envelope: EngineEnvelope) -> Self {
         Output {
             text: envelope.to_json(),
             exit_code: envelope.exit_code(),
@@ -187,6 +197,10 @@ fn run() -> Option<Output> {
             let openai_model = stored.openai_model.unwrap_or(defaults.openai_model);
             Some(model::run(&args.verb, &openai_model).into())
         }
+        // `engine` reads no stdin and no Settings entry: the verb names the
+        // component, and which engine a Check runs on says nothing about what
+        // is on disk (spec section 5.4).
+        Command::Engine(args) => Some(engine_install::run(&args.verb).into()),
     }
 }
 

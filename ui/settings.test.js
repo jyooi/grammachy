@@ -80,7 +80,7 @@ test("a stored value the spec lists reads back as it stands", () => {
 
 test("a missing key reads as the spec section 7 default", () => {
   assert.equal(valueOf({ id: PLUGIN_ID }, "nativeLanguage"), "none")
-  assert.equal(valueOf({ id: PLUGIN_ID }, "engine"), "languagetool")
+  assert.equal(valueOf({ id: PLUGIN_ID }, "engine"), "harper")
   assert.equal(valueOf({ id: PLUGIN_ID }, "autoReplace"), false)
   assert.equal(valueOf({ id: PLUGIN_ID }, "openaiBaseUrl"), "http://127.0.0.1:8080")
   assert.equal(valueOf({ id: PLUGIN_ID }, "openaiModel"), "qwen3.8-4b")
@@ -98,8 +98,8 @@ test("thinking is on by default and off only when the file says so", () => {
 
 test("an unknown stored value reads as the default", () => {
   assert.equal(valueOf({ nativeLanguage: "kl" }, "nativeLanguage"), "none")
-  assert.equal(valueOf({ engine: "claude" }, "engine"), "languagetool")
-  assert.equal(valueOf({ engine: 7 }, "engine"), "languagetool")
+  assert.equal(valueOf({ engine: "claude" }, "engine"), "harper")
+  assert.equal(valueOf({ engine: 7 }, "engine"), "harper")
   assert.equal(valueOf({ autoReplace: "yes" }, "autoReplace"), false)
   assert.equal(valueOf({ openaiBaseUrl: "" }, "openaiBaseUrl"), "http://127.0.0.1:8080")
   assert.equal(valueOf({ openaiModel: null }, "openaiModel"), "qwen3.8-4b")
@@ -121,7 +121,7 @@ test("reading never rewrites the entry it was handed", () => {
 
 test("a write keeps a known value and replaces an unknown one with the default", () => {
   assert.equal(normalised("engine", "harper"), "harper")
-  assert.equal(normalised("engine", "claude"), "languagetool")
+  assert.equal(normalised("engine", "claude"), "harper")
   assert.equal(normalised("openaiModel", ""), "qwen3.8-4b")
   assert.equal(normalised("openaiBaseUrl", "http://127.0.0.1:9090"), "http://127.0.0.1:9090")
   assert.equal(normalised("autoReplace", true), true)

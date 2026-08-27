@@ -23,6 +23,7 @@ use std::process::{Command, Stdio};
 use std::sync::Mutex;
 use std::time::Duration;
 
+use grammachy::engines::openai::served;
 use serde_json::Value;
 
 const ADDRESS: &str = "127.0.0.1:8080";
@@ -37,10 +38,68 @@ const ADDRESS: &str = "127.0.0.1:8080";
 /// each other.
 static ONE_AT_A_TIME: Mutex<()> = Mutex::new(());
 
-/// Whether a model server answers on the default base URL of spec section 7.
+/// Whether a model server answers on the default base URL of spec section 7
+/// with the weights the default `openaiModel` names.
+///
+/// A silent port is one reason to skip. A port that holds other weights is the
+/// same statement: the served-model guard of HUF-236 refuses such a Check
+/// before it sends anything, and it is right to, because the answer would be
+/// about a model nobody asked for. Neither is a fault of the code under test,
+/// so both skip rather than fail. `grammachy model download <name>` for the
+/// default model, and a server started on it, is what these cases want.
+///
+/// The comparison is `served::matches`, the rule the adapter itself uses, so
+/// this never disagrees with the guard it is standing in for.
 fn server_answers() -> bool {
     let address: SocketAddr = ADDRESS.parse().expect("the address is valid");
-    TcpStream::connect_timeout(&address, Duration::from_millis(300)).is_ok()
+    if TcpStream::connect_timeout(&address, Duration::from_millis(300)).is_err() {
+        return false;
+    }
+    match served_model() {
+        // A server that names no model is checked as before: `openaiBaseUrl`
+        // accepts any OpenAI-compatible server, so the guard lets it through.
+        None => true,
+        Some(served) => {
+            let wanted = grammachy::settings::DEFAULT_OPENAI_MODEL;
+            if served::matches(&served, wanted) {
+                return true;
+            }
+            // `file_name` cuts the directory off, the way every value that
+            // leaves the adapter is cut, so no home directory reaches a log.
+            eprintln!(
+                "skipped: {ADDRESS} serves {}, not {wanted}",
+                served::file_name(&served)
+            );
+            false
+        }
+    }
+}
+
+/// What the server on the default base URL says it holds, if it says anything.
+///
+/// `/v1/models` first and `/props` next, the order `Openai::probe` asks in.
+fn served_model() -> Option<String> {
+    let wanted = grammachy::settings::DEFAULT_OPENAI_MODEL;
+    let models = get_json(&format!("http://{ADDRESS}/v1/models"))
+        .and_then(|raw| served::from_models(&raw, wanted));
+    models.or_else(|| {
+        get_json(&format!("http://{ADDRESS}/props")).and_then(|raw| served::from_props(&raw))
+    })
+}
+
+fn get_json(url: &str) -> Option<Value> {
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .timeout_global(Some(Duration::from_secs(2)))
+        .build()
+        .into();
+    let text = agent
+        .get(url)
+        .call()
+        .ok()?
+        .into_body()
+        .read_to_string()
+        .ok()?;
+    serde_json::from_str::<Value>(&text).ok()
 }
 
 /// Whether one run may reach the `grammachy-llama` unit.

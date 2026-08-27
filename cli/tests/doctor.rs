@@ -18,7 +18,13 @@ fn ready() -> Facts {
     Facts {
         binary: Some(PathBuf::from("/home/u/plugin/bin/grammachy")),
         version: "0.1.0".to_string(),
-        languagetool_launcher: Some(PathBuf::from("/usr/bin/languagetool")),
+        // LanguageTool is an opt-in component, so the ready machine is one
+        // where the user added it from Settings (HUF-237). The pacman package
+        // is the alternative and has its own cases below.
+        languagetool_tree: Some(PathBuf::from(
+            "/home/u/.local/share/grammachy/engines/languagetool",
+        )),
+        languagetool_launcher: None,
         java: Some(PathBuf::from("/usr/lib/jvm/default/bin/java")),
         languagetool_address: "127.0.0.1:8081".to_string(),
         llama_server: Some(PathBuf::from("/usr/bin/llama-server")),
@@ -62,6 +68,13 @@ fn missing_lines(text: &str) -> Vec<&str> {
         .collect()
 }
 
+/// The lines that report a piece the machine simply has not added, HUF-237.
+fn optional_lines(text: &str) -> Vec<&str> {
+    text.lines()
+        .filter(|line| line.trim_start().starts_with("optional"))
+        .collect()
+}
+
 #[test]
 fn a_ready_machine_reports_nothing_missing() {
     let facts = ready();
@@ -92,36 +105,114 @@ fn a_ready_machine_reports_nothing_missing() {
     }
 }
 
+/// HUF-237: a fresh install never fetched LanguageTool, so the line says the
+/// engine is optional rather than that something is missing, and it names the
+/// verb that adds it without a password.
 #[test]
-fn a_missing_languagetool_prints_its_pacman_line() {
+fn a_missing_languagetool_is_optional_and_names_the_no_sudo_install() {
     let mut facts = ready();
+    facts.languagetool_tree = None;
     facts.languagetool_launcher = None;
 
     let text = text_of(&facts, EngineSlug::Languagetool);
 
-    assert_eq!(missing_lines(&text).len(), 1, "{text}");
     assert!(
-        text.contains("sudo pacman -S languagetool"),
+        missing_lines(&text).is_empty(),
+        "an engine nobody added is not a broken install: {text}"
+    );
+    assert_eq!(optional_lines(&text).len(), 1, "{text}");
+    assert!(
+        text.contains("grammachy engine install languagetool"),
         "the exact command is printed: {text}"
     );
     assert!(
-        text.contains("/usr/bin/languagetool does not exist"),
-        "{text}"
+        !text.contains("sudo pacman -S languagetool"),
+        "the install needs no password any more: {text}"
     );
+    // The engine still cannot run, so a Check on it is still refused.
     assert_eq!(
         doctor::run(&facts, EngineSlug::Languagetool, false).exit_code,
         1
     );
 }
 
+/// The Java runtime serves LanguageTool alone, so on a machine that has no
+/// LanguageTool a missing runtime is optional for the same reason.
 #[test]
-fn an_installed_languagetool_has_no_pacman_line() {
+fn a_missing_java_is_optional_only_while_languagetool_is_absent() {
+    let mut facts = ready();
+    facts.languagetool_tree = None;
+    facts.languagetool_launcher = None;
+    facts.java = None;
+
+    let text = text_of(&facts, EngineSlug::Languagetool);
+    assert!(missing_lines(&text).is_empty(), "{text}");
+    assert_eq!(optional_lines(&text).len(), 2, "{text}");
+
+    // Once LanguageTool is on the machine the server cannot start without a
+    // runtime, so the same fact is a real fault.
+    facts.languagetool_launcher = Some(PathBuf::from("/usr/bin/languagetool"));
+    let text = text_of(&facts, EngineSlug::Languagetool);
+    assert_eq!(missing_lines(&text).len(), 1, "{text}");
+    assert!(text.contains("sudo pacman -S jre-openjdk"), "{text}");
+}
+
+/// The pacman package is an alternative Grammachy never installs and never
+/// removes, so the report says where that LanguageTool came from.
+#[test]
+fn a_languagetool_from_the_package_says_so() {
+    let mut facts = ready();
+    facts.languagetool_tree = None;
+    facts.languagetool_launcher = Some(PathBuf::from("/usr/bin/languagetool"));
+
+    let report = Report::new(&facts, EngineSlug::Languagetool);
+    let check = report
+        .checks
+        .iter()
+        .find(|check| check.id == "languagetool")
+        .expect("the LanguageTool check is there");
+
+    assert!(report.ready, "{}", report.diagnosis);
+    assert!(check.ok);
+    assert!(!check.optional);
+    assert_eq!(check.state, Some("package"));
+    assert!(
+        check.detail.contains("from the languagetool package"),
+        "{}",
+        check.detail
+    );
+}
+
+/// The installed tree wins over the package, because it is the one the adapter
+/// runs and the one `grammachy engine remove` can take away again.
+#[test]
+fn the_installed_tree_wins_over_the_package() {
+    let mut facts = ready();
+    facts.languagetool_launcher = Some(PathBuf::from("/usr/bin/languagetool"));
+
+    let report = Report::new(&facts, EngineSlug::Languagetool);
+    let check = report
+        .checks
+        .iter()
+        .find(|check| check.id == "languagetool")
+        .expect("the LanguageTool check is there");
+
+    assert_eq!(check.state, Some("installed"));
+    assert_eq!(
+        check.detail,
+        "/home/u/.local/share/grammachy/engines/languagetool"
+    );
+}
+
+#[test]
+fn an_installed_languagetool_has_no_install_line() {
     let text = text_of(&ready(), EngineSlug::Languagetool);
 
     assert!(
-        !text.contains("sudo pacman -S languagetool"),
-        "the line is gone once the package is there: {text}"
+        !text.contains("grammachy engine install languagetool"),
+        "the line is gone once the component is there: {text}"
     );
+    assert!(!text.contains("sudo pacman -S languagetool"), "{text}");
 }
 
 #[test]
@@ -538,6 +629,7 @@ fn a_running_unit_changes_the_ready_diagnosis() {
 #[test]
 fn every_engine_slug_gets_its_own_failing_diagnosis() {
     let mut facts = ready();
+    facts.languagetool_tree = None;
     facts.languagetool_launcher = None;
     facts.llama_server = None;
     facts.binary = None;
@@ -557,7 +649,8 @@ fn every_engine_slug_gets_its_own_failing_diagnosis() {
 
     assert_eq!(
         Report::new(&facts, EngineSlug::Languagetool).diagnosis,
-        "LanguageTool is not installed: /usr/bin/languagetool does not exist. Run: sudo pacman -S languagetool"
+        "LanguageTool is optional and is not installed. Add it in Settings, Engines. \
+Run: grammachy engine install languagetool"
     );
     assert_eq!(
         Report::new(&facts, EngineSlug::Openai).diagnosis,
@@ -638,20 +731,20 @@ fn the_binary_prints_a_report_and_a_json_envelope() {
     let text = run_binary(&["doctor"]);
     assert!(text.starts_with("Grammachy doctor"), "{text}");
     assert!(text.contains("Hardware tier"), "{text}");
-    assert!(text.contains("Engine languagetool"), "{text}");
+    // Spec section 4: a fresh install checks with Harper, which needs nothing
+    // downloaded and no pacman command (HUF-237).
+    assert!(text.contains("Engine harper"), "{text}");
     // Nothing is installed for the user, whatever is missing.
     assert!(!text.contains("Installing"), "{text}");
 
     let json = run_binary(&["doctor", "--json"]);
     let value: Value = serde_json::from_str(json.trim()).expect("stdout is one JSON object");
     assert_eq!(value["contractVersion"], 1);
-    assert_eq!(value["engine"], "languagetool");
+    assert_eq!(value["engine"], "harper");
     assert_eq!(json.trim().lines().count(), 1, "one line only: {json}");
-
-    // Harper needs only the binary, which is running, so this machine is ready.
-    let harper = run_binary(&["doctor", "--engine", "harper", "--json"]);
-    let value: Value = serde_json::from_str(harper.trim()).expect("stdout is one JSON object");
-    assert_eq!(value["ready"], true, "{harper}");
+    // Harper needs only the binary, which is running, so this machine is
+    // ready with nothing installed at all.
+    assert_eq!(value["ready"], true, "{json}");
 }
 
 /// Spec section 4: the cloud engine needs the key file, and `doctor` reads it.
@@ -831,19 +924,48 @@ fn the_key_check_carries_one_state_word_per_key_state() {
     }
 }
 
-/// Only the `key` check has states the shell must tell apart, so no other
-/// check may grow a word the shell would then have to read.
+/// Two checks have states the shell must tell apart: the `key` file and which
+/// route put LanguageTool on the machine. No other check may grow a word the
+/// shell would then have to read.
 #[test]
 fn no_other_check_carries_a_state_word() {
     let json = doctor::run(&ready(), EngineSlug::Openrouter, true).text;
     let value: Value = serde_json::from_str(&json).expect("the envelope is one JSON object");
 
     for check in value["checks"].as_array().expect("checks is an array") {
-        if check["id"] == "key" {
+        if check["id"] == "key" || check["id"] == "languagetool" {
             continue;
         }
         assert!(check.get("state").is_none(), "{check}");
     }
+}
+
+/// The `languagetool` check carries one word per route onto the machine, which
+/// is what the Settings row reads rather than the prose of `detail`.
+#[test]
+fn the_languagetool_check_names_the_route_it_found() {
+    let mut facts = ready();
+    assert_eq!(state_of(&facts), "installed");
+
+    facts.languagetool_tree = None;
+    facts.languagetool_launcher = Some(PathBuf::from("/usr/bin/languagetool"));
+    assert_eq!(state_of(&facts), "package");
+
+    facts.languagetool_launcher = None;
+    assert_eq!(state_of(&facts), "absent");
+}
+
+fn state_of(facts: &Facts) -> String {
+    let json = doctor::run(facts, EngineSlug::Languagetool, true).text;
+    let value: Value = serde_json::from_str(&json).expect("the envelope is one JSON object");
+    value["checks"]
+        .as_array()
+        .expect("checks is an array")
+        .iter()
+        .find(|check| check["id"] == "languagetool")
+        .and_then(|check| check["state"].as_str())
+        .expect("the LanguageTool check carries a state word")
+        .to_string()
 }
 
 /// The report says the state of the key file and never a byte of the key.
@@ -876,6 +998,8 @@ fn run_binary(args: &[&str]) -> String {
         .args(args)
         // No test reads the developer's real settings file (spec section 7).
         .env("GRAMMACHY_SHELL_JSON", "/nonexistent/shell.json")
+        // Nor the engines this machine has installed (spec section 5.4).
+        .env("GRAMMACHY_ENGINES_DIR", "/nonexistent/engines")
         .output()
         .expect("the binary runs");
 

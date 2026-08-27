@@ -23,7 +23,7 @@
     "defaults": {
       "nativeLanguage": "none",
       "targetEnglish": "en-US",
-      "engine": "languagetool",
+      "engine": "harper",
       "autoReplace": false,
       "openaiBaseUrl": "http://127.0.0.1:8080",
       "openaiModel": "qwen3.8-4b",
@@ -68,7 +68,7 @@
           "harper",
           "openrouter"
         ],
-        "defaultValue": "languagetool"
+        "defaultValue": "harper"
       },
       {
         "key": "autoReplace",

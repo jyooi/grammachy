@@ -12,6 +12,7 @@ import "ui/format.js" as Format
 import "ui/anchor.js" as Anchor
 import "ui/capture.js" as Capture
 import "ui/limits.js" as Limits
+import "ui/engines.js" as EnginesJs
 import "ui/models.js" as ModelsJs
 
 // The overlay entry point. `open(payload)` routes a summon to a surface, spec
@@ -175,6 +176,30 @@ Item {
   // capture or release one when it closes.
   property bool runCaptured: false
 
+  // ------------------------------------------------------------- engines
+  //
+  // The optional engine components this machine keeps, spec section 5.4. The
+  // list lives here rather than in the card for the reason the Models list
+  // does: an install runs for minutes and closing the overlay does not cancel
+  // it, so `engines` and `engineBusy` are what a second summon comes back to.
+  property var engines: []
+  property string engineBusy: ""
+  property double engineBusyBytes: 0
+  property string enginesDirectory: ""
+  property double enginesFreeBytes: 0
+  property int engineListSerial: 0
+  property int engineListFloor: 0
+  property var engineNote: null
+  // The slug a Remove confirm is waiting on, spec section 7.
+  property string engineConfirm: ""
+  // The phase the card comes back to once that confirm is answered.
+  property string phaseBeforeEngineConfirm: ""
+
+  // The one fact every engine verb and every drawn button asks, the rule
+  // `modelsBusy` keeps for the Models list.
+  readonly property bool enginesBusy: engineActionProcess.running
+    || root.engineConfirm.length > 0
+
   // ------------------------------------------------------------- models
   //
   // The weights the Local LLM engine runs on, spec section 5.3. The list lives
@@ -303,6 +328,13 @@ Item {
   // Nothing was sent, and the next Check asks again.
   onSettingsOpenChanged: {
     if (root.settingsOpen && root.phase === "cloudConsent") root.cancelCloudCheck()
+    // The Engines list is drawn whatever engine is selected, because the whole
+    // point is to add one the dropdown cannot offer yet (HUF-237). So Settings
+    // being open is the whole condition for reading it.
+    if (root.settingsOpen) root.refreshEngines()
+    // A question that is off the screen must never still be answerable, the
+    // rule `onShowsModelsChanged` keeps for the Models confirm.
+    else if (root.phase === "confirmEngine") root.closeEngineConfirm()
   }
 
   function refreshCloudKey() {
@@ -481,6 +513,10 @@ Item {
     // confirm is a question about a card that is gone, so it goes.
     root.modelConfirm = ""
     root.phaseBeforeModelConfirm = ""
+    // Spec section 5.4 keeps the same two rules for the Engines list: an
+    // install in flight outlives the summon, and its Remove confirm does not.
+    root.engineConfirm = ""
+    root.phaseBeforeEngineConfirm = ""
     // A consent card is a question about a Check that is gone, so it goes with
     // it. The answer stays: `cloudConsentGiven` outlives every summon.
     root.clearCloudConsent()
@@ -754,6 +790,167 @@ Item {
     restoreClipboard.running = true
   }
 
+
+  // ----------------------------------------------------------------- engines
+  //
+  // Spec section 5.4. Every verb of `grammachy engine` runs through one of two
+  // processes: `engineListProcess` reads the list and is what the poll repeats,
+  // and `engineActionProcess` carries the one verb the user asked for. Both
+  // answer the same envelope, so one reader serves them. It is the shape the
+  // Models list already has, because the two lists answer the same question
+  // about different things.
+
+  function engineCommand(verbArgs) {
+    return [root.binaryPath, "engine"].concat(verbArgs)
+  }
+
+  // The list as it is right now. It runs when Settings opens and once a second
+  // while an install is in flight.
+  function refreshEngines() {
+    engineListProcess.command = root.engineCommand(["list"])
+    if (engineListProcess.running) {
+      engineListProcess.restartQueued = true
+      return
+    }
+    engineListProcess.running = true
+  }
+
+  function onEngineListOutput(text, stamp) {
+    var answer = EnginesJs.read(text)
+    if (answer.error) {
+      // A poll that failed says nothing new: the rows on screen are still the
+      // last true answer, and the note the verb itself left is the one to keep.
+      if (root.engines.length === 0)
+        root.engineNote = EnginesJs.note(answer.error.code, answer.error.message, "")
+      return
+    }
+    root.absorbEngineReport(answer.report, stamp)
+  }
+
+  // The rows of one answer merged into the list, the rule `absorbModelReport`
+  // keeps: the list is replaced only when it says something new, so the poll
+  // does not rebuild the row once a second and restart the bar's animation.
+  function absorbEngineReport(report, stamp) {
+    var settled = EnginesJs.absorbed(root.engines, report, stamp, root.engineListFloor)
+    if (!settled) return
+    var next = settled.engines
+    root.engineBusyBytes = EnginesJs.partialOf(next, root.engineBusy)
+    if (!EnginesJs.sameRows(root.engines, next, root.engineBusy)) root.engines = next
+    root.enginesDirectory = settled.directory
+    root.enginesFreeBytes = settled.freeBytes
+  }
+
+  // Spec section 5.4: one verb at a time, so an Install while a verb is in
+  // flight is a no-op rather than a second transfer. The buttons that would
+  // reach here are drawn disabled from the same `enginesBusy`, so this guard is
+  // what makes the drawing true rather than a second opinion.
+  function installEngine(slug) {
+    if (root.enginesBusy) return
+    root.engineNote = null
+    root.engineBusy = slug
+    // The running row's bar reads the live count rather than the list, so it
+    // starts where the list already is.
+    root.engineBusyBytes = EnginesJs.partialOf(root.engines, slug)
+    root.runEngineAction(["install", slug])
+    enginePoll.start()
+  }
+
+  // Cancel is a SIGTERM, which the CLI turns into a kept `.part` file and the
+  // `cancelled` code. Killing the process outright would leave curl running.
+  function cancelEngineInstall() {
+    if (root.engineBusy.length === 0) return
+    engineActionProcess.signal(15)
+  }
+
+  // Remove asks once when a Check would run on this engine, because the next
+  // Check would then have nothing to reach. Every other row goes straight out.
+  function removeEngine(slug) {
+    // One question at a time too: a second bin press would take the phase to
+    // restore back with it and leave the confirm with no way out.
+    if (root.enginesBusy) return
+    root.engineNote = null
+    if (String(root.setting("engine")) !== String(slug)) {
+      root.runEngineAction(["remove", slug])
+      return
+    }
+    root.askRemoveEngine(slug)
+  }
+
+  function askRemoveEngine(slug) {
+    root.engineConfirm = slug
+    root.phaseBeforeEngineConfirm = root.phase
+    root.phase = "confirmEngine"
+  }
+
+  function confirmRemoveEngine(slug) {
+    if (root.phase !== "confirmEngine") return
+    root.closeEngineConfirm()
+    root.runEngineAction(["remove", slug])
+  }
+
+  function keepEngine() {
+    if (root.phase !== "confirmEngine") return
+    root.closeEngineConfirm()
+  }
+
+  function closeEngineConfirm() {
+    root.engineConfirm = ""
+    root.phase = root.phaseBeforeEngineConfirm.length > 0
+      ? root.phaseBeforeEngineConfirm : root.phase
+    root.phaseBeforeEngineConfirm = ""
+  }
+
+  // One verb at a time. Setting `command` under a process that is already
+  // running would change what the answer on its way back belongs to, and
+  // setting `running` again is a no-op, so the second verb would vanish.
+  function runEngineAction(verbArgs) {
+    if (engineActionProcess.running) return
+    engineActionProcess.verbName = verbArgs.length > 1 ? String(verbArgs[1]) : ""
+    engineActionProcess.verb = String(verbArgs[0])
+    engineActionProcess.command = root.engineCommand(verbArgs)
+    engineActionProcess.launchPending = true
+    engineActionProcess.running = true
+  }
+
+  function onEngineActionOutput(text, slug, verb) {
+    // The verb has spoken about the directory, so every `list` run that started
+    // before now read it too early to know that.
+    root.engineListFloor = root.engineListSerial + 1
+    var answer = EnginesJs.read(text)
+    if (answer.error) {
+      root.engineNote = EnginesJs.note(answer.error.code, answer.error.message, slug)
+      // A cancel or a failure both leave a `.part` file worth redrawing.
+      root.refreshEngines()
+      return
+    }
+    root.engineNote = null
+    root.absorbEngineReport(answer.report)
+    if (verb === "remove") root.fallBackFromRemovedEngine(slug)
+  }
+
+  // Spec section 7: removing the engine a Check would run on leaves the
+  // Settings consistent, so the setting moves to the one engine that cannot go
+  // away. Anything else would leave a stored engine no dropdown row offers and
+  // every Check answering `engine_unavailable`.
+  //
+  // The pacman package is the one case a Remove does not change: the CLI runs
+  // that LanguageTool when no installed tree is there, so the row is still
+  // available and the setting stays where it is.
+  function fallBackFromRemovedEngine(slug) {
+    if (EnginesJs.isAvailable(root.engines, slug)) return
+    var next = Settings.engineAfterRemoval(root.setting("engine"), slug)
+    if (next === null) return
+    root.persistSetting("engine", next)
+  }
+
+  // The verb is over, whatever it answered, so the poll stops and every other
+  // Install comes back.
+  function finishEngineAction() {
+    enginePoll.stop()
+    root.engineBusy = ""
+    engineActionProcess.verbName = ""
+    engineActionProcess.verb = ""
+  }
 
   // ------------------------------------------------------------------ models
   //
@@ -1648,6 +1845,7 @@ Item {
     // The Remove confirm sits over the Settings view and is one question, so it
     // takes the keyboard from every other card while it is up.
     if (root.phase === "confirmModel") return Keymap.MODE_MODEL_CONFIRM
+    if (root.phase === "confirmEngine") return Keymap.MODE_ENGINE_CONFIRM
     // Settings hides the consent card, so Settings answers the keyboard first.
     // `onSettingsOpenChanged` already cancels the pending Check, and this order
     // is what makes a hidden card unanswerable whatever the phase says.
@@ -1693,6 +1891,8 @@ Item {
     else if (action === Keymap.CLOUD_CONTINUE) root.continueCloudCheck()
     else if (action === Keymap.CLOUD_CANCEL) root.cancelCloudCheck()
     else if (action === Keymap.KEEP_MODEL) root.keepModel()
+    else if (action === Keymap.REMOVE_ENGINE) root.confirmRemoveEngine(root.engineConfirm)
+    else if (action === Keymap.KEEP_ENGINE) root.keepEngine()
 
     event.accepted = true
   }
@@ -1887,6 +2087,82 @@ Item {
     }
   }
 
+
+  // The Engines list of spec section 5.4. It runs when Settings opens and once
+  // a second while an install is in flight, which is how the progress bar
+  // moves: the CLI prints nothing while curl runs, so the `.part` file on disk
+  // is the only progress there is to read.
+  Process {
+    id: engineListProcess
+    property bool restartQueued: false
+    // When this run read the directory, which is the moment it started.
+    property int startedSerial: 0
+
+    onStarted: {
+      root.engineListSerial += 1
+      engineListProcess.startedSerial = root.engineListSerial
+    }
+    onRunningChanged: {
+      if (engineListProcess.running) return
+      if (!engineListProcess.restartQueued) return
+      engineListProcess.restartQueued = false
+      engineListProcess.running = true
+    }
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root.onEngineListOutput(text, engineListProcess.startedSerial)
+    }
+    stderr: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: if (text.length > 0) console.warn("grammachy engine list:", text)
+    }
+  }
+
+  // The one verb the user asked for. An install lives here for minutes, which
+  // is why Cancel signals this process rather than ending it: the CLI turns a
+  // SIGTERM into a kept `.part` file and the `cancelled` code.
+  Process {
+    id: engineActionProcess
+    property string verbName: ""
+    property string verb: ""
+    property string startedName: ""
+    property string startedVerb: ""
+    property bool launchPending: false
+
+    onStarted: {
+      engineActionProcess.launchPending = false
+      engineActionProcess.startedName = engineActionProcess.verbName
+      engineActionProcess.startedVerb = engineActionProcess.verb
+    }
+    onRunningChanged: {
+      if (engineActionProcess.running) return
+      // No binary to run, so there is no stdout for the reader to answer from.
+      if (engineActionProcess.launchPending) {
+        engineActionProcess.launchPending = false
+        root.engineNote = EnginesJs.note(
+          EnginesJs.BAD_ARGUMENTS, "", engineActionProcess.verbName)
+      }
+      root.finishEngineAction()
+    }
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root.onEngineActionOutput(
+        text, engineActionProcess.startedName, engineActionProcess.startedVerb)
+    }
+    stderr: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: if (text.length > 0) console.warn("grammachy engine:", text)
+    }
+  }
+
+  // One second, the step the Models poll uses, for the same reason: it is the
+  // smallest change a reader notices on a bar that takes minutes to fill.
+  Timer {
+    id: enginePoll
+    interval: 1000
+    repeat: true
+    onTriggered: root.refreshEngines()
+  }
 
   // The Models list of spec section 5.3. It runs when Settings opens on the
   // Local LLM engine and once a second while a download is in flight, which is
@@ -2226,6 +2502,21 @@ Item {
         cloudKey: root.cloudKey
         consentCard: root.phase === "cloudConsent" ? root.cloudConsentCard() : null
 
+        engines: root.engines
+        engineBusy: root.engineBusy
+        engineBusyBytes: root.engineBusyBytes
+        enginesBusy: root.enginesBusy
+        engineConfirm: root.engineConfirm
+        enginesDirectory: root.enginesDirectory
+        enginesFreeBytes: root.enginesFreeBytes
+        engineNote: root.engineNote
+
+        onEngineInstallRequested: function(slug) { root.installEngine(slug) }
+        onEngineCancelRequested: root.cancelEngineInstall()
+        onEngineRemoveRequested: function(slug) { root.removeEngine(slug) }
+        onEngineRemoveConfirmed: function(slug) { root.confirmRemoveEngine(slug) }
+        onEngineKeepRequested: root.keepEngine()
+
         models: root.models
         modelBusy: root.modelBusy
         modelBusyBytes: root.modelBusyBytes
@@ -2310,6 +2601,21 @@ Item {
         openrouterModel: root.setting("openrouterModel")
         cloudKey: root.cloudKey
         consentCard: root.phase === "cloudConsent" ? root.cloudConsentCard() : null
+
+        engines: root.engines
+        engineBusy: root.engineBusy
+        engineBusyBytes: root.engineBusyBytes
+        enginesBusy: root.enginesBusy
+        engineConfirm: root.engineConfirm
+        enginesDirectory: root.enginesDirectory
+        enginesFreeBytes: root.enginesFreeBytes
+        engineNote: root.engineNote
+
+        onEngineInstallRequested: function(slug) { root.installEngine(slug) }
+        onEngineCancelRequested: root.cancelEngineInstall()
+        onEngineRemoveRequested: function(slug) { root.removeEngine(slug) }
+        onEngineRemoveConfirmed: function(slug) { root.confirmRemoveEngine(slug) }
+        onEngineKeepRequested: root.keepEngine()
 
         models: root.models
         modelBusy: root.modelBusy

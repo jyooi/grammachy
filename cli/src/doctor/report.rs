@@ -23,6 +23,15 @@ pub struct Check {
     /// The display name of the piece.
     pub name: &'static str,
     pub ok: bool,
+    /// Whether a piece that is not `ok` is one the machine simply does not
+    /// have yet rather than one it is missing.
+    ///
+    /// LanguageTool is the case HUF-237 made: it is an engine the user adds
+    /// from Settings, so a fresh install that never asked for it is not a
+    /// broken install. `ok` still answers the engine question, so
+    /// `doctor --engine languagetool` on such a machine still refuses; only
+    /// the word beside the line changes, from `missing` to `optional`.
+    pub optional: bool,
     /// One sentence saying what was found, or what is missing.
     pub detail: String,
     /// The exact command that installs the missing piece, when one exists.
@@ -160,6 +169,7 @@ fn binary_check(facts: &Facts) -> Check {
             id: "binary",
             name: "Grammachy CLI",
             ok: true,
+            optional: false,
             detail: format!("grammachy {version} at {}", path.display()),
             remedy: None,
             state: None,
@@ -169,6 +179,7 @@ fn binary_check(facts: &Facts) -> Check {
             id: "binary",
             name: "Grammachy CLI",
             ok: false,
+            optional: false,
             detail: format!("grammachy {version} runs, but its own path is not readable."),
             remedy: None,
             state: None,
@@ -177,38 +188,85 @@ fn binary_check(facts: &Facts) -> Check {
     }
 }
 
+/// LanguageTool, spec section 4 and HUF-237.
+///
+/// It is an opt-in component, so a machine that does not have it is not a
+/// broken install: the line says so and names the verb that adds it without a
+/// password. The pacman package is the alternative, and the report says which
+/// of the two answered, because only the installed tree is one
+/// `grammachy engine remove languagetool` can take away again.
+///
+/// The state word is the contract the Settings row reads, the way the `key`
+/// check's word is: `detail` is prose and nothing may parse it.
 fn languagetool_check(facts: &Facts) -> Check {
-    match &facts.languagetool_launcher {
-        Some(path) => Check {
+    match (&facts.languagetool_tree, &facts.languagetool_launcher) {
+        (Some(path), _) => Check {
             id: "languagetool",
             name: "LanguageTool",
             ok: true,
+            optional: false,
             detail: path.display().to_string(),
             remedy: None,
-            state: None,
+            state: Some(LANGUAGETOOL_INSTALLED),
             engines: vec!["languagetool"],
         },
-        None => Check {
+        // The package is a LanguageTool this project did not put there, so the
+        // line says where it came from: Remove in Settings would not take it
+        // off the machine.
+        (None, Some(path)) => Check {
+            id: "languagetool",
+            name: "LanguageTool",
+            ok: true,
+            optional: false,
+            detail: format!("{} from the languagetool package.", path.display()),
+            remedy: None,
+            state: Some(LANGUAGETOOL_PACKAGE),
+            engines: vec!["languagetool"],
+        },
+        (None, None) => Check {
             id: "languagetool",
             name: "LanguageTool",
             ok: false,
-            detail: format!(
-                "LanguageTool is not installed: {} does not exist.",
-                crate::engines::languagetool::unit::PACKAGE_LAUNCHER
-            ),
-            remedy: Some("sudo pacman -S languagetool".to_string()),
-            state: None,
+            // Nobody asked for this engine, so nothing about this machine is
+            // wrong. Only a Check on `languagetool` turns the line into a
+            // refusal, which `ok` still does.
+            optional: true,
+            detail: "LanguageTool is optional and is not installed. Add it in Settings, Engines."
+                .to_string(),
+            // No sudo: the install writes one directory under HOME.
+            remedy: Some(LANGUAGETOOL_INSTALL_COMMAND.to_string()),
+            state: Some(LANGUAGETOOL_ABSENT),
             engines: vec!["languagetool"],
         },
     }
 }
 
+/// The state words the `languagetool` check carries, one per route onto the
+/// machine, the way the `key` check carries one.
+///
+/// `docs/doctor.md` documents them and `cli/tests/overlay_engines.rs` holds
+/// them, because `detail` is prose and no contract: a reader that needs to
+/// tell the two routes apart reads this word and never that sentence.
+pub const LANGUAGETOOL_INSTALLED: &str = "installed";
+pub const LANGUAGETOOL_PACKAGE: &str = "package";
+pub const LANGUAGETOOL_ABSENT: &str = "absent";
+
+/// The one command that adds LanguageTool, named by every line that offers it.
+pub const LANGUAGETOOL_INSTALL_COMMAND: &str = "grammachy engine install languagetool";
+
+/// The Java runtime, which only LanguageTool needs.
+///
+/// A machine that has no LanguageTool has no use for Java either, so a missing
+/// runtime there is optional for the same reason the component is. Once
+/// LanguageTool is on the machine a missing runtime is a real fault, because
+/// the server cannot start without one.
 fn java_check(facts: &Facts) -> Check {
     match &facts.java {
         Some(path) => Check {
             id: "java",
             name: "Java runtime",
             ok: true,
+            optional: false,
             detail: path.display().to_string(),
             remedy: None,
             state: None,
@@ -220,6 +278,7 @@ fn java_check(facts: &Facts) -> Check {
             id: "java",
             name: "Java runtime",
             ok: false,
+            optional: facts.languagetool().is_none(),
             detail: "No Java runtime: JAVA_HOME is not set and no default JVM is installed."
                 .to_string(),
             remedy: Some("sudo pacman -S jre-openjdk".to_string()),
@@ -235,6 +294,7 @@ fn llama_check(facts: &Facts, tier: HardwareTier) -> Check {
             id: "llama.cpp",
             name: "llama.cpp server",
             ok: true,
+            optional: false,
             detail: path.display().to_string(),
             remedy: None,
             state: None,
@@ -246,6 +306,7 @@ fn llama_check(facts: &Facts, tier: HardwareTier) -> Check {
             id: "llama.cpp",
             name: "llama.cpp server",
             ok: false,
+            optional: false,
             detail: format!(
                 "llama.cpp is not installed: {} does not exist.",
                 crate::engines::openai::unit::PACKAGE_SERVER
@@ -309,6 +370,7 @@ fn backend_check(facts: &Facts) -> Check {
             id: "backend",
             name: "llama.cpp backend",
             ok: false,
+            optional: false,
             detail,
             remedy: Some(format!("sudo pacman -S {}", packages.join(" "))),
             state: None,
@@ -321,6 +383,7 @@ fn backend_check(facts: &Facts) -> Check {
             id: "backend",
             name: "llama.cpp backend",
             ok: true,
+            optional: false,
             detail: installed.join(", "),
             remedy: None,
             state: None,
@@ -333,6 +396,7 @@ fn backend_check(facts: &Facts) -> Check {
         id: "backend",
         name: "llama.cpp backend",
         ok: true,
+        optional: false,
         detail: format!(
             "{} is installed, so llama.cpp runs on the CPU. {} runs it on the graphics processor.",
             installed.join(", "),
@@ -351,6 +415,7 @@ fn model_check(facts: &Facts) -> Check {
             id: "model",
             name: "Model weights",
             ok: true,
+            optional: false,
             detail: path.display().to_string(),
             remedy: None,
             state: None,
@@ -364,6 +429,7 @@ fn model_check(facts: &Facts) -> Check {
             id: "model",
             name: "Model weights",
             ok: false,
+            optional: false,
             detail: format!(
                 "No weights for {model} in {}. Grammachy cannot fetch {model}, so put its .gguf file there yourself, or pick a catalogue model in Settings, Models.",
                 directory.display()
@@ -376,6 +442,7 @@ fn model_check(facts: &Facts) -> Check {
             id: "model",
             name: "Model weights",
             ok: false,
+            optional: false,
             detail: format!("No weights for {model} in {}.", directory.display()),
             // Spec section 5.3: the weights are the one missing piece a user
             // fixes without a terminal, so the remedy names the verb the
@@ -388,6 +455,7 @@ fn model_check(facts: &Facts) -> Check {
             id: "model",
             name: "Model weights",
             ok: false,
+            optional: false,
             detail: "No model directory: HOME is not set.".to_string(),
             remedy: None,
             state: None,
@@ -402,6 +470,7 @@ fn endpoint_check(facts: &Facts) -> Check {
             id: "endpoint",
             name: "Local LLM endpoint",
             ok: true,
+            optional: false,
             detail: address.clone(),
             remedy: None,
             state: None,
@@ -413,6 +482,7 @@ fn endpoint_check(facts: &Facts) -> Check {
             id: "endpoint",
             name: "Local LLM endpoint",
             ok: false,
+            optional: false,
             detail: message.clone(),
             remedy: None,
             state: None,
@@ -478,6 +548,7 @@ fn key_check(facts: &Facts) -> Check {
         id: "key",
         name: "OpenRouter key",
         ok,
+        optional: false,
         detail,
         remedy,
         state: Some(key_state_word(state)),
@@ -498,6 +569,7 @@ fn unit_check(
             id,
             name,
             ok: true,
+            optional: false,
             detail: format!("{unit} is running."),
             remedy: None,
             state: None,
@@ -507,6 +579,7 @@ fn unit_check(
             id,
             name,
             ok: true,
+            optional: false,
             detail: format!("{unit} is not running. The next Check starts it."),
             remedy: None,
             state: None,
@@ -516,6 +589,7 @@ fn unit_check(
             id,
             name,
             ok: false,
+            optional: false,
             detail: format!("systemctl --user did not answer, so nothing can start {unit}."),
             remedy: None,
             state: None,

@@ -150,5 +150,7 @@ fn built_in_defaults_are_the_spec_defaults() {
 
     assert_eq!(options.native, NativeLanguage::None);
     assert_eq!(options.target, TargetEnglish::EnUs);
-    assert_eq!(options.engine, EngineSlug::Languagetool);
+    // Spec section 4, HUF-237: a fresh install checks with Harper, which is
+    // compiled into the binary. Every other engine is something the user adds.
+    assert_eq!(options.engine, EngineSlug::Harper);
 }
