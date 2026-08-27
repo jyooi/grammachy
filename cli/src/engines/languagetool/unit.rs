@@ -100,7 +100,7 @@ pub fn start(port: u16) -> Result<(), StartFailure> {
     let config = write_config()?;
     let command = server_command(port, &config)?;
 
-    local::start_unit(UNIT_NAME, "Grammachy LanguageTool server", &command)
+    local::start_unit(UNIT_NAME, "Grammachy LanguageTool server", &command).map(drop)
 }
 
 #[cfg(test)]

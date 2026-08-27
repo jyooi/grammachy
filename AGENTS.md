@@ -43,12 +43,14 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 - llama-server ignores the `model` field of the request, so the weights it already holds answer every Check.
   `cli/src/engines/openai/served.rs` is the whole guard against that (HUF-236): the adapter reads `GET /v1/models` and then `GET /props` once, before its first Check, and `served::matches` compares what the server named with `openaiModel` on the prefix rule `unit::model_file` uses.
   A named mismatch stops the unit through the `Stopper` value and lets the start path load the right weights.
-  Every port the guard cannot reload is one `bad_arguments` naming both models: the stop is forbidden, the stop did not run, or the port still holds the wrong weights after it.
+  The stop runs only when `unit::served_address` says the unit serves the base URL, because that URL may name an Ollama or an LM Studio on another port and no disagreement about weights may take down a server the run was not asked about.
+  Every port the guard cannot reload is one `bad_arguments` naming both models, and `Unreloadable` gives each its own remedy: the start is forbidden, the unit does not serve the address, the stop did not run, the port still holds the wrong weights, or this adapter started that unit itself.
   A transient unit that is not running is not loaded either, so `systemctl --user stop` on it fails, which is what a hand-run server on the base URL looks like.
   A server that names no model is checked as before, because `openaiBaseUrl` accepts any OpenAI-compatible server.
-  `served::from_models` reads the whole `data` list and prefers an entry that matches, because Ollama and LM Studio list every model they can serve.
+  `served::from_models` reads the whole `data` list and prefers an entry that matches, and `Openai::probe` prefers a route that matches, because Ollama and LM Studio list every model and `llama-server --alias` renames what `/v1/models` reports while `/props` stays truthful.
+  `served::file_name` cuts the directory off every value that leaves the adapter, because a llama.cpp `--model` path holds a home directory and one bench run is a committed file.
   Only a named answer settles the question: a silent port and a port that answers HTTP 503 while it reads its weights both leave it open.
-  So `Openai::confirm_started` asks again after the start path has a server up, and that second question refuses a mismatch rather than reloading one.
+  So `Openai::confirm_started` asks again after the start path has a server up, and `local::Started` decides what a mismatch earns there: a unit this adapter built is refused, and one an earlier session left is reloaded and the Check re-run, which is the HUF-236 recovery.
   Only a settled answer is cached, and one adapter is built per bench row and per `check` run, so a 365-item row pays a small constant number of probes.
   `Engine::served_model` carries it to `Measurement::served`, which is the "Weights served for" line under both bench tables.
   Every stub of `cli/tests/bench.rs` and `cli/tests/openai_stub.rs` therefore has to route on the request line: a probe is not a Check and must not reach the counters.

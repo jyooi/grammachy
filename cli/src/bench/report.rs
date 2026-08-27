@@ -1025,6 +1025,10 @@ fn missed_items(set: &SetTables) -> String {
 /// any OpenAI-compatible server, and only llama-server says what it loaded.
 /// The row is still guarded, because the guard refuses a named mismatch before
 /// the first Check and never runs on a silence (HUF-236).
+///
+/// The value is a weights file name. `Engine::served_model` cuts the directory
+/// off, because one run of `bench` is the whole committed benchmark file and a
+/// llama.cpp `--model` path holds the home directory it runs under.
 fn served_line(name: &str, outcome: &Outcome) -> String {
     match outcome.measurement().and_then(|it| it.served.as_deref()) {
         None => String::new(),

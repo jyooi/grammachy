@@ -10,8 +10,9 @@
 //!
 //! Two routes answer that question. `GET /v1/models` is the OpenAI one, and
 //! llama-server answers it with a single entry. `GET /props` is the
-//! llama-server extension, which names the weights file it loaded. The first
-//! route that answers wins.
+//! llama-server extension, which names the weights file it loaded. An answer
+//! that matches the requested model wins, whichever route gave it, because a
+//! `--alias` renames what `/v1/models` reports and leaves `/props` truthful.
 //!
 //! A server that answers neither leaves the question open, and an open question
 //! is not a mismatch: any OpenAI-compatible server may sit on the base URL, and
@@ -76,14 +77,21 @@ pub fn matches(served: &str, requested: &str) -> bool {
     !requested.is_empty() && file_stem(served).starts_with(&requested)
 }
 
+/// The weights file name a server reported, without its directory.
+///
+/// llama.cpp names its weights as the `--model` path it was started with, and
+/// that path holds the home directory of whoever runs it. One bench run is the
+/// whole committed benchmark file, so nothing outside this module may carry the
+/// directory. The file name keeps the quantisation, which is what a reader of
+/// that file needs.
+pub fn file_name(served: &str) -> &str {
+    let served = served.trim();
+    served.rsplit(['/', '\\']).next().unwrap_or(served)
+}
+
 /// The weights file name a server reported, without its directory or suffix.
 pub fn file_stem(served: &str) -> String {
-    let served = served.trim();
-    let name = served
-        .rsplit(['/', '\\'])
-        .next()
-        .unwrap_or(served)
-        .to_ascii_lowercase();
+    let name = file_name(served).to_ascii_lowercase();
     name.strip_suffix(".gguf").unwrap_or(&name).to_string()
 }
 
@@ -145,6 +153,20 @@ mod tests {
         }
         assert_eq!(from_props(&json!({})), None);
         assert_eq!(from_props(&json!({ "model_path": "" })), None);
+    }
+
+    /// The `--model` path of a llama.cpp unit holds a home directory, and one
+    /// bench run is a committed file, so only the file name may leave here.
+    #[test]
+    fn a_served_path_is_cut_down_to_the_weights_file_name() {
+        for served in [
+            "/home/someone/.local/share/grammachy/models/gemma-4-E4B-it-Q4_K_M.gguf",
+            "  /home/someone/.local/share/grammachy/models/gemma-4-E4B-it-Q4_K_M.gguf  ",
+            "gemma-4-E4B-it-Q4_K_M.gguf",
+        ] {
+            assert_eq!(file_name(served), "gemma-4-E4B-it-Q4_K_M.gguf", "{served}");
+        }
+        assert_eq!(file_name("local-llm"), "local-llm");
     }
 
     #[test]

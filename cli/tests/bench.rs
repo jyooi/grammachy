@@ -2215,8 +2215,17 @@ fn a_server_that_serves_another_model_measures_no_row() {
 /// what the Settings called it.
 #[test]
 fn a_server_that_serves_the_named_model_measures_every_row_and_names_the_weights() {
+    // llama.cpp names its weights as the `--model` path it was started with,
+    // and one bench run is the whole committed benchmark file, so the home
+    // directory in that path must never reach it.
     let served = "gemma-4-e4b-it-Q4_K_M.gguf";
-    let stub = stub_holding(answer_body(None), usize::MAX, Some(served));
+    let stub = stub_holding(
+        answer_body(None),
+        usize::MAX,
+        Some(&format!(
+            "/home/someone/.local/share/grammachy/models/{served}"
+        )),
+    );
     let settings = settings_file(
         "served-match.json",
         &format!(
@@ -2243,6 +2252,11 @@ fn a_server_that_serves_the_named_model_measures_every_row_and_names_the_weights
     ] {
         assert!(run.stdout.contains(&named), "{}", run.stdout);
     }
+    assert!(
+        !run.stdout.contains("/home/someone"),
+        "no machine's own path reaches the benchmark file:\n{}",
+        run.stdout
+    );
     assert!(
         !run.stdout.contains("- Engine `openai`:"),
         "the row is measured, not skipped:\n{}",

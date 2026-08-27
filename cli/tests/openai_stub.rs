@@ -13,8 +13,9 @@ use std::time::{Duration, Instant};
 
 use grammachy::args::CheckOptions;
 use grammachy::engine::{Engine, EngineFailure};
+use grammachy::engines::local::Started;
 use grammachy::engines::openai::endpoint::Endpoint;
-use grammachy::engines::openai::{Config, Openai};
+use grammachy::engines::openai::{Config, Openai, UnitAddress};
 
 const TEXT: &str = "She bought three book from the store.";
 
@@ -174,6 +175,114 @@ impl Stub {
         });
 
         Stub { address, seen }
+    }
+
+    /// A stub that answers the two probe routes differently.
+    ///
+    /// That is `llama-server --alias`: `/v1/models` reports the alias and
+    /// `/props` still names the weights file it loaded.
+    fn aliased(alias: &'static str, model_path: &'static str) -> Stub {
+        let listener = bind_free_port();
+        let address = listener
+            .local_addr()
+            .expect("the port is known")
+            .to_string();
+        let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let recorder = Arc::clone(&seen);
+
+        thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else { break };
+                let request = read_request(&mut stream);
+                let is_check = request.starts_with("POST ");
+                let props = request.contains("/props");
+                recorder
+                    .lock()
+                    .expect("the log is not poisoned")
+                    .push(request);
+                if is_check {
+                    let _ = write!(
+                        stream,
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{ANSWER}",
+                        ANSWER.len()
+                    );
+                    continue;
+                }
+                let body = match props {
+                    true => format!(r#"{{"model_path":"{model_path}"}}"#),
+                    false => format!(
+                        r#"{{"object":"list","data":[{{"id":"{alias}","object":"model"}}]}}"#
+                    ),
+                };
+                let _ = write!(
+                    stream,
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+            }
+        });
+
+        Stub { address, seen }
+    }
+
+    /// A unit an earlier session left behind, still reading its weights.
+    ///
+    /// It answers 503 until the first Check has been tried, which is llama.cpp
+    /// reading a file. After that it names `before` until the stop lands and
+    /// `after` once it has, which is what one reload looks like from here.
+    fn leftover(before: &'static str, after: &'static str) -> (Stub, Stops) {
+        let listener = bind_free_port();
+        let address = listener
+            .local_addr()
+            .expect("the port is known")
+            .to_string();
+        let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let recorder = Arc::clone(&seen);
+        let stops = Stops::default();
+        let stopped = Arc::clone(&stops.0);
+
+        thread::spawn(move || {
+            let mut checks = 0usize;
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else { break };
+                let request = read_request(&mut stream);
+                let is_check = request.starts_with("POST ");
+                recorder
+                    .lock()
+                    .expect("the log is not poisoned")
+                    .push(request);
+                if is_check {
+                    checks += 1;
+                    if checks == 1 {
+                        let _ = write!(
+                            stream,
+                            "HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                        );
+                        continue;
+                    }
+                    let _ = write!(
+                        stream,
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{ANSWER}",
+                        ANSWER.len()
+                    );
+                    continue;
+                }
+                if checks == 0 {
+                    let _ = write!(
+                        stream,
+                        "HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                    );
+                    continue;
+                }
+                let served = match stopped.load(Ordering::SeqCst) {
+                    0 => before,
+                    _ => after,
+                };
+                write_probe(&mut stream, Some(served));
+            }
+        });
+
+        (Stub { address, seen }, stops)
     }
 
     /// A stub that swaps the weights it names once the unit is stopped.
@@ -357,7 +466,7 @@ fn adapter_with_budget(
         },
         Box::new(move |_model: &str, _endpoint: &Endpoint| {
             counter.fetch_add(1, Ordering::SeqCst);
-            Ok(())
+            Ok(Started::Fresh)
         }),
     )
 }
@@ -366,13 +475,24 @@ fn adapter_with_budget(
 ///
 /// No case may reach the unit the live shell uses, so the stopper is the test's
 /// own here exactly as the starter is.
-fn adapter_with_stopper(start_unit: bool, starts: &Starts, stops: &Stops) -> Openai {
-    adapter_with_stopper_and_budget(start_unit, Duration::from_millis(0), starts, stops)
+fn adapter_with_stopper(unit_at: &str, start_unit: bool, starts: &Starts, stops: &Stops) -> Openai {
+    adapter_with_stopper_and_budget(unit_at, start_unit, Duration::from_millis(0), starts, stops)
+}
+
+/// The seam that says where the `grammachy-llama` unit listens.
+///
+/// The guard stops that unit only for the address it serves, so a case whose
+/// stub stands for the unit hands in the stub's own address. A case that stands
+/// for an Ollama, or for a hand-run server, hands in another one.
+fn unit_at(address: &str) -> UnitAddress {
+    let address = address.trim_start_matches("http://").to_string();
+    Box::new(move || Some(address.clone()))
 }
 
 /// The same adapter with a startup budget, for the cases where the server does
 /// come up, or finishes loading, on a later request.
 fn adapter_with_stopper_and_budget(
+    unit_address: &str,
     start_unit: bool,
     startup_budget: Duration,
     starts: &Starts,
@@ -388,12 +508,13 @@ fn adapter_with_stopper_and_budget(
         },
         Box::new(move |_model: &str, _endpoint: &Endpoint| {
             started.fetch_add(1, Ordering::SeqCst);
-            Ok(())
+            Ok(Started::Fresh)
         }),
         Box::new(move |_unit: &str| {
             stopped.fetch_add(1, Ordering::SeqCst);
             Ok(())
         }),
+        unit_at(unit_address),
     )
 }
 
@@ -808,7 +929,7 @@ fn a_server_that_serves_another_model_never_answers_a_check() {
     let stub = Stub::holding(Answer::Json(ANSWER), Some("granite-4.2-3b-Q4_K_M.gguf"));
     let (starts, stops) = (Starts::default(), Stops::default());
 
-    let failure = adapter_with_stopper(false, &starts, &stops)
+    let failure = adapter_with_stopper(&stub.address, false, &starts, &stops)
         .check(TEXT, &options(&stub.base_url()))
         .expect_err("the server holds another model");
 
@@ -833,7 +954,7 @@ fn a_server_that_serves_the_requested_weights_is_checked_and_named() {
     let served = "qwen3.8-4b-Q4_K_M.gguf";
     let stub = Stub::holding(Answer::Json(ANSWER), Some(served));
     let (starts, stops) = (Starts::default(), Stops::default());
-    let adapter = adapter_with_stopper(true, &starts, &stops);
+    let adapter = adapter_with_stopper(&stub.address, true, &starts, &stops);
 
     let issues = adapter
         .check(TEXT, &options(&stub.base_url()))
@@ -855,7 +976,7 @@ fn a_mismatch_is_reloaded_before_the_first_check() {
         "qwen3.8-4b-Q4_K_M.gguf",
     );
     let starts = Starts::default();
-    let adapter = adapter_with_stopper(true, &starts, &stops);
+    let adapter = adapter_with_stopper(&stub.address, true, &starts, &stops);
 
     let issues = adapter
         .check(TEXT, &options(&stub.base_url()))
@@ -878,7 +999,7 @@ fn a_mismatch_is_reloaded_before_the_first_check() {
 fn a_server_that_names_no_model_is_checked_rather_than_refused() {
     let stub = Stub::serving(Answer::Json(ANSWER));
     let (starts, stops) = (Starts::default(), Stops::default());
-    let adapter = adapter_with_stopper(true, &starts, &stops);
+    let adapter = adapter_with_stopper(&stub.address, true, &starts, &stops);
 
     let issues = adapter
         .check(TEXT, &options(&stub.base_url()))
@@ -895,7 +1016,7 @@ fn a_server_that_names_no_model_is_checked_rather_than_refused() {
 fn the_server_is_asked_what_it_serves_once_for_the_whole_row() {
     let stub = Stub::holding(Answer::Json(ANSWER), Some("qwen3.8-4b-Q4_K_M.gguf"));
     let (starts, stops) = (Starts::default(), Stops::default());
-    let adapter = adapter_with_stopper(true, &starts, &stops);
+    let adapter = adapter_with_stopper(&stub.address, true, &starts, &stops);
     let options = options(&stub.base_url());
 
     for _ in 0..3 {
@@ -914,7 +1035,7 @@ fn a_silent_port_is_started_rather_than_refused() {
     let (address, _ports) = silent_address();
     let (starts, stops) = (Starts::default(), Stops::default());
 
-    let failure = adapter_with_stopper(true, &starts, &stops)
+    let failure = adapter_with_stopper(&address, true, &starts, &stops)
         .check(TEXT, &options(&format!("http://{address}")))
         .expect_err("nothing listens on the port");
 
@@ -933,6 +1054,7 @@ fn a_silent_port_is_started_rather_than_refused() {
 fn adapter_that_brings_up(
     port: u16,
     served: &'static str,
+    started_as: Started,
     held: &Arc<std::sync::Mutex<Option<Stub>>>,
     stops: &Stops,
 ) -> Openai {
@@ -949,12 +1071,13 @@ fn adapter_that_brings_up(
             if slot.is_none() {
                 *slot = Some(Stub::on_port(port, Answer::Json(ANSWER), Some(served)));
             }
-            Ok(())
+            Ok(started_as)
         }),
         Box::new(move |_unit: &str| {
             stopped.fetch_add(1, Ordering::SeqCst);
             Ok(())
         }),
+        unit_at(&format!("127.0.0.1:{port}")),
     )
 }
 
@@ -967,7 +1090,7 @@ fn a_server_the_start_path_brought_up_is_asked_what_it_serves() {
     let held = Arc::new(std::sync::Mutex::new(None));
     let stops = Stops::default();
     let served = "qwen3.8-4b-Q4_K_M.gguf";
-    let adapter = adapter_that_brings_up(port_of(&address), served, &held, &stops);
+    let adapter = adapter_that_brings_up(port_of(&address), served, Started::Fresh, &held, &stops);
 
     let issues = adapter
         .check(TEXT, &options(&format!("http://{address}")))
@@ -993,6 +1116,7 @@ fn a_started_server_that_holds_another_model_refuses_the_check() {
     let adapter = adapter_that_brings_up(
         port_of(&address),
         "granite-4.2-3b-Q4_K_M.gguf",
+        Started::Fresh,
         &held,
         &stops,
     );
@@ -1034,7 +1158,13 @@ fn a_server_that_was_still_loading_is_asked_again_once_it_answers() {
     let served = "qwen3.8-4b-Q4_K_M.gguf";
     let stub = Stub::holding(Answer::LoadingThenJson(1, ANSWER), Some(served));
     let (starts, stops) = (Starts::default(), Stops::default());
-    let adapter = adapter_with_stopper_and_budget(true, Duration::from_secs(5), &starts, &stops);
+    let adapter = adapter_with_stopper_and_budget(
+        &stub.address,
+        true,
+        Duration::from_secs(5),
+        &starts,
+        &stops,
+    );
 
     let issues = adapter
         .check(TEXT, &options(&stub.base_url()))
@@ -1052,7 +1182,13 @@ fn a_server_that_finished_loading_another_model_refuses_the_check() {
         Some("granite-4.2-3b-Q4_K_M.gguf"),
     );
     let (starts, stops) = (Starts::default(), Stops::default());
-    let adapter = adapter_with_stopper_and_budget(true, Duration::from_secs(5), &starts, &stops);
+    let adapter = adapter_with_stopper_and_budget(
+        &stub.address,
+        true,
+        Duration::from_secs(5),
+        &starts,
+        &stops,
+    );
 
     let failure = adapter
         .check(TEXT, &options(&stub.base_url()))
@@ -1086,13 +1222,14 @@ fn a_stop_that_cannot_run_still_names_both_models() {
         },
         Box::new(move |_model: &str, _endpoint: &Endpoint| {
             started.fetch_add(1, Ordering::SeqCst);
-            Ok(())
+            Ok(Started::Fresh)
         }),
         Box::new(|unit: &str| {
             Err(format!(
                 "systemctl could not stop {unit}: Unit {unit}.service not loaded."
             ))
         }),
+        unit_at(&stub.address),
     );
 
     let failure = adapter
@@ -1116,4 +1253,135 @@ fn a_stop_that_cannot_run_still_names_both_models() {
         stub.requests()
     );
     assert_eq!(starts.count(), 0, "a refused Check starts nothing");
+}
+
+/// `openaiBaseUrl` accepts any loopback server, so it may name an Ollama or an
+/// LM Studio on a port the `grammachy-llama` unit does not serve. A
+/// disagreement about weights there must never take down a server the run was
+/// not asked about, and must not pay the reload wait either.
+#[test]
+fn a_mismatch_on_another_server_stops_no_unit() {
+    let stub = Stub::holding(Answer::Json(ANSWER), Some("granite-4.2-3b-Q4_K_M.gguf"));
+    let (starts, stops) = (Starts::default(), Stops::default());
+    let started = Arc::clone(&starts.0);
+    let stopped = Arc::clone(&stops.0);
+    let adapter = Openai::with_server_control(
+        Config {
+            timeout: Duration::from_secs(2),
+            start_unit: true,
+            startup_budget: Duration::from_millis(0),
+        },
+        Box::new(move |_model: &str, _endpoint: &Endpoint| {
+            started.fetch_add(1, Ordering::SeqCst);
+            Ok(Started::Fresh)
+        }),
+        Box::new(move |_unit: &str| {
+            stopped.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }),
+        // The unit is on the default port, and the base URL is not.
+        unit_at("127.0.0.1:8080"),
+    );
+    let began = Instant::now();
+
+    let failure = adapter
+        .check(TEXT, &options(&stub.base_url()))
+        .expect_err("the other server holds another model");
+
+    assert_eq!(
+        stops.count(),
+        0,
+        "a server the unit does not serve is never stopped"
+    );
+    assert_eq!(starts.count(), 0);
+    assert!(stub.checks().is_empty(), "{:?}", stub.requests());
+    assert!(
+        began.elapsed() < Duration::from_secs(5),
+        "the refusal pays no reload wait"
+    );
+    match failure {
+        EngineFailure::BadArguments(message) => {
+            assert!(message.contains("granite-4.2-3b-Q4_K_M.gguf"), "{message}");
+            assert!(message.contains(REQUESTED), "{message}");
+            assert!(
+                message.contains("does not serve this address"),
+                "the refusal says why no reload ran: {message}"
+            );
+        }
+        other => panic!("expected bad_arguments, got {other:?}"),
+    }
+}
+
+/// The HUF-236 case itself. A sibling task left the unit reading other weights,
+/// so it answers 503 for minutes. The start call finds that unit already there
+/// and starts nothing, so the weights on the port belong to an earlier session
+/// and one stop reloads them. The Check recovers rather than refuses, and the
+/// answer the leftover weights gave is thrown away with them.
+#[test]
+fn a_unit_that_was_already_running_is_reloaded_rather_than_refused() {
+    let (stub, stops) = Stub::leftover("granite-4.2-3b-Q4_K_M.gguf", "qwen3.8-4b-Q4_K_M.gguf");
+    let starts = Starts::default();
+    let started = Arc::clone(&starts.0);
+    let adapter = Openai::with_server_control(
+        Config {
+            timeout: Duration::from_secs(2),
+            start_unit: true,
+            startup_budget: Duration::from_secs(5),
+        },
+        // systemd-run answers this way for a unit an earlier session left, so
+        // this call started nothing and the weights are not the ones it asked
+        // for.
+        Box::new(move |_model: &str, _endpoint: &Endpoint| {
+            started.fetch_add(1, Ordering::SeqCst);
+            Ok(Started::AlreadyRunning)
+        }),
+        Box::new({
+            let stopped = Arc::clone(&stops.0);
+            move |_unit: &str| {
+                stopped.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            }
+        }),
+        unit_at(&stub.address),
+    );
+
+    let issues = adapter
+        .check(TEXT, &options(&stub.base_url()))
+        .expect("the reloaded unit answers");
+
+    assert_eq!(issues.len(), 1);
+    assert_eq!(stops.count(), 1, "the leftover unit is reloaded once");
+    assert_eq!(
+        adapter.served_weights().as_deref(),
+        Some("qwen3.8-4b-Q4_K_M.gguf"),
+        "the Check is measured on the weights it asked for"
+    );
+    assert_eq!(
+        stub.checks().len(),
+        3,
+        "the answer the leftover weights gave is thrown away and the Check runs again: {:?}",
+        stub.requests()
+    );
+}
+
+/// `llama-server --alias` renames what `/v1/models` reports and leaves `/props`
+/// naming the weights file. A Check that worked before the guard must still
+/// work, so a matching answer wins whichever route gave it.
+#[test]
+fn an_aliased_server_passes_on_the_weights_file_props_names() {
+    let stub = Stub::aliased("local-llm", "/models/qwen3.8-4b-Q4_K_M.gguf");
+    let (starts, stops) = (Starts::default(), Stops::default());
+    let adapter = adapter_with_stopper(&stub.address, true, &starts, &stops);
+
+    let issues = adapter
+        .check(TEXT, &options(&stub.base_url()))
+        .expect("the alias hides a file that does match");
+
+    assert_eq!(issues.len(), 1);
+    assert_eq!(stops.count(), 0, "a match is never a reload");
+    assert_eq!(
+        adapter.served_weights().as_deref(),
+        Some("qwen3.8-4b-Q4_K_M.gguf"),
+        "the row names the weights file and never the path"
+    );
 }

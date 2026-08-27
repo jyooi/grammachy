@@ -37,7 +37,7 @@ use std::time::{Duration, Instant};
 
 use crate::args::CheckOptions;
 use crate::engine::{Answer, Engine, EngineFailure, Usage};
-use crate::engines::local::{is_unreachable, StartFailure};
+use crate::engines::local::{is_unreachable, StartFailure, Started};
 use crate::envelope::Issue;
 use crate::model::{self, Stopper};
 
@@ -129,15 +129,77 @@ impl Config {
 ///
 /// The real one is [`unit::start`]. Tests hand in their own, which is how the
 /// adapter's start behaviour is covered without a systemd unit.
-pub type Starter = Box<dyn Fn(&str, &Endpoint) -> Result<(), StartFailure> + Send + Sync>;
+pub type Starter = Box<dyn Fn(&str, &Endpoint) -> Result<Started, StartFailure> + Send + Sync>;
+
+/// What answers where the `grammachy-llama` unit listens.
+///
+/// The real one is [`unit::served_address`]. The guard reads it before it stops
+/// anything, so a disagreement about weights on an Ollama port never takes down
+/// a llama.cpp the run was not asked about.
+pub type UnitAddress = Box<dyn Fn() -> Option<String> + Send + Sync>;
+
+/// How many times one Check may bring a server up before it gives up.
+///
+/// A start whose server holds another model reloads once and starts once more.
+/// A second round that still holds the wrong weights is a port this adapter
+/// cannot settle, so the Check ends rather than loops.
+const MAX_START_ROUNDS: usize = 2;
 
 /// What the guard does with a server that named another model.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Mismatch {
     /// Stop the unit, so the start path can load the requested weights.
     Reload,
-    /// Refuse the Check. A reload already had its turn.
+    /// Refuse the Check, because this adapter started that very server and a
+    /// reload would load the same weights again.
     Refuse,
+}
+
+/// Why the guard did not reload a port that serves the wrong weights.
+///
+/// Each one earns its own remedy, because the advice a person can act on
+/// differs. Naming a repair that already ran, or one that cannot run, wastes
+/// the only sentence the refusal has.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Unreloadable {
+    /// A start is forbidden here, so a stop would leave the port with nothing.
+    StartForbidden,
+    /// The unit does not serve this address, so no stop of it would free it.
+    NotTheUnit,
+    /// The stop did not run, and this is what it said.
+    StopFailed(String),
+    /// The stop ran, and the port still serves the wrong weights.
+    StillServing,
+    /// This adapter started that unit itself, so it holds what a start loads.
+    FreshStart,
+}
+
+impl Unreloadable {
+    /// The sentence that follows the two model names.
+    fn remedy(&self, requested: &str) -> String {
+        let elsewhere = format!("point openaiBaseUrl at a server that holds {requested}");
+        match self {
+            Unreloadable::StartForbidden => {
+                format!("No start is allowed here, so no reload ran. Stop that server, or {elsewhere}.")
+            }
+            Unreloadable::NotTheUnit => format!(
+                "The {} unit does not serve this address, so no reload ran. Stop that server, or {elsewhere}.",
+                unit::UNIT_NAME,
+            ),
+            Unreloadable::StopFailed(why) => format!(
+                "The reload did not run: {}. Stop that server, or {elsewhere}.",
+                why.trim().trim_end_matches('.'),
+            ),
+            Unreloadable::StillServing => format!(
+                "The {} unit stopped and the port still serves the other model. Stop that server, or {elsewhere}.",
+                unit::UNIT_NAME,
+            ),
+            Unreloadable::FreshStart => format!(
+                "This adapter started the {} unit itself, so another reload would load the same weights. Check openaiModel, or {elsewhere}.",
+                unit::UNIT_NAME,
+            ),
+        }
+    }
 }
 
 /// What one run of the served-model guard decided.
@@ -149,6 +211,9 @@ enum Mismatch {
 struct Confirmed {
     weights: Option<String>,
     settled: bool,
+    /// Whether a reload ran. A reload drops the weights any answer already in
+    /// hand was measured against, so that answer goes away with them.
+    reloaded: bool,
 }
 
 impl Confirmed {
@@ -157,6 +222,7 @@ impl Confirmed {
         Confirmed {
             weights: None,
             settled: false,
+            reloaded: false,
         }
     }
 
@@ -165,7 +231,14 @@ impl Confirmed {
         Confirmed {
             weights: Some(weights),
             settled: true,
+            reloaded: false,
         }
+    }
+
+    /// The same answer, reached after a reload dropped the old weights.
+    fn after_reload(mut self) -> Self {
+        self.reloaded = true;
+        self
     }
 }
 
@@ -185,6 +258,7 @@ pub struct Openai {
     config: Config,
     starter: Starter,
     stopper: Stopper,
+    unit_address: UnitAddress,
     served: Mutex<Guard>,
 }
 
@@ -196,6 +270,7 @@ impl Openai {
                 unit::start(model, endpoint.bind_host(), endpoint.port)
             }),
             stopper: model::stopper(),
+            unit_address: Box::new(unit::served_address),
             served: Mutex::default(),
         }
     }
@@ -214,6 +289,7 @@ impl Openai {
             stopper: Box::new(|unit: &str| {
                 Err(format!("this adapter holds no way to stop {unit}"))
             }),
+            unit_address: Box::new(|| None),
             served: Mutex::default(),
         }
     }
@@ -222,11 +298,17 @@ impl Openai {
     ///
     /// The stopper is what a reload runs, so the served-model guard is covered
     /// with no systemd at all.
-    pub fn with_server_control(config: Config, starter: Starter, stopper: Stopper) -> Self {
+    pub fn with_server_control(
+        config: Config,
+        starter: Starter,
+        stopper: Stopper,
+        unit_address: UnitAddress,
+    ) -> Self {
         Openai {
             config,
             starter,
             stopper,
+            unit_address,
             served: Mutex::default(),
         }
     }
@@ -238,6 +320,10 @@ impl Openai {
     /// file says what was measured rather than only what was requested. A row
     /// whose port was silent until the start path brought a server up reports
     /// what that server named, because the guard asks it again once it answers.
+    ///
+    /// The answer is the weights file name and never the path a server gave,
+    /// because one bench run is the whole committed benchmark file and a
+    /// llama.cpp `--model` path holds the home directory it runs under.
     pub fn served_weights(&self) -> Option<String> {
         self.guard()
             .verdict
@@ -245,6 +331,7 @@ impl Openai {
             .and_then(|verdict| verdict.as_ref().ok())
             .cloned()
             .flatten()
+            .map(|served| served::file_name(&served).to_string())
     }
 
     /// The guard state, whatever an earlier panic left behind.
@@ -367,16 +454,32 @@ impl Openai {
     }
 
     /// Ask the server what it serves, over both routes it may answer on.
+    ///
+    /// An answer that matches the requested model wins, whichever route gave
+    /// it. `llama-server --alias` renames what `/v1/models` reports and leaves
+    /// `/props` naming the weights file, so a route that merely names something
+    /// must never shadow one that names the right thing. That is the rule
+    /// [`served::from_models`] applies inside one list, across the two routes.
+    /// Only the first named answer is kept for the refusal.
     fn probe(&self, endpoint: &Endpoint, options: &CheckOptions) -> Served {
+        let mut named: Option<String> = None;
         let mut found = Served::Silent;
         for url in [&endpoint.models_url, &endpoint.props_url] {
             match self.probe_route(url, options) {
-                Served::Id(id) => return Served::Id(id),
+                Served::Id(id) if served::matches(&id, &options.openai_model) => {
+                    return Served::Id(id)
+                }
+                Served::Id(id) => {
+                    named.get_or_insert(id);
+                }
                 Served::Unknown => found = Served::Unknown,
                 Served::Silent => {}
             }
         }
-        found
+        match named {
+            Some(id) => Served::Id(id),
+            None => found,
+        }
     }
 
     /// The served-model guard before the first Check of this adapter's life.
@@ -393,6 +496,7 @@ impl Openai {
             return verdict.map(drop);
         }
         self.store(&mut guard, endpoint, options, Mismatch::Reload)
+            .map(drop)
     }
 
     /// The served-model guard after the start path brought a server up.
@@ -402,19 +506,31 @@ impl Openai {
     /// against weights this adapter never confirmed. Asking again is what
     /// closes that window.
     ///
-    /// This second question refuses a named mismatch rather than reloading it.
-    /// The adapter has just started the server for `openaiModel` and the port
-    /// still holds another model, so no further stop of the unit can reload it.
+    /// What a named mismatch earns here follows `started`. `Started::Fresh`
+    /// means systemd-run built the unit from `openaiModel` itself, so another
+    /// reload would load the same weights and the Check refuses. A unit that
+    /// was already running is the HUF-236 case: the start call did nothing, the
+    /// weights on the port belong to an earlier session, and one stop reloads
+    /// them. So that one takes the ordinary verdict and reloads.
+    ///
+    /// The answer comes back as whether the Check in hand still stands. A
+    /// reload dropped the weights it was measured against, so it does not.
     fn confirm_started(
         &self,
         endpoint: &Endpoint,
         options: &CheckOptions,
-    ) -> Result<(), EngineFailure> {
+        started: Started,
+    ) -> Result<bool, EngineFailure> {
         let mut guard = self.guard();
         if guard.settled {
-            return guard.verdict.clone().unwrap_or(Ok(None)).map(drop);
+            return guard.verdict.clone().unwrap_or(Ok(None)).map(|_| true);
         }
-        self.store(&mut guard, endpoint, options, Mismatch::Refuse)
+        let on_mismatch = match started {
+            Started::Fresh => Mismatch::Refuse,
+            Started::AlreadyRunning => Mismatch::Reload,
+        };
+        self.store(&mut guard, endpoint, options, on_mismatch)
+            .map(|confirmed| !confirmed.reloaded)
     }
 
     /// Probe the server and record what it answered.
@@ -428,7 +544,7 @@ impl Openai {
         endpoint: &Endpoint,
         options: &CheckOptions,
         on_mismatch: Mismatch,
-    ) -> Result<(), EngineFailure> {
+    ) -> Result<Confirmed, EngineFailure> {
         let outcome = self.verify_served(endpoint, options, on_mismatch);
         guard.settled = outcome.as_ref().is_ok_and(|it| it.settled) || outcome.is_err();
         guard.verdict = Some(
@@ -437,7 +553,7 @@ impl Openai {
                 .map(|it| it.weights.clone())
                 .map_err(Clone::clone),
         );
-        outcome.map(drop)
+        outcome
     }
 
     /// One probe, and the verdict it earns.
@@ -451,9 +567,12 @@ impl Openai {
             Served::Id(id) if served::matches(&id, &options.openai_model) => {
                 Ok(Confirmed::named(id))
             }
-            Served::Id(id) if on_mismatch == Mismatch::Refuse => {
-                Err(mismatch(endpoint, &id, &options.openai_model, None))
-            }
+            Served::Id(id) if on_mismatch == Mismatch::Refuse => Err(mismatch(
+                endpoint,
+                &id,
+                &options.openai_model,
+                Unreloadable::FreshStart,
+            )),
             Served::Id(id) => self.reload(endpoint, options, &id),
             Served::Silent | Served::Unknown => Ok(Confirmed::open()),
         }
@@ -466,41 +585,60 @@ impl Openai {
     /// the server up for `openaiModel`, so this only has to free the port and
     /// wait for that to take.
     ///
-    /// Three things end a reload, and all three are the one refusal of
-    /// [`mismatch`]. The stop is forbidden, the stop did not run, or the port
-    /// still holds the wrong weights after it. A transient unit that is not
-    /// running is not loaded either, so `systemctl --user stop` on it fails,
-    /// which is what a hand-run server and an Ollama on the base URL both look
-    /// like. None of the three is a machine that is broken, and each one leaves
-    /// the same two model names for a person to settle.
+    /// The stop only runs when the unit is the server behind `endpoint`.
+    /// `openaiBaseUrl` accepts any loopback server, so it may name an Ollama, an
+    /// LM Studio, or a hand-run llama-server on another port. Stopping the unit
+    /// then takes down a server no part of this disagreement is about, and one
+    /// that another run may be measuring on. So the address decides, and every
+    /// other case refuses without a stop and without the reload wait.
+    ///
+    /// Four things end a reload, and each is the one refusal of [`mismatch`]
+    /// with a reason of its own: the start is forbidden, the unit does not
+    /// serve this address, the stop did not run, or the port still holds the
+    /// wrong weights after a stop that did. None of the four is a machine that
+    /// is broken, and each leaves the same two model names for a person to
+    /// settle.
     fn reload(
         &self,
         endpoint: &Endpoint,
         options: &CheckOptions,
         was: &str,
     ) -> Result<Confirmed, EngineFailure> {
-        let refuse = |why: Option<String>| mismatch(endpoint, was, &options.openai_model, why);
+        let refuse = |why: Unreloadable| mismatch(endpoint, was, &options.openai_model, why);
         if !self.config.start_unit {
-            return Err(refuse(None));
+            return Err(refuse(Unreloadable::StartForbidden));
+        }
+        if !self.unit_serves(endpoint) {
+            return Err(refuse(Unreloadable::NotTheUnit));
         }
         if let Err(why) = (self.stopper)(unit::UNIT_NAME) {
-            return Err(refuse(Some(why)));
+            return Err(refuse(Unreloadable::StopFailed(why)));
         }
 
         let deadline = Instant::now() + RELOAD_BUDGET;
         loop {
             match self.probe(endpoint, options) {
                 Served::Id(id) if served::matches(&id, &options.openai_model) => {
-                    return Ok(Confirmed::named(id))
+                    return Ok(Confirmed::named(id).after_reload())
                 }
                 // The port is free, so the start path loads the right weights.
                 // What it loads is still unconfirmed, so the question stays
                 // open until that server answers.
-                Served::Silent => return Ok(Confirmed::open()),
-                _ if Instant::now() >= deadline => return Err(refuse(None)),
+                Served::Silent => return Ok(Confirmed::open().after_reload()),
+                _ if Instant::now() >= deadline => return Err(refuse(Unreloadable::StillServing)),
                 _ => sleep(PROBE_INTERVAL),
             }
         }
+    }
+
+    /// Whether the `grammachy-llama` unit is the server behind one endpoint.
+    ///
+    /// [`unit::start`] writes the host and the port into the unit command, so
+    /// the unit says where it listens. An address it does not name belongs to a
+    /// server this adapter never started and must never stop.
+    fn unit_serves(&self, endpoint: &Endpoint) -> bool {
+        (self.unit_address)()
+            .is_some_and(|address| address == format!("{}:{}", endpoint.bind_host(), endpoint.port))
     }
 
     /// Start the unit and wait until the server answers the Check.
@@ -509,10 +647,11 @@ impl Openai {
         endpoint: &Endpoint,
         options: &CheckOptions,
         body: &str,
-    ) -> Result<serde_json::Value, EngineFailure> {
-        if let Err(StartFailure(message)) = (self.starter)(&options.openai_model, endpoint) {
-            return Err(EngineFailure::Unavailable(message));
-        }
+    ) -> Result<(serde_json::Value, Started), EngineFailure> {
+        let started = match (self.starter)(&options.openai_model, endpoint) {
+            Ok(started) => started,
+            Err(StartFailure(message)) => return Err(EngineFailure::Unavailable(message)),
+        };
 
         let deadline = Instant::now() + self.config.startup_budget;
         loop {
@@ -523,9 +662,44 @@ impl Openai {
                     }
                     sleep(PROBE_INTERVAL);
                 }
-                outcome => return outcome,
+                outcome => return outcome.map(|raw| (raw, started)),
             }
         }
+    }
+
+    /// One Check, sent only to a server whose weights the guard confirmed.
+    ///
+    /// A silent port and a port still reading its weights settle nothing, so
+    /// the guard asks again once a server answers. A reload at that point drops
+    /// the weights the answer in hand came from, so that answer goes away and
+    /// the Check runs once more against what the start path loads next.
+    fn checked(
+        &self,
+        endpoint: &Endpoint,
+        options: &CheckOptions,
+        body: &str,
+    ) -> Result<serde_json::Value, EngineFailure> {
+        for _ in 0..MAX_START_ROUNDS {
+            // A settled guard answers from its own record and sends nothing.
+            self.confirm(endpoint, options)?;
+
+            let message = match self.request(endpoint, options, body) {
+                Err(EngineFailure::Unavailable(message)) => message,
+                outcome => return outcome,
+            };
+            if !self.config.start_unit {
+                return Err(EngineFailure::Unavailable(message));
+            }
+
+            let (raw, started) = self.start_and_retry(endpoint, options, body)?;
+            if self.confirm_started(endpoint, options, started)? {
+                return Ok(raw);
+            }
+        }
+        Err(EngineFailure::Unavailable(format!(
+            "The model server on {} did not settle on one model after {MAX_START_ROUNDS} reloads",
+            endpoint.address(),
+        )))
     }
 }
 
@@ -534,31 +708,22 @@ impl Openai {
 /// It is `bad_arguments` rather than an engine error, because nothing about
 /// this machine is broken: the base URL and the model setting disagree, and
 /// only a person can settle which of the two is wrong. Every port the guard
-/// cannot reload ends here, so `why` carries what stopped the reload when
-/// there is something a person can act on.
+/// cannot reload ends here, and `why` picks the one remedy that fits it.
 ///
-/// The remedy follows `why`. A stop that did not run means the port belongs to
-/// a server this adapter never started, so telling a person to stop the unit
-/// would name the one repair that already failed.
+/// The served model is named by its weights file alone. A llama.cpp path holds
+/// the home directory it runs under, and this message reaches a log and a bench
+/// report.
 fn mismatch(
     endpoint: &Endpoint,
     served: &str,
     requested: &str,
-    why: Option<String>,
+    why: Unreloadable,
 ) -> EngineFailure {
-    let remedy = match why {
-        Some(why) => format!(
-            " The reload did not run: {}. Stop that server, or point openaiBaseUrl at a server that holds {requested}.",
-            why.trim().trim_end_matches('.'),
-        ),
-        None => format!(
-            " Stop the {} unit, or point openaiBaseUrl at a server that holds {requested}.",
-            unit::UNIT_NAME,
-        ),
-    };
     EngineFailure::BadArguments(format!(
-        "The model server on {} serves {served}, and this Check asks for {requested}.{remedy}",
+        "The model server on {} serves {}, and this Check asks for {requested}. {}",
         endpoint.address(),
+        served::file_name(served),
+        why.remedy(requested),
     ))
 }
 
@@ -580,27 +745,11 @@ impl Engine for Openai {
         let endpoint =
             endpoint::parse(&options.openai_base_url).map_err(EngineFailure::BadArguments)?;
 
-        // Before the first Check: the server must hold the weights that were
-        // asked for. Nothing is measured or checked against another model.
-        self.confirm(&endpoint, options)?;
-
         let body = prompt::request_body(text, options, force_of(options)).to_string();
 
-        let answer = match self.request(&endpoint, options, &body) {
-            Err(EngineFailure::Unavailable(message)) => {
-                if self.config.start_unit {
-                    let answer = self.start_and_retry(&endpoint, options, &body)?;
-                    // A server came up, or a loading one finished. Either way
-                    // the probe above settled nothing, so ask again and throw
-                    // this answer away when the weights are the wrong ones.
-                    self.confirm_started(&endpoint, options)?;
-                    answer
-                } else {
-                    return Err(EngineFailure::Unavailable(message));
-                }
-            }
-            outcome => outcome?,
-        };
+        // Before the first Check: the server must hold the weights that were
+        // asked for. Nothing is measured or checked against another model.
+        let answer = self.checked(&endpoint, options, &body)?;
 
         let usage = Usage::from_response(&answer);
         let completion: ChatResponse = serde_json::from_value(answer).map_err(|error| {
@@ -614,5 +763,63 @@ impl Engine for Openai {
             cost: None,
             usage,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn endpoint() -> Endpoint {
+        endpoint::parse("http://127.0.0.1:8080").expect("a loopback URL parses")
+    }
+
+    /// Every refusal names both models, and each reason gives advice that fits
+    /// it. A remedy that names a repair which already ran, or one that cannot
+    /// run, wastes the only sentence the refusal has.
+    #[test]
+    fn each_refusal_names_both_models_and_advises_what_is_left() {
+        let reasons = [
+            Unreloadable::StartForbidden,
+            Unreloadable::NotTheUnit,
+            Unreloadable::StopFailed("Unit grammachy-llama.service not loaded".to_string()),
+            Unreloadable::StillServing,
+            Unreloadable::FreshStart,
+        ];
+
+        for why in reasons {
+            let EngineFailure::BadArguments(message) = mismatch(
+                &endpoint(),
+                "/models/granite-4.2-3b-Q4_K_M.gguf",
+                "gemma-4-e4b-it",
+                why.clone(),
+            ) else {
+                panic!("the guard refuses with bad_arguments");
+            };
+
+            assert!(message.contains("granite-4.2-3b-Q4_K_M.gguf"), "{message}");
+            assert!(message.contains("gemma-4-e4b-it"), "{message}");
+            assert!(
+                !message.contains("/models/"),
+                "the served weights are named by file: {message}"
+            );
+        }
+
+        // The stop already ran in these two, so neither may ask for it again.
+        for why in [
+            Unreloadable::StillServing,
+            Unreloadable::StopFailed("x".to_string()),
+        ] {
+            let remedy = why.remedy("gemma-4-e4b-it");
+            assert!(
+                !remedy.contains(&format!("Stop the {}", unit::UNIT_NAME)),
+                "{remedy}"
+            );
+        }
+        // These two ran no stop, so neither may report one.
+        for why in [Unreloadable::StartForbidden, Unreloadable::NotTheUnit] {
+            let remedy = why.remedy("gemma-4-e4b-it");
+            assert!(remedy.contains("no reload ran"), "{remedy}");
+        }
     }
 }
