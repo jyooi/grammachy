@@ -23,12 +23,26 @@ pub struct ServerCommand {
     pub environment: Vec<(String, String)>,
 }
 
-/// Start one transient user unit, or answer `Ok(())` when it already runs.
+/// What one unit was doing before this call.
+///
+/// A caller that must know whose server answers the port reads this. Only a
+/// `Fresh` unit runs the command that this call built, so only a `Fresh` one
+/// holds what the caller asked for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Started {
+    /// systemd-run created the unit, so it runs the command above.
+    Fresh,
+    /// A unit of that name was there already, so this call started nothing and
+    /// the server on the port is whatever an earlier one left.
+    AlreadyRunning,
+}
+
+/// Start one transient user unit, or say that it was already running.
 pub fn start_unit(
     unit: &str,
     description: &str,
     command: &ServerCommand,
-) -> Result<(), StartFailure> {
+) -> Result<Started, StartFailure> {
     let mut systemd_run = Command::new("systemd-run");
     systemd_run
         .arg("--user")
@@ -47,13 +61,13 @@ pub fn start_unit(
         .map_err(|error| StartFailure(format!("systemd-run could not run: {error}")))?;
 
     if output.status.success() {
-        return Ok(());
+        return Ok(Started::Fresh);
     }
 
     let message = String::from_utf8_lossy(&output.stderr).trim().to_string();
     // A unit left from an earlier Check is the outcome this call wanted.
     if message.contains("already exists") {
-        return Ok(());
+        return Ok(Started::AlreadyRunning);
     }
     Err(StartFailure(format!(
         "systemd-run could not start {unit}: {message}"

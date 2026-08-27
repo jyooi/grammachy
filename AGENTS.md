@@ -40,6 +40,26 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   Until they are loaded it answers HTTP 503, which is minutes for a 5 GB file.
   `openai/mod.rs` maps that one status to `engine_unavailable`.
   `start_and_retry` then waits it out rather than failing the first Check of a session.
+- llama-server ignores the `model` field of the request, so the weights it already holds answer every Check.
+  `cli/src/engines/openai/served.rs` is the whole guard against that (HUF-236): the adapter reads `GET /v1/models` and then `GET /props` once, before its first Check, and `served::matches` compares what the server named with `openaiModel` on the prefix rule `unit::model_file` uses.
+  A named mismatch stops the unit through the `Stopper` value and lets the start path load the right weights.
+  The stop runs only when `unit::served_address` says the unit serves the base URL, because that URL may name an Ollama or an LM Studio on another port and no disagreement about weights may take down a server the run was not asked about.
+  Every port the guard cannot reload is one `bad_arguments` naming both models, and `Unreloadable` gives each its own remedy: the start is forbidden, the unit does not serve the address, the stop did not run, the port still holds the wrong weights, or this adapter started that unit itself.
+  A hand-run server, an Ollama, and an LM Studio all end on the address rule, because the unit holds no address for their port.
+  A transient unit is collected the moment it ends, so one that ends between the address question and the stop is no longer loaded and the stop fails on it.
+  A server that names no model is checked as before, because `openaiBaseUrl` accepts any OpenAI-compatible server.
+  `served::from_models` reads the whole `data` list and prefers an entry that matches, and `Openai::probe` prefers a route that matches, because Ollama and LM Studio list every model and `llama-server --alias` renames what `/v1/models` reports while `/props` stays truthful.
+  `served::file_name` cuts the directory off every value that leaves the adapter, because a llama.cpp `--model` path holds a home directory and one bench run is a committed file.
+  Only a named answer settles the question: a silent port and a port that answers HTTP 503 while it reads its weights both leave it open.
+  So `Openai::confirm_started` asks again after the start path has a server up, and `local::Started` decides what a mismatch earns there: a unit this adapter built is refused, and one an earlier session left is reloaded and the Check re-run, which is the HUF-236 recovery.
+  That second question takes no short cut on a settled answer, because reaching it means the server left the port and something brought it back, which is the one event a settled answer cannot survive.
+  A row whose server holds the port for its whole life never reaches it, so the guard still costs one probe there.
+  `Openai::confirm` answers from the record after the first probe, and only a reload drops that record.
+  One adapter is built per bench row and per `check` run, so a 365-item row pays a small constant number of probes.
+  `Engine::served_model` carries it to `Measurement::served`, which is the "Weights served for" line under both bench tables.
+  Every stub of `cli/tests/bench.rs` and `cli/tests/openai_stub.rs` therefore has to route on the request line: a probe is not a Check and must not reach the counters.
+  The guard also gave `cli/tests/openai_live.rs` a way onto the real unit, because a reload runs `systemctl`, so every case there but the `#[ignore]` cold start sets `GRAMMACHY_LLAMA_START=never` and `GRAMMACHY_LLAMA_STOP=never`.
+  `Openai::with_starter` holds no working stopper for the same reason; `with_server_control` is the only route that takes one.
 - The `openai` base URL host must be loopback, and `cli/src/engines/openai/endpoint.rs` is the only place that decides it.
   A remote host is `bad_arguments` and no request is made; that is a product guarantee, so keep it tested.
   Its prompt in `prompt.rs` is the wording HUF-181 measured, and the "shortest exact substring" rule is what makes the spans usable rather than whole-sentence rewrites.
@@ -70,6 +90,7 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   The three verbs agree on one pair of paths, the row's pinned file name and its `.part`.
   So a hand-placed `.gguf` is never listed and never deleted.
   The licence of a row comes from `bench::weights::of`, the one product rule of spec section 13.1.
+  `remove` stops the unit only for the file the setting resolves to, and `model::stop_found_nothing_to_stop` is what lets a unit that was not running through: a transient unit is collected when it stops, so `systemctl` exits 5 on it, and that is the outcome the Remove wanted.
   `cancel.rs` is the whole cancel.
   The SIGTERM handler only sets a flag, and `curl` polls it so the child dies and the `.part` file stays.
   Seams are `GRAMMACHY_MODELS_DIR`, `GRAMMACHY_MODEL_BASE_URL`, `GRAMMACHY_MODEL_SHA256`, `GRAMMACHY_MODEL_SIZE_BYTES`, `GRAMMACHY_LLAMA_STOP`, plus the `Downloader` and `Stopper` values.

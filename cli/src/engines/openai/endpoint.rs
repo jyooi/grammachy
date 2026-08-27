@@ -21,6 +21,11 @@ pub struct Endpoint {
     pub port: u16,
     /// The full chat completion URL the adapter posts to.
     pub chat_url: String,
+    /// The OpenAI model list of this server, which names the weights it holds.
+    pub models_url: String,
+    /// The llama.cpp `/props` endpoint, the second way to ask the same
+    /// question. It sits at the root of the server and not under `/v1`.
+    pub props_url: String,
 }
 
 impl Endpoint {
@@ -80,7 +85,9 @@ pub fn parse(base_url: &str) -> Result<Endpoint, String> {
     Ok(Endpoint {
         host,
         port,
-        chat_url: chat_url(&scheme, authority, path),
+        chat_url: api_url(&scheme, authority, path, "/chat/completions"),
+        models_url: api_url(&scheme, authority, path, "/models"),
+        props_url: props_url(&scheme, authority, path),
     })
 }
 
@@ -113,20 +120,33 @@ fn parse_port(digits: &str) -> Result<u16, String> {
         .map_err(|_| format!("The OpenAI base URL has no usable port: {digits}"))
 }
 
-/// Where the chat completions live under one base URL.
+/// Where one OpenAI route lives under one base URL.
 ///
 /// A base URL that already ends in `/v1` only needs the rest of the path, which
 /// is what a user pastes from another tool's documentation. Anything else gets
 /// the whole OpenAI path.
-fn chat_url(scheme: &str, authority: &str, path: &str) -> String {
-    let path = path.split(['?', '#']).next().unwrap_or("");
-    let base = path.trim_end_matches('/');
-    let suffix = if base.ends_with("/v1") {
-        "/chat/completions"
-    } else {
-        "/v1/chat/completions"
-    };
-    format!("{scheme}://{authority}{base}{suffix}")
+fn api_url(scheme: &str, authority: &str, path: &str, suffix: &str) -> String {
+    let base = trimmed_path(path);
+    let version = if base.ends_with("/v1") { "" } else { "/v1" };
+    format!("{scheme}://{authority}{base}{version}{suffix}")
+}
+
+/// Where the llama.cpp `/props` endpoint lives under one base URL.
+///
+/// That route is a llama.cpp extension rather than an OpenAI one, so it sits at
+/// the root of the server. A base URL that names `/v1` therefore loses it here.
+fn props_url(scheme: &str, authority: &str, path: &str) -> String {
+    let base = trimmed_path(path);
+    let root = base.strip_suffix("/v1").unwrap_or(base);
+    format!("{scheme}://{authority}{root}/props")
+}
+
+/// The path of one base URL, without its query, fragment, or trailing slash.
+fn trimmed_path(path: &str) -> &str {
+    path.split(['?', '#'])
+        .next()
+        .unwrap_or("")
+        .trim_end_matches('/')
 }
 
 #[cfg(test)]
@@ -211,6 +231,25 @@ mod tests {
             parse("http://localhost:9000/llm").unwrap().chat_url,
             "http://localhost:9000/llm/v1/chat/completions"
         );
+    }
+
+    /// The served-model guard of HUF-236 asks these two routes, so both have to
+    /// land where llama-server actually serves them: the model list under the
+    /// OpenAI version prefix, and `/props` at the root beside it.
+    #[test]
+    fn the_served_model_routes_sit_beside_the_chat_completions() {
+        let plain = parse("http://127.0.0.1:8080").expect("the base URL parses");
+        assert_eq!(plain.models_url, "http://127.0.0.1:8080/v1/models");
+        assert_eq!(plain.props_url, "http://127.0.0.1:8080/props");
+
+        let versioned = parse("http://127.0.0.1:8080/v1/").expect("the base URL parses");
+        assert_eq!(versioned.models_url, "http://127.0.0.1:8080/v1/models");
+        assert_eq!(versioned.props_url, "http://127.0.0.1:8080/props");
+
+        // A proxy that mounts the API under a prefix keeps that prefix on both.
+        let mounted = parse("http://localhost:9000/llm").expect("the base URL parses");
+        assert_eq!(mounted.models_url, "http://localhost:9000/llm/v1/models");
+        assert_eq!(mounted.props_url, "http://localhost:9000/llm/props");
     }
 
     #[test]

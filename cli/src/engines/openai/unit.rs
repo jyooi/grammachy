@@ -42,8 +42,9 @@
 //! section 5.3). Nothing here downloads anything.
 
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
-use crate::engines::local::{self, ServerCommand, StartFailure};
+use crate::engines::local::{self, ServerCommand, StartFailure, Started};
 
 /// The transient unit name from spec section 4.
 pub const UNIT_NAME: &str = "grammachy-llama";
@@ -154,8 +155,11 @@ pub fn server_command(model_path: &Path, host: &str, port: u16) -> ServerCommand
     }
 }
 
-/// Start the transient unit, or answer `Ok(())` when it already runs.
-pub fn start(model: &str, host: &str, port: u16) -> Result<(), StartFailure> {
+/// Start the transient unit, and say whether this call created it.
+///
+/// A unit an earlier session left holds the weights that session asked for, so
+/// the caller has to know which of the two it got (HUF-236).
+pub fn start(model: &str, host: &str, port: u16) -> Result<Started, StartFailure> {
     if !Path::new(PACKAGE_SERVER).is_file() {
         return Err(StartFailure(format!(
             "llama.cpp is not installed: {PACKAGE_SERVER} does not exist. Install it with: {INSTALL_LINE}"
@@ -170,9 +174,71 @@ pub fn start(model: &str, host: &str, port: u16) -> Result<(), StartFailure> {
     local::start_unit(UNIT_NAME, "Grammachy llama.cpp server", &command)
 }
 
+/// The address the `grammachy-llama` unit serves, when systemd holds one.
+///
+/// [`start`] writes the host and the port into the unit command, so the unit
+/// is its own record of where it listens. The guard reads it before it stops
+/// anything, because `openaiBaseUrl` may name an Ollama or an LM Studio on
+/// another port, and no disagreement about weights may take down a server that
+/// is not part of it. A unit systemd does not hold answers `None`, and so does
+/// a command that names no port.
+pub fn served_address() -> Option<String> {
+    let output = Command::new("systemctl")
+        .args([
+            "--user",
+            "show",
+            UNIT_NAME,
+            "--property=ExecStart",
+            "--value",
+        ])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    address_of(&String::from_utf8_lossy(&output.stdout))
+}
+
+/// The `host:port` one `ExecStart` property names.
+///
+/// systemd prints the whole command inside one line, so the two flags
+/// [`server_command`] wrote are read back out of it by name.
+fn address_of(exec_start: &str) -> Option<String> {
+    let words: Vec<&str> = exec_start.split_whitespace().collect();
+    let after = |flag: &str| {
+        words
+            .iter()
+            .position(|word| *word == flag)
+            .and_then(|at| words.get(at + 1))
+            .copied()
+    };
+    Some(format!("{}:{}", after("--host")?, after("--port")?))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The guard stops the unit only for the address it serves, and this is
+    /// where that address comes from. The line is the shape `systemctl show`
+    /// prints for the command `server_command` builds.
+    #[test]
+    fn the_unit_command_says_which_address_it_serves() {
+        let command = server_command(Path::new("/models/gemma.gguf"), "127.0.0.1", 8080);
+        let exec_start = format!(
+            "{{ path={} ; argv[]={} {} ; ignore_errors=no }}",
+            command.program,
+            command.program,
+            command.arguments.join(" ")
+        );
+
+        assert_eq!(address_of(&exec_start).as_deref(), Some("127.0.0.1:8080"));
+        assert_eq!(address_of("").as_deref(), None);
+        assert_eq!(
+            address_of("{ path=/usr/bin/llama-server }").as_deref(),
+            None
+        );
+    }
 
     #[test]
     fn the_command_names_the_model_and_stays_on_the_loopback_interface() {

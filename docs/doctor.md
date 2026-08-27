@@ -16,6 +16,9 @@ Doctor names that command only for a catalogue name.
 The `openaiModel` field takes any name, and a name the catalogue does not carry has no download.
 For such a name the detail says to place the `.gguf` file by hand, or to pick a catalogue model.
 
+A Check on the `openai` engine reads the model the server serves before it sends anything, and a server that holds other weights than `openaiModel` names is reloaded or refused with `bad_arguments` (HUF-236).
+Doctor reports the install state and never that comparison, because the answer belongs to one Check and to one base URL.
+
 The weights the `model` check names are the `openaiModel` setting, whose default is the recommended local model.
 That name comes from the benchmark tables by the rules of `docs/spec/evals.md` section 5, which `cli/src/bench/weights.rs` holds.
 The recommended local model is Apache-2.0 or MIT, its weights file is at or under 4 GB, its measured resident memory fits the 8 GB tier, and it ran with thinking on.
