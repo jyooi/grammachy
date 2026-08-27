@@ -316,6 +316,11 @@ fn mode_of(path: &Path) -> u32 {
         & 0o777
 }
 
+fn inode_of(path: &Path) -> u64 {
+    use std::os::unix::fs::MetadataExt;
+    std::fs::metadata(path).expect("the path exists").ino()
+}
+
 #[test]
 fn the_key_lands_in_a_private_file_inside_a_private_directory() {
     let home = Home::new("key-write");
@@ -377,6 +382,55 @@ fn a_rewrite_tightens_a_loose_key_file() {
 
     setup.write_key("sk-or-v1-second");
 
+    assert_eq!(mode_of(&home.key), 0o600);
+}
+
+/// The new key never lands in the loose inode: a descriptor opened before the
+/// write keeps the access it was opened with, so a rewrite makes a fresh file
+/// and renames it over the old one.
+#[test]
+fn a_rewrite_never_puts_the_key_in_the_loose_file() {
+    use std::io::Read;
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    let home = Home::new("key-loose-inode");
+    let setup = home.setup();
+    setup.write_key("sk-or-v1-first");
+    std::fs::set_permissions(&home.key, std::fs::Permissions::from_mode(0o644))
+        .expect("the mode is loosened by hand");
+    let loose = std::fs::File::open(&home.key).expect("another reader holds the loose file open");
+    let loose_inode = loose.metadata().expect("the open file has metadata").ino();
+
+    setup.write_key("sk-or-v1-second");
+
+    let mut held = String::new();
+    (&loose)
+        .read_to_string(&mut held)
+        .expect("the held descriptor still reads");
+    assert!(!held.contains("sk-or-v1-second"), "{held:?}");
+    assert_ne!(inode_of(&home.key), loose_inode);
+    assert_eq!(mode_of(&home.key), 0o600);
+    assert_eq!(
+        std::fs::read_to_string(&home.key).expect("the key file is readable"),
+        "sk-or-v1-second\n"
+    );
+}
+
+/// Repairing the mode of an unchanged key is a change: the run tightened a
+/// file another user could read, so the envelope must not say nothing happened.
+#[test]
+fn tightening_a_loose_key_file_reports_a_change() {
+    use std::os::unix::fs::PermissionsExt;
+    let home = Home::new("key-loose-state");
+    let setup = home.setup();
+    setup.write_key("sk-or-v1-same");
+    std::fs::set_permissions(&home.key, std::fs::Permissions::from_mode(0o644))
+        .expect("the mode is loosened by hand");
+
+    let repair = setup.write_key("sk-or-v1-same");
+    let again = setup.write_key("sk-or-v1-same");
+
+    assert_eq!(step(&repair, "key").state, State::Changed);
+    assert_eq!(step(&again, "key").state, State::Unchanged);
     assert_eq!(mode_of(&home.key), 0o600);
 }
 

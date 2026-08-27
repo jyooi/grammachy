@@ -61,8 +61,8 @@ pub enum KeyState {
     Loose { path: PathBuf, mode: u32 },
     /// The file exists and holds no key.
     Empty(PathBuf),
-    /// A key is stored, mode 0600.
-    Ready(PathBuf),
+    /// A key is stored, and no group or other user can read it.
+    Ready { path: PathBuf, mode: u32 },
 }
 
 impl KeyState {
@@ -73,7 +73,7 @@ impl KeyState {
             KeyState::Missing(path)
             | KeyState::Loose { path, .. }
             | KeyState::Empty(path)
-            | KeyState::Ready(path) => Some(path),
+            | KeyState::Ready { path, .. } => Some(path),
         }
     }
 }
@@ -93,7 +93,7 @@ fn key_state(path: Option<PathBuf>) -> KeyState {
         return KeyState::Loose { path, mode };
     }
     match std::fs::read_to_string(&path) {
-        Ok(text) if !text.trim().is_empty() => KeyState::Ready(path),
+        Ok(text) if !text.trim().is_empty() => KeyState::Ready { path, mode },
         _ => KeyState::Empty(path),
     }
 }

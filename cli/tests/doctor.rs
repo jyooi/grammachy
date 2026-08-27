@@ -28,7 +28,10 @@ fn ready() -> Facts {
             "/home/u/.local/share/grammachy/models/gemma-4-e4b-it-Q4_K_M.gguf",
         )),
         openai_endpoint: Ok("127.0.0.1:8080".to_string()),
-        openrouter_key: KeyState::Ready(key_path()),
+        openrouter_key: KeyState::Ready {
+            path: key_path(),
+            mode: 0o600,
+        },
         openrouter_model: "deepseek/deepseek-v4-flash".to_string(),
         languagetool_unit: UnitState::Stopped,
         llama_unit: UnitState::Stopped,
@@ -709,6 +712,29 @@ fn an_empty_key_file_is_not_a_key() {
     );
 }
 
+/// The report never states a mode it did not read: 0400 and 0700 are private
+/// too, so the passing line names what the file actually is.
+#[test]
+fn the_key_check_names_the_mode_it_read() {
+    for mode in [0o600, 0o400, 0o700] {
+        let mut facts = ready();
+        facts.openrouter_key = KeyState::Ready {
+            path: key_path(),
+            mode,
+        };
+
+        let report = Report::new(&facts, EngineSlug::Openrouter);
+        let key = report
+            .checks
+            .iter()
+            .find(|check| check.id == "key")
+            .expect("the report carries the key check");
+
+        assert!(key.ok, "{key:?}");
+        assert!(key.detail.contains(&format!("0{mode:o}")), "{key:?}");
+    }
+}
+
 /// A key another user can read is a key this machine no longer keeps.
 #[test]
 fn a_loose_key_file_fails_the_check_and_asks_for_chmod() {
@@ -735,7 +761,10 @@ fn a_loose_key_file_fails_the_check_and_asks_for_chmod() {
 #[test]
 fn no_report_line_can_carry_the_key_itself() {
     for state in [
-        KeyState::Ready(key_path()),
+        KeyState::Ready {
+            path: key_path(),
+            mode: 0o600,
+        },
         KeyState::Missing(key_path()),
         KeyState::Empty(key_path()),
         KeyState::Loose {

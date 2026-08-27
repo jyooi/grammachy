@@ -405,11 +405,11 @@ fn endpoint_check(facts: &Facts) -> Check {
 fn key_check(facts: &Facts) -> Check {
     let write = crate::setup::key::WRITE_COMMAND.to_string();
     match &facts.openrouter_key {
-        KeyState::Ready(path) => Check {
+        KeyState::Ready { path, mode } => Check {
             id: "key",
             name: "OpenRouter key",
             ok: true,
-            detail: format!("{} is stored, mode 0600.", path.display()),
+            detail: format!("{} is stored, mode 0{mode:o}.", path.display()),
             remedy: None,
             engines: vec!["openrouter"],
         },

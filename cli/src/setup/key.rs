@@ -5,11 +5,14 @@
 //! reaches QML, so nothing that draws a card can read it, and no argument list
 //! carries it where `ps` would show it.
 //!
-//! The directory is 0700 and the file is 0600, set on every run rather than
-//! only at creation, because a file that is already there keeps the mode it
-//! was made with. The adapter in [`crate::engines::openrouter`] reads the same
-//! path, and both sides take the same test seam, so no test writes the real
-//! key.
+//! The directory is 0700 and the file is 0600. A write never reuses the inode
+//! that is already there, because a file loosened by hand would hold the new
+//! key at its old mode for as long as the write takes, and a descriptor opened
+//! before a `chmod` keeps the access it was opened with. Every write therefore
+//! makes a private file beside the target and renames it over, which is atomic
+//! and leaves no readable window at all. The adapter in
+//! [`crate::engines::openrouter`] reads the same path, and both sides take the
+//! same test seam, so no test writes the real key.
 
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
@@ -46,13 +49,29 @@ pub fn parse(stdin: &str) -> Result<String, String> {
     Ok(key.to_string())
 }
 
+/// Where a write stages the key before it renames it over the target.
+fn staging_of(path: &Path) -> PathBuf {
+    let mut name = path.file_name().unwrap_or_default().to_os_string();
+    name.push(".new");
+    path.with_file_name(name)
+}
+
+/// The mode of a path right now, or `None` when nothing is there.
+fn mode_of(path: &Path) -> Option<u32> {
+    std::fs::metadata(path)
+        .ok()
+        .map(|metadata| metadata.permissions().mode() & 0o777)
+}
+
 /// Write the key, making the directory when it is not there.
 ///
 /// Answers whether the file changed, so a second run of the same key reports
-/// `unchanged` the way every other setup step does.
+/// `unchanged` the way every other setup step does. A repaired mode is a
+/// change too: the run tightened a key another user could read.
 pub fn write(path: &Path, key: &str) -> Result<bool, String> {
     let contents = format!("{key}\n");
     let before = std::fs::read_to_string(path).ok();
+    let before_mode = mode_of(path);
 
     if let Some(directory) = path.parent() {
         std::fs::create_dir_all(directory)
@@ -63,24 +82,44 @@ pub fn write(path: &Path, key: &str) -> Result<bool, String> {
             })?;
     }
 
-    // The mode is given at creation and set again after it, because an
-    // existing file keeps the mode it was made with.
-    {
-        use std::io::Write;
-        let mut file = std::fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .mode(FILE_MODE)
-            .open(path)
-            .map_err(|error| format!("{} could not be written: {error}", path.display()))?;
-        file.write_all(contents.as_bytes())
-            .map_err(|error| format!("{} could not be written: {error}", path.display()))?;
+    let staging = staging_of(path);
+    stage(&staging, contents.as_bytes()).inspect_err(|_| {
+        let _ = std::fs::remove_file(&staging);
+    })?;
+    std::fs::rename(&staging, path).map_err(|error| {
+        let _ = std::fs::remove_file(&staging);
+        format!("{} could not be written: {error}", path.display())
+    })?;
+
+    Ok(before.as_deref() != Some(contents.as_str()) || before_mode != Some(FILE_MODE))
+}
+
+/// Make a fresh private file at `path` and put `contents` in it.
+///
+/// The path is unlinked first and then created new, so the bytes never reach
+/// an inode that was already there and no open descriptor survives the write.
+/// `umask` can only clear bits of the creation mode, so the mode is set again
+/// afterwards to make it exactly [`FILE_MODE`].
+fn stage(path: &Path, contents: &[u8]) -> Result<(), String> {
+    use std::io::Write;
+
+    match std::fs::remove_file(path) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(format!("{} could not be written: {error}", path.display())),
     }
+
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(FILE_MODE)
+        .open(path)
+        .map_err(|error| format!("{} could not be written: {error}", path.display()))?;
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(FILE_MODE))
         .map_err(|error| format!("{} could not be made private: {error}", path.display()))?;
-
-    Ok(before.as_deref() != Some(contents.as_str()))
+    file.write_all(contents)
+        .map_err(|error| format!("{} could not be written: {error}", path.display()))?;
+    Ok(())
 }
 
 /// Delete the key file. A file that is not there is not a failure.
