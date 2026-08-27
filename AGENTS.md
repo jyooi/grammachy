@@ -141,6 +141,17 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   Every metric of that spec has a unit test in `metrics.rs` that runs from recorded answers, so no test needs a live model.
   `cli/tests/bench.rs` must seam every server the run can reach, LanguageTool and the OpenAI base URL both.
   The OpenAI default is a fixed loopback port, so a machine that already runs llama.cpp there answers a case meant to find nothing.
+  `--eval-set` runs the 365-item eval set of `docs/spec/evals.md` section 2 beside the fixture tables, and only the eval set names a recommendation.
+  ADR 0003 is the hard rule: the CLC FCE corpus is fetched at run time into the gitignored `cli/.eval-cache/`, and no part of it is committed.
+  `cli/src/bench/evalset/` owns that route, one file per step.
+  `cache.rs` fetches the sha256-pinned tarball and prints the licence notice on the first fill.
+  `corpus.rs` pairs each M2 sentence with the essay that carries the writer's language.
+  `convert.rs` joins the tokens back into a sentence and places the edit in UTF-16 offsets.
+  `draw.rs` draws with a fixed seed, and `sidecar.rs` is the committed text-free selection.
+  A cache the machine cannot fill is a skipped table with a reason, never an error.
+  Redraw `cli/tests/fixtures/eval-set.sidecar.json` with `cargo test --test evalset_sidecar -- --ignored`, which needs a filled cache.
+  `docs/dev.md` section 16 has the steps.
+  No test may fetch the corpus: the seams are `GRAMMACHY_EVAL_CACHE`, `GRAMMACHY_EVAL_FETCH=never`, `GRAMMACHY_EVAL_BASE_URL`, and `GRAMMACHY_EVAL_SHA256`.
 - The judge of `docs/spec/evals.md` section 4.4 is two halves that must agree on one rule.
   `cli/bench/judge.py` grades a recorded run, and `cli/src/bench/judge.rs` reads the answer into the Useful fix column.
   Both select nearly the same sample: a valid Check on an item with edits, where an Issue touches an expected span.
@@ -152,9 +163,10 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   Both files nest the key, item id then result text, which needs no delimiter and folds two models that answered alike onto one judgement.
   `cli/tests/fixtures/judge-labels.json` holds the 17 committed hand labels of HUF-210 and is compiled in.
   Every label must name a fixture item, because a label on a fetched eval-set item would commit FCE text against section 2.1.
-  The gate is 80% agreement on the labels a run matched, over at least `judge::MINIMUM_LABELLED` of them.
+  The gate is 80% agreement on the labels one set matched, over at least `judge::MINIMUM_LABELLED` of them.
   Below the gate, under that sample, or with no label matched, the column still prints and the file says it does not rank.
   `Report::rank_score` is the one place the ranking swaps to exact fix plus useful non-exact fixes.
+  One `Assessment` is built per set, in `bench::assessment`, because the Useful fix cell sits beside cells measured over that set alone.
   `Report::judge_covers_measured_rows` is the second condition of that swap, and the score, the ranking sentence, and the regression rule all read it.
   It needs one measured row with a judged hit, so a table of skipped rows never claims a measure that ranked nothing.
   One measured row the file covers no hit of drops the swap for the whole table, and the report names that row.

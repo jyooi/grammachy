@@ -884,13 +884,13 @@ fn thinking_both_prints_two_rows_for_one_local_model() {
     assert_eq!(wall.len(), 2, "one wall time per row: {}", run.stdout);
     assert!(
         wall[0].starts_with("Wall time of `qwen2.5-7b-instruct` with thinking on: ")
-            && wall[0].ends_with(" s for the whole fixture."),
+            && wall[0].ends_with(" s for the whole set."),
         "the first row of a model claims no server start: {wall:?}"
     );
     assert!(
         wall[1].starts_with("Wall time of `qwen2.5-7b-instruct` with thinking off: ")
             && wall[1].ends_with(
-                " s for the whole fixture, on the server the earlier row of this model ran on."
+                " s for the whole set, on the server the earlier row of this model ran on."
             ),
         "the second row of a model names the server it shared: {wall:?}"
     );
@@ -1241,7 +1241,7 @@ fn a_cloud_answer_without_a_cost_ends_every_cloud_row() {
     for model in ["deepseek/deepseek-v4-flash-0731", "google/gemini-3.7-flash"] {
         assert!(
             run.stdout.contains(&format!(
-                "- Model `{model}`: the answer for fixture sentence zh-01 {unpriced}"
+                "- Model `{model}`: the answer for item zh-01 {unpriced}"
             )),
             "{}",
             run.stdout
@@ -1791,7 +1791,7 @@ fn a_run_under_the_labelled_sample_prints_the_column_but_never_ranks() {
     );
     assert!(
         run.stdout.contains(
-            "This run matched 1 hand label, under the 5 the 80% gate needs, so the judge is unproven here.\nThe Useful fix column does not count in the ranking, because this run matched under the 5 hand labels the gate needs.\n"
+            "This set matched 1 hand label, under the 5 the 80% gate needs, so the judge is unproven here.\nThe Useful fix column does not count in the ranking, because this set matched under the 5 hand labels the gate needs.\n"
         ),
         "{}",
         run.stdout
@@ -1846,7 +1846,7 @@ fn a_run_no_hand_label_covers_prints_the_column_but_excludes_it_from_the_ranking
     assert!(quality.contains("| 1 of 1 (100.0%) |"), "{quality}");
     assert!(
         run.stdout.contains(
-            "so the 80% gate could not be measured.\nThe Useful fix column does not count in the ranking, because no hand label covers a hit of this run.\n"
+            "so the 80% gate could not be measured.\nThe Useful fix column does not count in the ranking, because no hand label covers a hit of this set.\n"
         ),
         "{}",
         run.stdout

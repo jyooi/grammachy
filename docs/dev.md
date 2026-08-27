@@ -664,6 +664,35 @@ cargo clippy --all-targets -- -D warnings
 cargo test
 ```
 
+No case reaches the network, and `cargo test` needs no corpus.
+The one case that reads the eval-set corpus skips itself when the cache is empty.
+
+### The eval set
+
+`grammachy bench --eval-set` ranks models on 365 items, spec `docs/spec/evals.md` section 2.
+It fetches the CLC FCE corpus into `cli/.eval-cache/`, which git ignores.
+ADR 0003 is the licence stance, so no part of that corpus may be committed.
+
+The first run fills the cache and prints the licence path on stderr.
+A machine that cannot fill it prints the eval tables as skipped with a reason.
+To fill the cache by hand, run the command once:
+
+```bash
+grammachy bench --eval-set > /dev/null
+```
+
+The committed selection is `cli/tests/fixtures/eval-set.sidecar.json`.
+It holds ids, essay and sentence index, offsets, and error codes only.
+Redraw it from a filled cache with:
+
+```bash
+cargo test --test evalset_sidecar -- --ignored --nocapture
+```
+
+The draw is seeded, so the same release redraws the same 325 items.
+The run adds the 40 fixture items to them, which the sidecar never holds.
+A different answer means the conversion rules changed.
+
 ## 17. Removing it
 
 Remove the hotkeys, the menu entry, and the OpenRouter key first (spec section 10):

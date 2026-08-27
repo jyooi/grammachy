@@ -15,9 +15,10 @@
 //!   writer gets after Accept. Nesting the two keys is what keeps a result text
 //!   that holds any delimiter readable, and it is what folds the identical
 //!   answers of two models onto one judgement.
-//! - The **gate** is spec section 4.4: the judge is proven on a run only when
-//!   it agrees with the committed hand labels on at least 80% of the labelled
-//!   items of that run, over a sample of at least [`MINIMUM_LABELLED`] of them.
+//! - The **gate** is spec section 4.4: the judge is proven on a set of items
+//!   only when it agrees with the committed hand labels on at least 80% of the
+//!   labelled items of that set, over a sample of at least
+//!   [`MINIMUM_LABELLED`] of them.
 //!   Below the gate, under that sample, or with no label matched, the column
 //!   still prints and the file says the judge is unproven.
 //!
@@ -141,26 +142,26 @@ impl RowTally {
     }
 }
 
-/// What one judgements file says about one run.
+/// What one judgements file says about one set of items.
 #[derive(Debug, Clone, Default)]
 pub struct Assessment {
     /// The Useful fix count of every row that produced a non-exact hit.
     rows: BTreeMap<RowKey, RowTally>,
-    /// Folded non-exact hits of the run that a hand label also covers.
+    /// Folded non-exact hits of the set that a hand label also covers.
     pub labelled: usize,
     /// Labelled hits where the judge and the hand label say the same thing.
     pub agreed: usize,
-    /// Folded non-exact hits of the run, and how many the file graded.
+    /// Folded non-exact hits of the set, and how many the file graded.
     pub hits: usize,
     pub judged: usize,
 }
 
 impl Assessment {
-    /// Grade one run: the hits it produced against the judgements it was given.
+    /// Grade one set: the hits it produced against the judgements it was given.
     ///
     /// The row counts are per row, because the column is a row column. The
-    /// agreement is over the folded hits of the whole run, because the gate is
-    /// a fact about the judge on this run rather than about one model.
+    /// agreement is over the folded hits of the whole set, because the gate is
+    /// a fact about the judge on those items rather than about one model.
     pub fn of(hits: &[Hit], judgements: &Judgements, labels: &Judgements) -> Assessment {
         let mut assessment = Assessment::default();
         let mut folded: BTreeMap<(&str, &str), ()> = BTreeMap::new();
@@ -233,12 +234,12 @@ impl Assessment {
     pub fn lines(&self) -> String {
         let mut out = String::new();
         out.push_str(&format!(
-            "Useful fix: {} of the {} folded non-exact hits of this run carry a judgement in the judgements file.\n",
+            "Useful fix: {} of the {} folded non-exact hits of this set carry a judgement in the judgements file.\n",
             self.judged, self.hits
         ));
         match self.agreement_percent() {
             Some(_) if self.labelled < MINIMUM_LABELLED => out.push_str(&format!(
-                "This run matched {}, under the {MINIMUM_LABELLED} the {AGREEMENT_GATE:.0}% gate needs, so the judge is unproven here.\n",
+                "This set matched {}, under the {MINIMUM_LABELLED} the {AGREEMENT_GATE:.0}% gate needs, so the judge is unproven here.\n",
                 match self.labelled {
                     1 => "1 hand label".to_string(),
                     labelled => format!("{labelled} hand labels"),
@@ -253,7 +254,7 @@ impl Assessment {
                 self.agreed, self.labelled
             )),
             None => out.push_str(&format!(
-                "No hand label of `cli/tests/fixtures/judge-labels.json` covers a hit of this run, so the {AGREEMENT_GATE:.0}% gate could not be measured.\n",
+                "No hand label of `cli/tests/fixtures/judge-labels.json` covers a hit of this set, so the {AGREEMENT_GATE:.0}% gate could not be measured.\n",
             )),
         }
         out
@@ -433,7 +434,7 @@ mod tests {
         assert!(!assessment.ranks(), "four labels is under the sample");
         assert!(
             assessment.lines().contains(
-                "This run matched 4 hand labels, under the 5 the 80% gate needs, so the judge is unproven here.\n"
+                "This set matched 4 hand labels, under the 5 the 80% gate needs, so the judge is unproven here.\n"
             ),
             "{}",
             assessment.lines()
@@ -447,7 +448,7 @@ mod tests {
     }
 
     #[test]
-    fn a_run_no_hand_label_covers_reports_no_agreement_and_never_ranks() {
+    fn a_set_no_hand_label_covers_reports_no_agreement_and_never_ranks() {
         let hits = [hit("openai", "gemma", "zh-03", "an answer")];
         let judgements = file(&[("zh-03", "an answer", true)]);
 
