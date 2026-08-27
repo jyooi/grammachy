@@ -16,7 +16,17 @@
 //! - A zero-width missing-word edit is widened to the next word, because the
 //!   contract of spec section 5.1 has no zero-width span: an Issue quotes the
 //!   text it replaces.
+//! - A word added after the last token of a sentence that ends in a stop is
+//!   not kept. The corrected sentence would read as a fragment behind its own
+//!   full stop, so no engine could write it and the item would measure
+//!   nothing.
 //! - The ERRANT code becomes the item's `type`.
+//!
+//! The Corrected text is the same walk over the corrected token stream, never
+//! a second rule that splices strings together. The edit is then the one span
+//! that turns the sentence into that Corrected text, which is how the span,
+//! the fix, and `expected_text` can never disagree. A correction no single
+//! span can write is a block this module does not keep.
 //!
 //! FCE has no astral characters, so a character offset is a UTF-16 offset.
 //! Nothing here trusts that: the walk counts UTF-16 code units.
@@ -103,17 +113,29 @@ pub fn item(block: &Block) -> Option<Item> {
 
     let count = block.tokens.len();
     match block.edits.len() {
-        0 if CONTROL_TOKENS.contains(&count) => Some(build(block, None)),
+        0 if CONTROL_TOKENS.contains(&count) => Some(control(block)),
         1 if ERROR_TOKENS.contains(&count) && is_measurable(&block.edits[0].code) => {
             build_error(block, &block.edits[0])
         }
         _ => None,
-    }?
-    .into()
+    }
+}
+
+/// The item of an error-free block, which expects itself.
+fn control(block: &Block) -> Item {
+    let text = detokenise(&block.tokens).0;
+    Item {
+        document: block.document,
+        sentence: block.sentence,
+        native: block.native.clone(),
+        expected_text: text.clone(),
+        text,
+        edits: Vec::new(),
+    }
 }
 
 /// The item of a block whose one edit was kept, or `None` when the edit does
-/// not point into the block.
+/// not point into the block or does not read as one mistake.
 fn build_error(block: &Block, edit: &Edit) -> Option<Item> {
     if edit.end > block.tokens.len() || edit.start > edit.end {
         return None;
@@ -121,80 +143,75 @@ fn build_error(block: &Block, edit: &Edit) -> Option<Item> {
     if edit.is_insertion() && block.tokens.is_empty() {
         return None;
     }
+    if edit.is_insertion() && edit.start == block.tokens.len() && ends_the_sentence(&block.tokens) {
+        // A word added behind the full stop reads as a fragment rather than
+        // as a sentence, so no engine could write the Corrected text.
+        return None;
+    }
     if !edit.is_insertion() && edit.correction.trim().is_empty() && edit.end - edit.start > 3 {
         // A long deletion leaves nothing to quote that reads as one mistake.
         return None;
     }
-    Some(build(block, Some(edit)))
+    build(block, edit)
+}
+
+/// Whether the last token of a block is the stop that ends its sentence.
+fn ends_the_sentence(tokens: &[String]) -> bool {
+    tokens
+        .last()
+        .is_some_and(|token| SENTENCE_END.contains(&token.as_str()))
 }
 
 /// Join the tokens back into a sentence and place the edit inside it.
-fn build(block: &Block, edit: Option<&Edit>) -> Item {
+///
+/// Both sentences come out of [`detokenise`], the tokens as the writer typed
+/// them and the tokens the annotator corrected, so the Corrected text is never
+/// spliced together from a second separator rule.
+fn build(block: &Block, edit: &Edit) -> Option<Item> {
     let (text, spans) = detokenise(&block.tokens);
-    let edits = edit
-        .map(|edit| vec![place(&text, &spans, &block.tokens, edit)])
-        .unwrap_or_default();
-    let expected_text = apply(&text, &edits);
+    let expected_text = detokenise(&corrected(&block.tokens, edit)).0;
+    let placed = place(&text, &spans, &block.tokens, edit, &expected_text)?;
 
-    Item {
+    Some(Item {
         document: block.document,
         sentence: block.sentence,
         native: block.native.clone(),
         text,
-        edits,
+        edits: vec![placed],
         expected_text,
-    }
+    })
 }
 
-/// The UTF-16 span of one edit and the replacement it carries.
+/// The token stream the annotator's correction leaves behind.
+fn corrected(tokens: &[String], edit: &Edit) -> Vec<String> {
+    let mut out = tokens[..edit.start].to_vec();
+    out.extend(edit.correction.split_whitespace().map(str::to_string));
+    out.extend_from_slice(&tokens[edit.end..]);
+    out
+}
+
+/// The UTF-16 span of one edit and the replacement it carries, or `None` when
+/// no single span writes the Corrected text.
 ///
-/// A missing word is a zero-width edit in M2. It is widened to the next word,
-/// or to the last word when it belongs after the end, so the span always
-/// quotes text the way spec section 5.1 requires.
-///
-/// M2 text is tokenised, the correction included, so every replacement is
-/// joined by [`join`], the rule that wrote the sentence. A widened insertion
-/// is joined onto the token in front of the span as well, or a next token that
-/// attaches to the word before it, such as `.` or `n't`, would take the
-/// correction inside that word.
-fn place(text: &str, spans: &[(usize, usize)], tokens: &[String], edit: &Edit) -> ItemEdit {
-    let correction: Vec<String> = edit
-        .correction
-        .split_whitespace()
-        .map(str::to_string)
-        .collect();
-
-    let (start, end, fix) = if !edit.is_insertion() {
-        (
-            spans[edit.start].0,
-            spans[edit.end - 1].1,
-            join(None, &correction).0,
-        )
-    } else if edit.start < tokens.len() {
-        let span = spans[edit.start];
-        let mut widened = correction;
-        widened.push(tokens[edit.start].clone());
-        (
-            span.0,
-            span.1,
-            join(attached_to(spans, tokens, edit.start), &widened).0,
-        )
-    } else {
-        let last = tokens.len() - 1;
-        let span = spans[last];
-        let mut widened = vec![tokens[last].clone()];
-        widened.extend(correction);
-        (span.0, span.1, join(None, &widened).0)
+/// The span quotes the words the edit is about: the words it replaces, or the
+/// word a missing word is widened onto, because the contract of spec section
+/// 5.1 has no zero-width span. [`fit`] then takes the separator on either side
+/// of those words when the correction moved it.
+fn place(
+    text: &str,
+    spans: &[(usize, usize)],
+    tokens: &[String],
+    edit: &Edit,
+    expected_text: &str,
+) -> Option<ItemEdit> {
+    let (start, end) = match (edit.is_insertion(), edit.start < tokens.len()) {
+        (false, _) => (spans[edit.start].0, spans[edit.end - 1].1),
+        (true, true) => spans[edit.start],
+        (true, false) => spans[tokens.len() - 1],
     };
+    let (start, end, fix) = fit(text, expected_text, start, end)?;
 
-    // A deletion takes the space in front of the word with it, the way a
-    // Fix that removes a word has to, or the Corrected text keeps a gap.
-    let start = match fix.is_empty() && start > 0 {
-        true if crate::text::utf16_slice(text, start - 1, start) == Some(" ") => start - 1,
-        _ => start,
-    };
-
-    ItemEdit {
+    Some(ItemEdit {
         start,
         end,
         text: crate::text::utf16_slice(text, start, end)
@@ -202,22 +219,63 @@ fn place(text: &str, spans: &[(usize, usize)], tokens: &[String], edit: &Edit) -
             .to_string(),
         fix,
         code: edit.code.clone(),
-    }
+    })
 }
 
-/// The text with every edit applied, the Corrected text a perfect engine gives.
-fn apply(text: &str, edits: &[ItemEdit]) -> String {
-    let mut out = text.to_string();
-    for edit in edits.iter().rev() {
-        let Some(start) = crate::text::byte_index_of_utf16(&out, edit.start) else {
+/// The span and replacement that turn `text` into `expected_text`, from a span
+/// that quotes the words the edit is about.
+///
+/// The correction may need a separator the sentence did not write, or leave
+/// one the sentence did: a possessive joins onto the word in front of it, and
+/// a deleted word takes the space in front of it with it. So the span may take
+/// one unit more on either side, and the first pair whose untouched text is
+/// the untouched text of the Corrected sentence is the answer. `None` says no
+/// one replacement writes this correction, which is a block that is not kept.
+///
+/// The pairs are tried tightest first, and the space in front of the words
+/// before the space behind them, which is the rule of spec `evals.md` section
+/// 2 for a deletion.
+fn fit(
+    text: &str,
+    expected_text: &str,
+    start: usize,
+    end: usize,
+) -> Option<(usize, usize, String)> {
+    let units = crate::text::utf16_len(text);
+    let expected_units = crate::text::utf16_len(expected_text);
+    let before = start.saturating_sub(1);
+
+    for (start, end) in [
+        (start, end),
+        (before, end),
+        (start, end + 1),
+        (before, end + 1),
+    ] {
+        if end > units || end < start {
+            continue;
+        }
+        let tail = units - end;
+        if expected_units < start + tail {
+            continue;
+        }
+        if crate::text::utf16_slice(text, 0, start)
+            != crate::text::utf16_slice(expected_text, 0, start)
+        {
+            continue;
+        }
+        if crate::text::utf16_slice(text, end, units)
+            != crate::text::utf16_slice(expected_text, expected_units - tail, expected_units)
+        {
+            continue;
+        }
+        let Some(fix) = crate::text::utf16_slice(expected_text, start, expected_units - tail)
+        else {
             continue;
         };
-        let Some(end) = crate::text::byte_index_of_utf16(&out, edit.end) else {
-            continue;
-        };
-        out.replace_range(start..end, &edit.fix);
+        return Some((start, end, fix.to_string()));
     }
-    out
+
+    None
 }
 
 /// Join tokens into a sentence and record each token's UTF-16 span in it.
@@ -225,16 +283,6 @@ fn apply(text: &str, edits: &[ItemEdit]) -> String {
 /// The separator is decided per token, so the spans are exact by construction
 /// rather than by a second pass that could disagree with the join.
 pub fn detokenise(tokens: &[String]) -> (String, Vec<(usize, usize)>) {
-    join(None, tokens)
-}
-
-/// Join tokens onto what comes before them, recording each token's span.
-///
-/// `previous` is the token the first of these follows, or `None` at the start
-/// of a sentence. It is the one separator rule of this module: [`detokenise`]
-/// writes a whole sentence with it and [`place`] writes one replacement with
-/// it, so a fix reads exactly as the same words read inside the sentence.
-fn join(previous: Option<&str>, tokens: &[String]) -> (String, Vec<(usize, usize)>) {
     let mut text = String::new();
     let mut spans = Vec::with_capacity(tokens.len());
     let mut units = 0;
@@ -245,11 +293,8 @@ fn join(previous: Option<&str>, tokens: &[String]) -> (String, Vec<(usize, usize
         if token == "\"" {
             quotes += 1;
         }
-        let before = match index.checked_sub(1) {
-            Some(place) => Some(tokens[place].as_str()),
-            None => previous,
-        };
-        if separated(before, token, opening_quote, tokens, index) {
+        let previous = index.checked_sub(1).map(|before| tokens[before].as_str());
+        if index > 0 && separated(previous, token, opening_quote, tokens, index) {
             text.push(' ');
             units += 1;
         }
@@ -262,23 +307,7 @@ fn join(previous: Option<&str>, tokens: &[String]) -> (String, Vec<(usize, usize
     (text, spans)
 }
 
-/// The token a widened insertion is joined onto, when there is one.
-///
-/// A sentence that already wrote a space in front of the span keeps it outside
-/// the span, so the join must not write a second one. `None` says the
-/// replacement starts where a separator would be wrong.
-fn attached_to<'a>(
-    spans: &[(usize, usize)],
-    tokens: &'a [String],
-    index: usize,
-) -> Option<&'a str> {
-    let previous = index.checked_sub(1)?;
-    (spans[index].0 == spans[previous].1).then(|| tokens[previous].as_str())
-}
-
 /// Whether a space is written before this token.
-///
-/// `previous` is `None` when nothing comes before it, which writes no space.
 fn separated(
     previous: Option<&str>,
     token: &str,
@@ -298,9 +327,9 @@ fn separated(
                 return false;
             }
             // The quote that opened stays against the word it opened.
-            !(previous == "\"" && index > 0 && opened_before(tokens, index - 1))
+            !(previous == "\"" && opened_before(tokens, index - 1))
         }
-        None => false,
+        None => true,
     }
 }
 
@@ -326,6 +355,17 @@ mod tests {
             tokens: sentence.split(' ').map(str::to_string).collect(),
             edits,
         }
+    }
+
+    /// The sentence a writer gets after accepting the item's own edit.
+    fn applied(item: &Item) -> String {
+        let mut out = item.text.clone();
+        for edit in item.edits.iter().rev() {
+            let start = crate::text::byte_index_of_utf16(&out, edit.start).expect("a real index");
+            let end = crate::text::byte_index_of_utf16(&out, edit.end).expect("a real index");
+            out.replace_range(start..end, &edit.fix);
+        }
+        out
     }
 
     fn edit(start: usize, end: usize, code: &str, correction: &str) -> Edit {
@@ -448,12 +488,17 @@ mod tests {
                 "no zero-width span"
             );
 
-            let mut corrected: Vec<String> = sentence.split(' ').map(str::to_string).collect();
-            corrected.insert(index, correction.to_string());
+            let mut stream: Vec<String> = sentence.split(' ').map(str::to_string).collect();
+            stream.insert(index, correction.to_string());
             assert_eq!(
                 item.expected_text,
-                detokenise(&corrected).0,
+                detokenise(&stream).0,
                 "the fix reads as the same words read inside a sentence"
+            );
+            assert_eq!(
+                applied(&item),
+                item.expected_text,
+                "the one span writes the Corrected text"
             );
         }
     }
@@ -472,20 +517,35 @@ mod tests {
         assert_eq!(item.expected_text, "I didn't liked the film at all.");
     }
 
+    /// A word added behind the full stop is not a sentence a writer types.
+    #[test]
+    fn a_word_added_behind_the_final_stop_is_not_kept() {
+        assert!(
+            item(&block(
+                "pt",
+                "I am looking forward to hearing from you .",
+                vec![edit(9, 9, "M:ADV", "soon")],
+            ))
+            .is_none(),
+            "the corrected sentence would read as a fragment"
+        );
+    }
+
+    /// A block that carries no final stop still takes a word at its end.
     #[test]
     fn a_missing_word_at_the_end_widens_onto_the_word_before_it() {
         let item = item(&block(
             "pt",
-            "I am looking forward to hearing from you .",
-            vec![edit(9, 9, "M:ADV", "soon")],
+            "I am looking forward to hearing from you",
+            vec![edit(8, 8, "M:ADV", "soon")],
         ))
         .expect("the block is kept");
 
-        assert_eq!(item.edits[0].text, ".");
-        assert_eq!(item.edits[0].fix, ". soon");
+        assert_eq!(item.edits[0].text, "you");
+        assert_eq!(item.edits[0].fix, "you soon");
         assert_eq!(
             item.expected_text,
-            "I am looking forward to hearing from you. soon"
+            "I am looking forward to hearing from you soon"
         );
     }
 
@@ -504,6 +564,47 @@ mod tests {
         );
         assert_eq!(item.edits[0].fix, "");
         assert_eq!(item.expected_text, "If you do not agree, I will act.");
+    }
+
+    /// A correction that joins onto the word in front of it takes the space
+    /// the sentence wrote between them.
+    #[test]
+    fn a_correction_that_attaches_leftward_takes_the_space_with_it() {
+        let cases = [
+            (
+                "My brother car is red .",
+                2,
+                2,
+                "M:NOUN:POSS",
+                "'s",
+                "My brother's car is red.",
+            ),
+            (
+                "I do not like it .",
+                2,
+                3,
+                "R:CONTR",
+                "n't",
+                "I don't like it.",
+            ),
+        ];
+
+        for (sentence, start, end, code, correction, expected) in cases {
+            let block = block("zh", sentence, vec![edit(start, end, code, correction)]);
+            let item = item(&block).expect("the block is kept");
+
+            assert_eq!(item.expected_text, expected);
+            assert_eq!(
+                item.expected_text,
+                detokenise(&corrected(&block.tokens, &block.edits[0])).0,
+                "the Corrected text is the sentence the corrected tokens write"
+            );
+            assert_eq!(
+                applied(&item),
+                item.expected_text,
+                "the one span writes the Corrected text"
+            );
+        }
     }
 
     #[test]

@@ -102,6 +102,16 @@ fn the_first_run_unpacks_the_pinned_tarball_and_no_later_run_fetches_again() {
         .expect("the filled cache is read rather than fetched");
 
     assert_eq!(again, cache, "the second run answers the same cache");
+
+    // A release the machine holds only half of is not the release. An unpack
+    // that stopped part way must fetch the rest rather than answer as filled.
+    std::fs::remove_file(cache.json("test")).expect("one split file is removed");
+    let error = cache::ensure_in(&cache_directory, &source, &refuse, false).unwrap_err();
+
+    assert!(
+        error.contains("forbids the fetch"),
+        "half a release fetches again: {error}"
+    );
 }
 
 /// The digest is what makes the fetch safe, so a tarball that does not match
@@ -138,19 +148,19 @@ fn a_tarball_that_misses_the_pinned_digest_is_refused_and_leaves_nothing() {
 
 /// Half a release is not the release.
 ///
-/// A tarball that unpacks the M2 tree without the JSON tree would read later
-/// as a corpus that cannot be parsed, and the next run would fetch the whole
-/// tarball again. So the fill answers it, and it names the file it lacks.
+/// The run reads every split, so a tarball that carries the train split alone
+/// would read later as a corpus that cannot be parsed. The fill answers it
+/// instead, and it names the file it lacks.
 #[test]
 fn a_tarball_that_unpacks_half_the_release_names_the_file_it_lacks() {
     let directory = scratch("eval-cache-half");
-    let source = tarball(&directory, &[]);
+    let source = tarball(&directory, &["train"]);
     let cache_directory = directory.join("cache");
 
     let error = cache::ensure_in(&cache_directory, &source, &curl(), true).unwrap_err();
 
     assert!(error.contains("unpacked without"), "{error}");
-    assert!(error.ends_with("fce.train.gold.bea19.m2"), "{error}");
+    assert!(error.ends_with("fce.dev.gold.bea19.m2"), "{error}");
 }
 
 /// An address on the loopback interface with nothing listening on it.

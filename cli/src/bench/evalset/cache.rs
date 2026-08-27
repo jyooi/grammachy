@@ -90,18 +90,20 @@ impl Cache {
 
     /// Whether this machine already holds the release.
     ///
-    /// Both files of the split the run reads first have to be here. One
-    /// without the other is half a release, which reads later as a corpus
-    /// that cannot be parsed and which the next run would fetch all over
-    /// again, so it is answered here instead.
+    /// Every file the run reads has to be here, both files of every split of
+    /// [`super::corpus::SPLITS`]. Half a release reads later as a corpus that
+    /// cannot be parsed, and a predicate that called it filled would never
+    /// fetch the rest, so an interrupted unpack would poison the cache for
+    /// good.
     fn is_filled(&self) -> bool {
         self.missing().is_none()
     }
 
     /// The first file of the release this cache does not hold.
     fn missing(&self) -> Option<PathBuf> {
-        [self.m2("train"), self.json("train")]
+        super::corpus::SPLITS
             .into_iter()
+            .flat_map(|split| [self.m2(split), self.json(split)])
             .find(|path| !path.is_file())
     }
 }
