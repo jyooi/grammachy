@@ -369,7 +369,7 @@ Two more cards belong to the same session:
   `Setup` shows the setup notice until the setup card lands.
   Put the binary back and reload.
 
-## 11. Smoke item 7: switch to Harper, Check, switch back
+## 11. Smoke item 7: switch to LanguageTool, Check, switch back
 
 This item proves the Settings view of spec section 7: the gear, the storage, and that a change applies to the next Check.
 
