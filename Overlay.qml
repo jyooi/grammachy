@@ -520,6 +520,10 @@ Item {
       root.startComposeCheck()
       return
     }
+    if (Setup.retryAfterSetup(root.surface, root.selectionText) === "startQuick") {
+      root.startQuick()
+      return
+    }
     root.retryCheck()
   }
 

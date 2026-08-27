@@ -13,6 +13,12 @@ test("a missing companion binary opens the setup card before any Check", () => {
   assert.equal(Setup.companionMissing(true), false)
 })
 
+test("Retry after a bar-click install starts a new capture", () => {
+  assert.equal(Setup.retryAfterSetup("quick", ""), "startQuick")
+  assert.equal(Setup.retryAfterSetup("quick", "I has two book."), "retryCheck")
+  assert.equal(Setup.retryAfterSetup("compose", ""), "compose")
+})
+
 test("readLock reads the two pinned fields", () => {
   assert.deepEqual(
     Setup.readLock('{"version": "0.1.0", "sha256": "abc123"}'),

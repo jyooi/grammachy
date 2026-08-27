@@ -36,6 +36,12 @@ function companionMissing(present) {
   return present !== true
 }
 
+function retryAfterSetup(surface, selectionText) {
+  if (surface === "compose") return "compose"
+  if (typeof selectionText !== "string" || selectionText.length === 0) return "startQuick"
+  return "retryCheck"
+}
+
 // The two fields cli.lock pins, spec section 10. Text that will not parse,
 // or that carries no string for either field, reads the same as an empty
 // lock: nothing is pinned, so there is nothing to install from.
@@ -127,6 +133,7 @@ if (typeof module !== "undefined" && module.exports) {
     RETRY: RETRY,
     CLOSE: CLOSE,
     companionMissing: companionMissing,
+    retryAfterSetup: retryAfterSetup,
     readLock: readLock,
     card: card
   }
