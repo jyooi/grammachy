@@ -206,10 +206,15 @@ impl Gate {
                 let first = self.cloud_in_flight.fetch_add(1, Ordering::SeqCst) == 0;
                 if first {
                     // Hold the row open, so a local row still to come meets
-                    // it. The wait is long, because a debug Harper builds its
-                    // dictionary before the first local server is asked
-                    // anything, and only a run with no overlap at all pays it.
-                    wait_until(Duration::from_secs(60), || {
+                    // it. The bound sits far above the slowest debug Harper,
+                    // which builds its whole dictionary before the first local
+                    // server answers anything. Only a run with no overlap at
+                    // all pays the wait. The adapter gives up on a Check after
+                    // 30 s, so a hold this long loses this first Check. The
+                    // row then moves on to its next sentence against the same
+                    // stub, and the overlap proof stands, because no case
+                    // asserts what a cloud row measured.
+                    wait_until(Duration::from_secs(300), || {
                         self.local_seen.load(Ordering::SeqCst) > 0
                     });
                 }
