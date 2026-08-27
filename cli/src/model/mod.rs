@@ -82,6 +82,12 @@ const DEFAULT_BASE_URL: &str = "https://huggingface.co";
 /// A row belongs here only when its URL answers an unauthenticated 200. The
 /// `google` path of the Gemma file answers 401, which is why the `unsloth`
 /// mirror is the one named.
+///
+/// The `name` must also be a case-insensitive prefix of the `file_name`, because
+/// the Settings value it becomes is resolved to a file by [`unit::model_file`],
+/// which matches on that prefix. A row that breaks the rule downloads and lists
+/// but no engine can run it, so `every_row_name_resolves_to_its_own_file` guards
+/// it by running that resolver over every row.
 struct CatalogueRow {
     name: &'static str,
     repository: &'static str,
@@ -111,6 +117,28 @@ const CATALOGUE: &[CatalogueRow] = &[
         file_name: "Phi-4-mini-instruct-Q4_K_M.gguf",
         sha256: "88c00229914083cd112853aab84ed51b87bdf6b9ce42f532d8c85c7c63b1730a",
         size_bytes: 2_491_874_272,
+    },
+    // The Qwen3.8-4B-Distill weights, which the publisher quantises itself in
+    // `empero-ai/Qwen3.8-4B-Distill-GGUF`. The repository carries the word
+    // Distill and the files inside it do not, so the row takes the file name.
+    // The card states Apache-2.0, inherited from the Qwen3.5-4B base.
+    CatalogueRow {
+        name: "qwen3.8-4b",
+        repository: "empero-ai/Qwen3.8-4B-Distill-GGUF",
+        file_name: "Qwen3.8-4B-Q4_K_M.gguf",
+        sha256: "dec96e8cf2e11b613bb46513dec485377f9ca5a351e71712ee0e244f287c6790",
+        size_bytes: 2_783_446_304,
+    },
+    // IBM quantises `ibm-granite/granite-4.2-3b` itself in
+    // `ibm-granite/granite-4.2-3b-GGUF`, so the row takes the publisher's own
+    // file rather than a community mirror of it. Both repositories state
+    // Apache-2.0 and neither is gated.
+    CatalogueRow {
+        name: "granite-4.2-3b",
+        repository: "ibm-granite/granite-4.2-3b-GGUF",
+        file_name: "granite-4.2-3b-Q4_K_M.gguf",
+        sha256: "20e436143017578687f7f848225cc6c6038126c84149192229c7dff6e4e0f427",
+        size_bytes: 2_244_012_160,
     },
 ];
 
@@ -677,7 +705,13 @@ mod tests {
     fn every_catalogue_row_is_pinned_twice_and_names_its_licence() {
         assert_eq!(
             names(),
-            ["gemma-4-e4b-it", "qwen3-4b-instruct", "phi-4-mini-instruct"]
+            [
+                "gemma-4-e4b-it",
+                "qwen3-4b-instruct",
+                "phi-4-mini-instruct",
+                "qwen3.8-4b",
+                "granite-4.2-3b"
+            ]
         );
         for row in CATALOGUE {
             assert_eq!(row.sha256.len(), 64, "{} is pinned by digest", row.name);
@@ -696,6 +730,74 @@ mod tests {
         }
         assert_eq!(licences::of("qwen3-4b-instruct").license, "Apache-2.0");
         assert_eq!(licences::of("phi-4-mini-instruct").license, "MIT");
+        assert_eq!(licences::of("qwen3.8-4b").license, "Apache-2.0");
+        assert_eq!(licences::of("granite-4.2-3b").license, "Apache-2.0");
+    }
+
+    /// A name the engine cannot resolve to a file downloads and lists but never
+    /// runs, because `unit::model_file` matches the Settings value against the
+    /// start of each `.gguf` name.
+    ///
+    /// This runs that resolver rather than restating its rule, over a directory
+    /// that holds the pinned file of every row at once. So a name that resolves
+    /// to another row's file fails here rather than on a user's machine.
+    #[test]
+    fn every_row_name_resolves_to_its_own_file() {
+        let directory = scratch("catalogue-resolution");
+        for row in CATALOGUE {
+            assert!(
+                row.file_name
+                    .to_ascii_lowercase()
+                    .starts_with(&row.name.to_ascii_lowercase()),
+                "{} does not name the start of {}",
+                row.name,
+                row.file_name
+            );
+            std::fs::write(directory.join(row.file_name), b"weights")
+                .expect("the placeholder weights file is written");
+        }
+
+        for row in CATALOGUE {
+            let resolved = unit::model_file(&directory, row.name)
+                .unwrap_or_else(|error| panic!("{} resolves to a file: {}", row.name, error.0));
+            assert_eq!(
+                resolved,
+                directory.join(row.file_name),
+                "{} resolves to another row's file",
+                row.name
+            );
+        }
+    }
+
+    /// The two sub-4 GB rows of the on-device target, pinned from the
+    /// `x-linked-etag` and `x-linked-size` of an unauthenticated request.
+    #[test]
+    fn the_sub_four_gigabyte_rows_are_pinned_and_under_the_target() {
+        const TARGET_BYTES: u64 = 4 * 1024 * 1024 * 1024;
+
+        let qwen = weights("qwen3.8-4b").expect("the Qwen3.8 row is in the catalogue");
+        assert_eq!(
+            qwen.url,
+            "https://huggingface.co/empero-ai/Qwen3.8-4B-Distill-GGUF/resolve/main/Qwen3.8-4B-Q4_K_M.gguf"
+        );
+        assert_eq!(
+            qwen.sha256,
+            "dec96e8cf2e11b613bb46513dec485377f9ca5a351e71712ee0e244f287c6790"
+        );
+        assert_eq!(qwen.size_bytes, 2_783_446_304);
+        assert!(qwen.size_bytes <= TARGET_BYTES);
+
+        let granite = weights("granite-4.2-3b").expect("the Granite row is in the catalogue");
+        assert_eq!(
+            granite.url,
+            "https://huggingface.co/ibm-granite/granite-4.2-3b-GGUF/resolve/main/granite-4.2-3b-Q4_K_M.gguf"
+        );
+        assert_eq!(
+            granite.sha256,
+            "20e436143017578687f7f848225cc6c6038126c84149192229c7dff6e4e0f427"
+        );
+        assert_eq!(granite.size_bytes, 2_244_012_160);
+        assert!(granite.size_bytes <= TARGET_BYTES);
     }
 
     #[test]

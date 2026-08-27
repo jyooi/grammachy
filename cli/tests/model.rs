@@ -14,6 +14,7 @@ use grammachy::model::{Failure, ModelEnvelope, Models, State, Stopper, Transfer}
 /// The pinned file name of each catalogue row, so a test can put one in place.
 const GEMMA: &str = "gemma-4-E4B-it-Q4_K_M.gguf";
 const QWEN: &str = "Qwen3-4B-Instruct-2507-Q4_K_M.gguf";
+const GRANITE: &str = "granite-4.2-3b-Q4_K_M.gguf";
 
 fn scratch(name: &str) -> PathBuf {
     let directory = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("model-{name}"));
@@ -54,14 +55,17 @@ fn every_catalogue_row_reports_what_the_directory_actually_holds() {
     std::fs::write(directory.join(GEMMA), b"whole weights").expect("the ready file is written");
     std::fs::write(directory.join(format!("{QWEN}.part")), vec![0u8; 4_096])
         .expect("the part file is written");
+    std::fs::write(directory.join(GRANITE), b"whole weights").expect("the ready file is written");
     let (models, _) = models(directory);
 
     let rows = models.list();
 
-    assert_eq!(rows.len(), 3, "one row per catalogue entry");
+    assert_eq!(rows.len(), 5, "one row per catalogue entry");
     assert_eq!(row(&rows, "gemma-4-e4b-it").state, State::Ready);
     assert_eq!(row(&rows, "qwen3-4b-instruct").state, State::Partial);
     assert_eq!(row(&rows, "phi-4-mini-instruct").state, State::Absent);
+    assert_eq!(row(&rows, "granite-4.2-3b").state, State::Ready);
+    assert_eq!(row(&rows, "qwen3.8-4b").state, State::Absent);
 }
 
 /// The shell polls `model list` while a download runs and reads `partialBytes`,
@@ -111,8 +115,12 @@ fn every_row_carries_its_pinned_size_and_its_licence() {
     assert_eq!(row(&rows, "gemma-4-e4b-it").size_bytes, 4_977_171_584);
     assert_eq!(row(&rows, "qwen3-4b-instruct").size_bytes, 2_497_281_120);
     assert_eq!(row(&rows, "phi-4-mini-instruct").size_bytes, 2_491_874_272);
+    assert_eq!(row(&rows, "qwen3.8-4b").size_bytes, 2_783_446_304);
+    assert_eq!(row(&rows, "granite-4.2-3b").size_bytes, 2_244_012_160);
     assert_eq!(row(&rows, "qwen3-4b-instruct").licence, "Apache-2.0");
     assert_eq!(row(&rows, "phi-4-mini-instruct").licence, "MIT");
+    assert_eq!(row(&rows, "qwen3.8-4b").licence, "Apache-2.0");
+    assert_eq!(row(&rows, "granite-4.2-3b").licence, "Apache-2.0");
     for row in &rows {
         assert!(row.file_name.ends_with(".gguf"), "{}", row.name);
     }
@@ -136,7 +144,7 @@ fn the_report_names_the_directory_and_the_free_bytes() {
     );
     assert_eq!(
         json["models"].as_array().expect("models is a list").len(),
-        3
+        5
     );
     assert_eq!(json["models"][0]["name"], "gemma-4-e4b-it");
     assert_eq!(json["models"][0]["state"], "absent");

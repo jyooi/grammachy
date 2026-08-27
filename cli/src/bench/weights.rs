@@ -58,8 +58,9 @@ impl Weights {
 ///
 /// A model name in Settings carries the quantisation, as in
 /// `qwen2.5-7b-instruct-q4_k_m`, so the match is on the prefix and ignores case.
-/// A prefix matches only when the name ends there or the next character is a
-/// hyphen. A longer family name does not take the terms of a shorter family.
+/// [`matches_prefix`] fixes where a prefix may end, which is what lets `qwen3`
+/// carry `qwen3.8-4b`. A longer family name does not take the terms of a
+/// shorter family.
 const KNOWN: &[(&str, Weights)] = &[
     // Alibaba released Qwen2.5 under Apache-2.0 except the 3B and the 72B.
     (
@@ -262,6 +263,19 @@ mod tests {
     fn the_qwen3_line_matches_through_its_point_release() {
         assert_eq!(of("Qwen3.5-4B-Q4_K_M").terms, Terms::Permissive);
         assert_eq!(of("qwen3-8b").terms, Terms::Permissive);
+    }
+
+    /// The two sub-4 GB catalogue rows of the on-device target both take
+    /// Apache-2.0 from a family prefix, so the license rule passes for them.
+    #[test]
+    fn the_sub_four_gigabyte_catalogue_rows_are_apache_licensed() {
+        for model in ["qwen3.8-4b", "Qwen3.8-4B-Q4_K_M", "granite-4.2-3b"] {
+            let weights = of(model);
+
+            assert_eq!(weights.license, "Apache-2.0", "{model}");
+            assert_eq!(weights.terms, Terms::Permissive, "{model}");
+            assert!(weights.is_eligible(), "{model}");
+        }
     }
 
     #[test]
