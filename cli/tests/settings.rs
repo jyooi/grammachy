@@ -61,7 +61,9 @@ fn defaults_apply_with_no_flags_and_no_file() {
 
     assert_eq!(options.native, NativeLanguage::None);
     assert_eq!(options.target, TargetEnglish::EnUs);
-    assert_eq!(options.engine, EngineSlug::Languagetool);
+    // Spec section 4, HUF-237: `harper` is the one engine compiled into the
+    // binary, so a fresh install checks with it and downloads nothing.
+    assert_eq!(options.engine, EngineSlug::Harper);
     assert_eq!(options.openai_base_url, DEFAULT_OPENAI_BASE_URL);
     assert_eq!(options.openai_model, DEFAULT_OPENAI_MODEL);
     assert_eq!(options.openai_api_key, "");

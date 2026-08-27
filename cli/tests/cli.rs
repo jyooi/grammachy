@@ -24,18 +24,33 @@ fn silent_address() -> String {
 }
 
 /// Point every run at a dead address and forbid every unit start, so the binary
-/// tests exercise argument handling only and never touch systemd. The settings
-/// file points at a path that does not exist, so no run reads the developer's
-/// real `~/.config/omarchy/shell.json` (spec section 7).
+/// tests exercise argument handling only and never touch systemd.
+///
+/// The settings file names a silent `openaiBaseUrl`, because the default is
+/// `127.0.0.1:8080` and a developer machine may run a real llama.cpp there.
+/// Without this the served-model guard of the `openai` adapter would answer
+/// about weights that machine happens to hold. No run reads the developer's
+/// real `~/.config/omarchy/shell.json` either (spec section 7).
+///
+/// The engines directory is a path that does not exist, so no run reads the
+/// components this machine has installed (spec section 5.4).
 fn no_engine(command: &mut Command) -> &mut Command {
     command
         .env("GRAMMACHY_LANGUAGETOOL_ADDRESS", silent_address())
         .env("GRAMMACHY_LANGUAGETOOL_START", "never")
         .env("GRAMMACHY_LLAMA_START", "never")
-        .env(
-            "GRAMMACHY_SHELL_JSON",
-            scratch_dir().join("no-such-shell.json"),
-        )
+        .env("GRAMMACHY_ENGINES_DIR", scratch_dir().join("no-engines"))
+        .env("GRAMMACHY_SHELL_JSON", silent_settings())
+}
+
+/// The settings file every run that names no other one reads: one silent
+/// `openaiBaseUrl` and nothing else, so every other key is the built-in
+/// default of spec section 7.
+fn silent_settings() -> PathBuf {
+    settings_file(
+        "silent-shell.json",
+        &format!(r#""openaiBaseUrl": "http://{}""#, silent_address()),
+    )
 }
 
 /// A directory of this test binary, removed with the target directory.
@@ -160,12 +175,14 @@ fn an_unknown_flag_prints_bad_arguments() {
 #[test]
 fn every_valid_flag_value_is_accepted() {
     for native in ["none", "zh", "ms", "es", "fr", "de", "pt", "ja"] {
+        // The default engine runs in process and answers a result, so there
+        // is no code at all on this path (spec section 4, HUF-237).
         let result = run(&["check", "--native", native], "Some text.");
-        let code = envelope(&result)["error"]["code"]
-            .as_str()
-            .unwrap()
-            .to_string();
-        assert_ne!(code, "bad_arguments", "--native {native} is valid");
+        assert_ne!(
+            envelope(&result)["error"]["code"],
+            "bad_arguments",
+            "--native {native} is valid"
+        );
     }
 
     for engine in ["languagetool", "openai", "harper"] {
@@ -314,14 +331,10 @@ fn an_unknown_stored_engine_falls_back_to_the_default() {
     let result = run_with_settings(&["check"], "He go home.", &settings);
 
     let value = envelope(&result);
-    assert_eq!(value["error"]["code"], "engine_unavailable");
-    assert!(
-        value["error"]["message"]
-            .as_str()
-            .expect("the message is a string")
-            .contains("LanguageTool"),
-        "the default engine ran: {value}"
-    );
+    // HUF-237: the default is Harper, which is compiled into the binary, so
+    // the fallback answers a result on a machine with nothing installed.
+    assert_eq!(result.status, 0, "{value}");
+    assert_eq!(value["engine"], "harper", "the default engine ran: {value}");
     assert_eq!(
         std::fs::read_to_string(&settings).expect("the file is readable"),
         before,
@@ -329,6 +342,8 @@ fn an_unknown_stored_engine_falls_back_to_the_default() {
     );
 }
 
+/// The acceptance criterion of HUF-237: a fresh install runs no download and
+/// no pacman command, and the first Check answers.
 #[test]
 fn a_missing_settings_file_is_fine() {
     let missing = scratch_dir().join("absent-shell.json");
@@ -336,7 +351,10 @@ fn a_missing_settings_file_is_fine() {
 
     let result = run_with_settings(&["check"], "He go home.", &missing);
 
-    assert_eq!(envelope(&result)["error"]["code"], "engine_unavailable");
+    let value = envelope(&result);
+    assert_eq!(result.status, 0, "{value}");
+    assert_eq!(value["engine"], "harper", "{value}");
+    assert!(value["issues"].is_array(), "{value}");
     assert!(!missing.exists(), "the CLI never creates the settings file");
 }
 
@@ -401,7 +419,8 @@ fn setup_writes_the_block_and_the_entry_and_remove_takes_them_out() {
     assert!(std::fs::read_to_string(&menu)
         .unwrap()
         .contains("grammachy.compose"));
-    // The default engine is `languagetool`, so nothing is downloaded.
+    // The default engine is `harper`, which is in the binary, so nothing is
+    // downloaded and no pacman command is printed (HUF-237).
     assert!(!home.join("models").exists());
 
     let removed = run_setup(&["setup", "--remove"], &home);

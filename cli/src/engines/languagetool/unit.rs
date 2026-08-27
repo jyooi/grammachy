@@ -3,11 +3,38 @@
 //! Spec section 4 and section 10: transient units only, through `systemd-run
 //! --user`, so removing the plugin leaves no unit file behind.
 //!
-//! The server command is the one the `languagetool` pacman package installs.
-//! Package 6.6-2 ships a single launcher, `/usr/bin/languagetool`, which builds
-//! the classpath from `/usr/share/java/languagetool` and execs
-//! `org.languagetool.server.HTTPServer` when it is given `--http`. So the unit
-//! runs:
+//! LanguageTool is an opt-in component (HUF-237), so the server can come from
+//! either of two places and [`server_command`] reads them in this order:
+//!
+//! 1. The tree `grammachy engine install languagetool` unpacks under
+//!    `~/.local/share/grammachy/engines/languagetool/`. That is the one this
+//!    project puts there, so it wins: a user who installed it from Settings
+//!    gets the release this build pins whatever else the machine carries.
+//! 2. `/usr/bin/languagetool` from the Arch `languagetool` package, which is
+//!    an alternative Grammachy never installs and never removes.
+//!
+//! Neither being there is not a fault of the machine: it is an engine the user
+//! has not added yet, which is what `doctor` says and what the Settings row
+//! offers to fix.
+//!
+//! The two run the server differently. The unpacked tree is jars, so the unit
+//! runs the JVM itself:
+//!
+//! ```text
+//! systemd-run --user --unit=grammachy-languagetool --collect \
+//!   -- <jvm>/bin/java \
+//!      -cp <tree>/languagetool-server.jar:<tree>/libs/* \
+//!      org.languagetool.server.HTTPServer --port 8081 --config <properties>
+//! ```
+//!
+//! The `libs/*` wildcard is expanded by the JVM and never by a shell, so it
+//! survives `systemd-run` passing the argument through untouched. The server
+//! jar's own manifest already names those jars relative to itself; naming them
+//! again costs nothing and does not depend on that manifest.
+//!
+//! Package 6.6-2 ships a single launcher instead, `/usr/bin/languagetool`,
+//! which builds the classpath from `/usr/share/java/languagetool` and execs
+//! `org.languagetool.server.HTTPServer` when it is given `--http`:
 //!
 //! ```text
 //! systemd-run --user --unit=grammachy-languagetool --collect \
@@ -22,11 +49,13 @@
 //! - `--http` is what picks the plain HTTP server. `--config` on its own makes
 //!   the launcher start the HTTPS server instead.
 //!
-//! No `--public` is passed, so the server listens on the loopback address only.
+//! No `--public` is passed either way, so the server listens on the loopback
+//! address only.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::engines::install;
 pub use crate::engines::local::StartFailure;
 use crate::engines::local::{self, ServerCommand};
 
@@ -39,18 +68,58 @@ const MAX_TEXT_LENGTH: usize = 5_000;
 /// The launcher the pacman package installs. `doctor` looks for it too.
 pub const PACKAGE_LAUNCHER: &str = "/usr/bin/languagetool";
 
+/// The server jar of the unpacked upstream release, under the installed tree.
+pub const SERVER_JAR: &str = "languagetool-server.jar";
+
+/// The class the server runs from, in both the tree and the package launcher.
+const SERVER_CLASS: &str = "org.languagetool.server.HTTPServer";
+
 /// Where `archlinux-java` points at the selected JVM.
 const DEFAULT_JVM: &str = "/usr/lib/jvm/default";
 
-/// Read the server command from the installed package.
+/// Read the server command from whichever LanguageTool this machine has.
+///
+/// The installed tree wins over the pacman package, because a user who added
+/// LanguageTool from Settings asked for the release this build pins.
 pub fn server_command(port: u16, config: &Path) -> Result<ServerCommand, StartFailure> {
-    if !Path::new(PACKAGE_LAUNCHER).is_file() {
-        return Err(StartFailure(format!(
-            "The languagetool package is not installed: {PACKAGE_LAUNCHER} does not exist."
-        )));
+    if let Some(tree) = install::installed("languagetool") {
+        return Ok(tree_command(&tree, port, config, java_home()?));
     }
+    if Path::new(PACKAGE_LAUNCHER).is_file() {
+        return Ok(package_command(port, config, java_home()?));
+    }
+    Err(StartFailure(format!(
+        "LanguageTool is not installed. Add it in Settings, or run: grammachy engine install languagetool. \
+The pacman package works too, and neither {PACKAGE_LAUNCHER} nor an installed tree is here."
+    )))
+}
 
-    Ok(ServerCommand {
+/// The JVM run against the unpacked upstream release.
+fn tree_command(tree: &Path, port: u16, config: &Path, java_home: String) -> ServerCommand {
+    let classpath = format!(
+        "{}:{}",
+        tree.join(SERVER_JAR).display(),
+        tree.join("libs/*").display()
+    );
+
+    ServerCommand {
+        program: format!("{java_home}/bin/java"),
+        arguments: vec![
+            "-cp".to_string(),
+            classpath,
+            SERVER_CLASS.to_string(),
+            "--port".to_string(),
+            port.to_string(),
+            "--config".to_string(),
+            config.to_string_lossy().to_string(),
+        ],
+        environment: Vec::new(),
+    }
+}
+
+/// The launcher the pacman package installs.
+fn package_command(port: u16, config: &Path, java_home: String) -> ServerCommand {
+    ServerCommand {
         program: PACKAGE_LAUNCHER.to_string(),
         arguments: vec![
             "--http".to_string(),
@@ -59,8 +128,8 @@ pub fn server_command(port: u16, config: &Path) -> Result<ServerCommand, StartFa
             "--config".to_string(),
             config.to_string_lossy().to_string(),
         ],
-        environment: vec![("JAVA_HOME".to_string(), java_home()?)],
-    })
+        environment: vec![("JAVA_HOME".to_string(), java_home)],
+    }
 }
 
 /// The JVM the launcher runs `bin/java` from. `doctor` reports the same one.
@@ -115,14 +184,39 @@ mod tests {
         assert_eq!(text.trim(), "maxTextLength=5000");
     }
 
+    /// The installed tree is jars, so the unit runs the JVM against the server
+    /// jar and the `libs` beside it.
     #[test]
-    fn the_server_command_is_the_package_launcher() {
+    fn the_tree_command_runs_the_jvm_against_the_unpacked_release() {
+        let tree = Path::new("/home/someone/.local/share/grammachy/engines/languagetool");
         let config = Path::new("/run/user/1000/grammachy/languagetool.properties");
-        let Ok(command) = server_command(8081, config) else {
-            // The package is not installed here, which is its own reported
-            // failure and is covered by the adapter tests.
-            return;
-        };
+
+        let command = tree_command(tree, 8081, config, "/usr/lib/jvm/default".to_string());
+
+        assert_eq!(command.program, "/usr/lib/jvm/default/bin/java");
+        assert_eq!(
+            command.arguments,
+            [
+                "-cp",
+                "/home/someone/.local/share/grammachy/engines/languagetool/languagetool-server.jar:/home/someone/.local/share/grammachy/engines/languagetool/libs/*",
+                "org.languagetool.server.HTTPServer",
+                "--port",
+                "8081",
+                "--config",
+                "/run/user/1000/grammachy/languagetool.properties"
+            ]
+        );
+        // The JVM is run directly, so nothing has to read JAVA_HOME.
+        assert!(command.environment.is_empty());
+        // No external access: the server never gets `--public`.
+        assert!(!command.arguments.contains(&"--public".to_string()));
+    }
+
+    #[test]
+    fn the_package_command_is_the_launcher_with_its_java_home() {
+        let config = Path::new("/run/user/1000/grammachy/languagetool.properties");
+
+        let command = package_command(8081, config, "/usr/lib/jvm/default".to_string());
 
         assert_eq!(command.program, PACKAGE_LAUNCHER);
         assert_eq!(
@@ -136,19 +230,29 @@ mod tests {
             ]
         );
         // The launcher needs this, because Arch never exports it.
-        assert_eq!(command.environment[0].0, "JAVA_HOME");
-        // No external access: the server never gets `--public`.
+        assert_eq!(
+            command.environment,
+            [("JAVA_HOME".to_string(), "/usr/lib/jvm/default".to_string())]
+        );
         assert!(!command.arguments.contains(&"--public".to_string()));
     }
 
+    /// LanguageTool is opt in now, so a machine with neither the tree nor the
+    /// package is told how to add it without a password (HUF-237).
     #[test]
-    fn a_missing_package_names_the_launcher_it_looked_for() {
-        if Path::new(PACKAGE_LAUNCHER).is_file() {
+    fn a_machine_with_neither_names_the_install_verb() {
+        if Path::new(PACKAGE_LAUNCHER).is_file() || install::installed("languagetool").is_some() {
             return;
         }
         let failure = server_command(8081, Path::new("/tmp/x.properties"))
-            .expect_err("the package is not installed");
+            .expect_err("LanguageTool is not on this machine");
 
-        assert!(failure.0.contains(PACKAGE_LAUNCHER));
+        assert!(
+            failure.0.contains("grammachy engine install languagetool"),
+            "{}",
+            failure.0
+        );
+        assert!(failure.0.contains(PACKAGE_LAUNCHER), "{}", failure.0);
+        assert!(!failure.0.contains("sudo"), "{}", failure.0);
     }
 }

@@ -33,7 +33,7 @@ var OPENROUTER_MODEL_PLACEHOLDER = "google/gemini-3.7-flash"
 // nobody chose.
 var DESCRIPTORS = {
   nativeLanguage: { type: "enum", values: ["none", "zh", "ms", "es", "fr", "de", "pt", "ja"], fallback: "none" },
-  engine: { type: "enum", values: ["languagetool", "openai", "harper", "openrouter"], fallback: "languagetool" },
+  engine: { type: "enum", values: ["languagetool", "openai", "harper", "openrouter"], fallback: "harper" },
   autoReplace: { type: "boolean", fallback: false },
   openaiBaseUrl: { type: "string", fallback: "http://127.0.0.1:8080" },
   openaiModel: { type: "string", fallback: "qwen3.8-4b" },
@@ -62,9 +62,51 @@ var ENGINE_OPTIONS = [
   { value: "openrouter", label: "Cloud LLM (OpenRouter)" }
 ]
 
+// The engine a fresh install checks with, spec section 4 and HUF-237.
+//
+// It is `harper` because that is the one engine compiled into the binary: it
+// needs no download, no pacman command, and no server, so the first Check on a
+// machine that has just been set up answers. It is also where the dropdown
+// falls back when the engine it was on stops being available.
+var BUILT_IN_ENGINE = "harper"
+
 // The one engine that sends text off this machine, `docs/spec/evals.md`
 // section 7. Every rule below that says "cloud" means this slug.
 var CLOUD_ENGINE = "openrouter"
+
+// ------------------------------------------------------- optional engines
+
+// The dropdown rows to draw, spec section 7 and HUF-237.
+//
+// An engine that is not on this machine is not offered: picking it would only
+// buy the reader an `engine_unavailable` card. `unavailable` is the list of
+// slugs `ui/engines.js` read out of `grammachy engine list`, so this file
+// never decides what is installed and only decides what that means.
+//
+// The engine the reader is already on stays in the list whatever that says.
+// A dropdown that drops its own value shows a blank box, and the stored value
+// is untouched until they choose something else, so hiding it would say the
+// setting is one thing while the file says another.
+function engineOptions(unavailable, current) {
+  var missing = Array.isArray(unavailable) ? unavailable : []
+  var selected = String(current === undefined ? "" : current)
+  var out = []
+  for (var i = 0; i < ENGINE_OPTIONS.length; i++) {
+    var option = ENGINE_OPTIONS[i]
+    if (option.value === selected || missing.indexOf(option.value) === -1) out.push(option)
+  }
+  return out
+}
+
+// The engine to fall back to when the selected one has just been removed.
+//
+// It is always the built-in one: it is the only engine that cannot go away, so
+// it is the only answer that is true whatever else the machine has. `null`
+// means nothing has to change, which is every case but the one where the
+// engine that went is the engine a Check would use.
+function engineAfterRemoval(current, removed) {
+  return String(current) === String(removed) ? BUILT_IN_ENGINE : null
+}
 
 function isPlainObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value)
@@ -237,6 +279,7 @@ if (typeof module !== "undefined" && module.exports) {
     DESCRIPTORS: DESCRIPTORS,
     NATIVE_LANGUAGE_OPTIONS: NATIVE_LANGUAGE_OPTIONS,
     ENGINE_OPTIONS: ENGINE_OPTIONS,
+    BUILT_IN_ENGINE: BUILT_IN_ENGINE,
     CLOUD_ENGINE: CLOUD_ENGINE,
     OPENROUTER_MODEL_PLACEHOLDER: OPENROUTER_MODEL_PLACEHOLDER,
     entryOf: entryOf,
@@ -244,6 +287,8 @@ if (typeof module !== "undefined" && module.exports) {
     isKnown: isKnown,
     valueOf: valueOf,
     labelOf: labelOf,
+    engineOptions: engineOptions,
+    engineAfterRemoval: engineAfterRemoval,
     normalised: normalised,
     mergedEntry: mergedEntry,
     needsCloudConsent: needsCloudConsent,

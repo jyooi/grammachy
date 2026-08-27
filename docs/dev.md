@@ -10,9 +10,11 @@ The Compose walkthrough later on this page is here for the same reason: spec sec
 
 - Omarchy 4.0.0 or later, because the plugin imports `qs.Ui` and `qs.Commons` from `/usr/share/omarchy/shell`.
 - A Rust toolchain, to build the companion CLI.
-- `languagetool` from pacman, for a Check that finds anything: `sudo pacman -S languagetool`.
-  Without it the popup shows the `engine_unavailable` card instead of marks, which still proves capture works.
-  The `harper` engine needs no package and no server, so smoke item 7 works on a bare machine.
+- Nothing else, to start with.
+  The default engine is `harper`, which is compiled into the binary, so a bare machine checks on the first try.
+- For LanguageTool, smoke item 18 installs it from Settings with no password.
+  It needs a Java runtime beside it: `sudo pacman -S jre-openjdk`.
+  The Arch `languagetool` package works too, and Grammachy never installs or removes it.
 
 `wl-clipboard` and `wtype` already ship with Omarchy.
 
@@ -104,7 +106,7 @@ Run this item with **two windows side by side**, because one window cannot tell 
 
 Expected: the popup opens beside the **left** terminal, at its top edge, on its trailing side, and not in the top-right corner of the screen.
 It never runs off the screen: its trailing edge stays inside the monitor and its top edge stays under the bar.
-The whole sentence shows, `has` and `book` carry a solid underline, and the hero reads `2 issues, 0 accepted, languagetool, <n> ms`.
+The whole sentence shows, `has` and `book` carry a solid underline, and the hero reads `2 issues, 0 accepted, harper, <n> ms`.
 Accept moves the mark to green and shows the Fix in place.
 Skip dims the mark and drops its underline.
 Both advance the focus to the next open Issue.
@@ -184,7 +186,7 @@ The capture tries the primary selection, then the Ctrl + C fallback, so this ite
 
 ## 8. Smoke item 4: a 6,000 unit selection
 
-The Check size limit belongs to the Engine, and the default `languagetool` engine takes 5,000 UTF-16 code units (spec section 4).
+The Check size limit belongs to the Engine, and the default `harper` engine takes 5,000 UTF-16 code units (spec section 4).
 A longer selection earns the too-long card.
 
 1. Make a file of about 6,000 characters and open it in a terminal pager or an editor:
@@ -259,7 +261,7 @@ Expected: the hero reads `draft, 20,000 units` and `Check` is on.
 
 2. Press `Check`.
 
-Expected: the hero meta line reads `Checking 1 of n, languagetool, <elapsed>`, with a `Cancel` button beside it.
+Expected: the hero meta line reads `Checking 1 of n, harper, <elapsed>`, with a `Cancel` button beside it.
 The number climbs, the elapsed time counts up, and the bar under `Checking chunk k of n...` fills as each Chunk lands.
 `n` is what `grammachy chunk` answered; check it by hand with the same Draft:
 
@@ -320,7 +322,8 @@ This item proves the error cards of spec section 8: the card names the engine, t
 The transient unit dies with the session, so nothing here is permanent.
 Stop it with `systemctl --user`, never from a test: only this manual run may touch the unit the live shell uses.
 
-1. Make sure `Engine` reads `LanguageTool` in Settings, which is the default.
+1. Set `Engine` to `LanguageTool` in Settings.
+   The row is offered only once LanguageTool is on this machine, so run smoke item 18 first if it is not.
 2. Run one Check so the unit is up, then stop it:
 
 ```bash
@@ -366,23 +369,23 @@ Two more cards belong to the same session:
   `Setup` shows the setup notice until the setup card lands.
   Put the binary back and reload.
 
-## 11. Smoke item 7: switch to Harper, Check, switch back
+## 11. Smoke item 7: switch to LanguageTool, Check, switch back
 
 This item proves the Settings view of spec section 7: the gear, the storage, and that a change applies to the next Check.
 
 1. Run smoke item 1 so the popup is open on a sentence with a mistake.
-   Read the hero meta line and note the engine it names, which is `languagetool` by default.
+   Read the hero meta line and note the engine it names, which is `harper` by default.
 2. Click the gear on the trailing edge of the hero.
    The card flips to Settings; the Issues stay behind it.
-3. Set `Engine` to `Harper`.
+3. Set `Engine` to `LanguageTool`, which needs smoke item 18 to have run.
    Nothing is saved by hand: the choice is in `~/.config/omarchy/shell.json` the moment the row is picked.
    Confirm it with `jq '.bar.layout.right[] | select(.id == "io.github.jyooi.grammachy")' ~/.config/omarchy/shell.json`.
 4. Click `Back`, or the gear again.
-   The same Issues are still on screen with the same accepted and skipped marks, and the meta line still names `languagetool`, because a change applies to the next Check only.
+   The same Issues are still on screen with the same accepted and skipped marks, and the meta line still names `harper`, because a change applies to the next Check only.
 5. Highlight the sentence again and click `G`.
 
-Expected: the new Check runs through Harper, and the meta line now names `harper`.
-Switch back to `LanguageTool` in Settings and run one more Check; the meta line names `languagetool` again.
+Expected: the new Check runs through LanguageTool, and the meta line now names `languagetool`.
+Switch back to `Harper` in Settings and run one more Check; the meta line names `harper` again.
 
 Three more Settings checks belong to the same session:
 
@@ -392,9 +395,9 @@ Three more Settings checks belong to the same session:
 - **Scripting.** With the popup open on Settings, run `omarchy-shell shell setBarWidget io.github.jyooi.grammachy engine '"harper"'` from a terminal.
   The Engine dropdown moves to `Harper` without a click.
 - **An unknown stored value.** Stop the shell, hand-edit the entry to `"engine": "claude"`, and start it again.
-  The dropdown shows `LanguageTool`, the default.
+  The dropdown shows `Harper`, the default.
   Open Settings, change nothing, and close the popup: `"engine": "claude"` is still in the file, because nothing is rewritten until the user changes it.
-  Pick `Harper` and the file finally reads `"engine": "harper"`.
+  Pick `Local LLM` and the file finally reads `"engine": "openai"`.
 
 ## 12. Smoke item 8: auto-replace in a terminal and a browser field
 
@@ -785,14 +788,135 @@ Compose wraps every failure in the Chunk card of spec section 9, which offers `R
     Empty the Cloud model field again, press SUPER + SHIFT + G, paste a Draft, and press Ctrl + Enter.
     The title and the body are the same, and the buttons are `Close`, `Retry remaining`, and `Settings`, with `Retry remaining` the primary one.
 
-## 17. Running the automated checks
+## 17. Smoke items 18 to 21: the Engines list
+
+These items prove spec sections 5.4 and 7 on a live desktop: LanguageTool is something the user adds and takes away, with no password.
+
+The install fetches about 250 MB and unpacks about 390 MB, both under HOME, so nothing here touches a system directory and nothing here needs `sudo`.
+
+### 18. Install LanguageTool from Settings
+
+1. Start with nothing installed.
+   Confirm it from a terminal:
+
+```bash
+bin/grammachy engine list | jq '.engines[] | {slug, state, fromPackage, sizeBytes}'
+```
+
+   A fresh machine answers `"state": "absent"` and `"fromPackage": false`.
+   A machine that already has the Arch package answers `"fromPackage": true`; remove it with `sudo pacman -R languagetool` to see this item, or skip to item 21.
+2. Highlight a sentence and click `G`, then open Settings with the gear.
+3. Read the `Engine` dropdown.
+
+Expected: it offers `Local LLM`, `Harper`, and `Cloud LLM (OpenRouter)` and no `LanguageTool` row, because that engine is not on this machine.
+
+4. Read the `Engines` list under the dropdown.
+
+Expected: one row, `LanguageTool 6.6`, over `About 240.3 MB, needs Java, LGPL-2.1-or-later`, with one download button.
+Under the list, the free space on the directory the install lands in.
+
+5. Press the download button.
+
+Expected: the button becomes a Cancel, a bar appears under the row, and the hint line counts up once a second: `Downloading 12.0 MB of 240.3 MB, 5%`.
+The CLI prints nothing while `curl` runs, so that count is the `.part` file on disk, polled once a second.
+
+6. Close the popup while it runs, then summon it again and open Settings.
+
+Expected: the bar is where it should be. Closing the overlay never cancels a transfer.
+
+7. Wait for it to finish.
+
+Expected: the hint reads `Installed, LGPL-2.1-or-later, needs Java`, the button is a bin, and the `Engine` dropdown now offers `LanguageTool`.
+Confirm what landed on disk:
+
+```bash
+ls ~/.local/share/grammachy/engines/languagetool/languagetool-server.jar
+bin/grammachy engine list | jq -r '.engines[0].state, .engines[0].path'
+```
+
+   The archive is gone: a re-install verifies the digest again, so keeping it would double the cost on disk.
+
+8. Set `Engine` to `LanguageTool`, close Settings, highlight a sentence with a mistake, and click `G`.
+
+Expected: the marked text of smoke item 1, and the hero meta line names `languagetool`.
+The first Check of a session starts the unit, which takes a moment.
+
+### 19. Cancel an install, then resume it
+
+1. Remove what item 18 installed, then press the download button again.
+2. Press Cancel a few seconds in.
+
+Expected: a notice under the list, `Download of languagetool stopped` over `What arrived is kept. Install resumes it.`
+The row reads `Part downloaded, 30.1 MB of 240.3 MB, LGPL-2.1-or-later, needs Java` and carries a download button and a bin.
+
+```bash
+ls -l ~/.local/share/grammachy/engines/LanguageTool-6.6.zip.part
+```
+
+3. Press the download button again.
+
+Expected: the bar starts where it stopped, not at zero. `curl --continue-at -` resumes the transfer.
+
+### 20. Remove the engine a Check would run on
+
+1. With LanguageTool installed and `Engine` set to `LanguageTool`, run one Check so the unit is up:
+
+```bash
+systemctl --user is-active grammachy-languagetool
+```
+
+2. Open Settings and press the bin on the LanguageTool row.
+
+Expected: a confirm under the row, `Remove the engine this check uses? Checks go back to Harper, which is built in.` with `Keep` and `Remove`.
+Esc answers Keep and Enter answers Remove; Ctrl + Enter does nothing, because that is Apply everywhere else.
+
+3. Close Settings with the question still open, then open it again.
+
+Expected: the question is gone and nothing was removed. A question that is off the screen must never still be answerable.
+
+4. Press the bin again and press `Remove`.
+
+Expected: the row reads `About 240.3 MB, needs Java, LGPL-2.1-or-later` again, the `Engine` dropdown drops the `LanguageTool` row, and the dropdown now reads `Harper`.
+The unit is gone with the tree:
+
+```bash
+systemctl --user is-active grammachy-languagetool
+ls ~/.local/share/grammachy/engines/
+jq '.bar.layout.right[] | select(.id == "io.github.jyooi.grammachy") | .engine' ~/.config/omarchy/shell.json
+```
+
+   The last line reads `"harper"`.
+
+5. Highlight a sentence and click `G`.
+
+Expected: the Check runs on Harper and answers. Nothing is left pointing at an engine that is not there.
+
+### 21. The pacman package is an alternative, never a thing to remove
+
+1. `sudo pacman -S languagetool`, with nothing installed from Settings.
+2. Open Settings.
+
+Expected: the `Engine` dropdown offers `LanguageTool`, and the Engines row reads `From the languagetool package, LGPL-2.1-or-later, needs Java` with **no buttons at all**.
+A Remove here would delete a directory this plugin never wrote and leave the package in place, which is a button that looks like it does something and does not.
+
+3. Read what `doctor` says:
+
+```bash
+bin/grammachy doctor --engine languagetool | head -4
+bin/grammachy doctor --json | jq -r '.checks[] | select(.id == "languagetool") | .state'
+```
+
+Expected: the line names the launcher and says it came from the package, and the state word is `package`.
+With nothing installed at all the state word is `absent`, the line reads `optional` rather than `missing`, and its remedy is `grammachy engine install languagetool` with no `sudo` in it.
+
+## 18. Running the automated checks
 
 The same three plugin checks CI runs, against the shell installed on this machine:
 
 ```bash
 for file in $(find . -name '*.qml' | sort); do qmllint -I /usr/share/omarchy/shell "$file" || echo "FAILED $file"; done
 omarchy-plugin-validate .
-node --test ui/splice.test.js ui/tokens.test.js ui/settings.test.js ui/keymap.test.js ui/errors.test.js ui/format.test.js ui/anchor.test.js ui/limits.test.js ui/models.test.js ui/capture.test.js
+node --test ui/splice.test.js ui/tokens.test.js ui/settings.test.js ui/keymap.test.js ui/errors.test.js ui/format.test.js ui/anchor.test.js ui/limits.test.js ui/models.test.js ui/capture.test.js ui/engines.test.js
 ```
 
 The `qmllint` on `PATH` reports a syntax error through its exit status alone and prints nothing.
@@ -842,7 +966,7 @@ The draw is seeded, so the same release redraws the same 325 items.
 The run adds the 40 fixture items to them, which the sidecar never holds.
 A different answer means the conversion rules changed.
 
-## 18. Removing it
+## 19. Removing it
 
 Remove the hotkeys, the menu entry, and the OpenRouter key first (spec section 10):
 

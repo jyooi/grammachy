@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::args::CheckOptions;
+use crate::engines::install;
 use crate::engines::languagetool;
 use crate::engines::openai::{self, endpoint};
 use crate::engines::openrouter;
@@ -199,7 +200,11 @@ pub struct Facts {
     pub binary: Option<PathBuf>,
     /// The version of that binary.
     pub version: String,
-    /// The LanguageTool launcher the pacman package installs.
+    /// The LanguageTool tree `grammachy engine install languagetool` unpacks
+    /// under HOME. It is the route that needs no password (HUF-237).
+    pub languagetool_tree: Option<PathBuf>,
+    /// The LanguageTool launcher the pacman package installs, which is the
+    /// alternative Grammachy never installs and never removes.
     pub languagetool_launcher: Option<PathBuf>,
     /// The `bin/java` the launcher runs, through `JAVA_HOME` or the default JVM.
     pub java: Option<PathBuf>,
@@ -278,6 +283,7 @@ impl Facts {
         Facts {
             binary: std::env::current_exe().ok(),
             version: env!("CARGO_PKG_VERSION").to_string(),
+            languagetool_tree: install::installed("languagetool"),
             languagetool_launcher: existing_file(languagetool::unit::PACKAGE_LAUNCHER),
             java: languagetool::unit::java_home()
                 .ok()
@@ -301,6 +307,16 @@ impl Facts {
     /// The tier these facts put the machine in.
     pub fn tier(&self) -> HardwareTier {
         tier_of(&self.cards)
+    }
+
+    /// Where LanguageTool is on this machine, whichever route put it there.
+    ///
+    /// The installed tree wins, because that is the one the adapter runs and
+    /// the one `grammachy engine remove` acts on.
+    pub fn languagetool(&self) -> Option<&Path> {
+        self.languagetool_tree
+            .as_deref()
+            .or(self.languagetool_launcher.as_deref())
     }
 
     /// The backends the tier of this machine wants.

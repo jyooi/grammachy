@@ -3,6 +3,10 @@
 //! One line per piece, so a missing piece is one line that already carries the
 //! exact command to fix it (spec section 10). Nothing here runs a command:
 //! pacman steps stay manual and `doctor` installs nothing.
+//!
+//! A piece the machine simply does not have yet reads `optional` rather than
+//! `missing` (HUF-237). LanguageTool is the case: a fresh install never fetched
+//! it, and calling that missing would tell the reader something is broken.
 
 use super::report::Report;
 
@@ -17,7 +21,13 @@ pub fn to_text(report: &Report) -> String {
 
     out.push_str("Grammachy doctor\n\n");
     for check in &report.checks {
-        let status = if check.ok { "ok" } else { "missing" };
+        let status = if check.ok {
+            "ok"
+        } else if check.optional {
+            "optional"
+        } else {
+            "missing"
+        };
         out.push_str(&format!(
             "  {status:<STATUS_WIDTH$}{:<NAME_WIDTH$}{}\n",
             check.name,

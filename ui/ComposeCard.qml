@@ -80,6 +80,17 @@ BorderSurface {
   // model comes from `ui/settings.js`, so this file draws it and words nothing.
   property var consentCard: null
 
+  // The Engines list of spec section 5.4, passed straight to the Settings view.
+  // The card knows nothing about it either: Overlay.qml owns every process.
+  property var engines: []
+  property string engineBusy: ""
+  property double engineBusyBytes: 0
+  property bool enginesBusy: false
+  property string engineConfirm: ""
+  property string enginesDirectory: ""
+  property double enginesFreeBytes: 0
+  property var engineNote: null
+
   // The Models list of spec section 5.3, passed straight to the Settings view.
   // The card knows nothing about it: Overlay.qml owns every process.
   property var models: []
@@ -119,6 +130,11 @@ BorderSurface {
   signal settingChanged(string name, var value)
   signal cloudContinueRequested()
   signal cloudCancelRequested()
+  signal engineInstallRequested(string slug)
+  signal engineCancelRequested()
+  signal engineRemoveRequested(string slug)
+  signal engineRemoveConfirmed(string slug)
+  signal engineKeepRequested()
   signal modelDownloadRequested(string name)
   signal modelCancelRequested()
   signal modelUseRequested(string name)
@@ -259,6 +275,19 @@ BorderSurface {
       localThinking: root.localThinking
       openrouterModel: root.openrouterModel
       cloudKey: root.cloudKey
+      engines: root.engines
+      engineBusy: root.engineBusy
+      engineBusyBytes: root.engineBusyBytes
+      enginesBusy: root.enginesBusy
+      engineConfirm: root.engineConfirm
+      enginesDirectory: root.enginesDirectory
+      enginesFreeBytes: root.enginesFreeBytes
+      engineNote: root.engineNote
+      onEngineInstallRequested: function(slug) { root.engineInstallRequested(slug) }
+      onEngineCancelRequested: root.engineCancelRequested()
+      onEngineRemoveRequested: function(slug) { root.engineRemoveRequested(slug) }
+      onEngineRemoveConfirmed: function(slug) { root.engineRemoveConfirmed(slug) }
+      onEngineKeepRequested: root.engineKeepRequested()
       models: root.models
       modelBusy: root.modelBusy
       modelBusyBytes: root.modelBusyBytes

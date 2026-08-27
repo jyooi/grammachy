@@ -779,9 +779,11 @@ fn a_run_names_the_machine_tier_and_the_regression_rule() {
 
     assert!(run.stdout.contains(" tier, "), "{}", run.stdout);
     assert!(run.stdout.contains("## Regression rule"), "{}", run.stdout);
+    // The regression gate names whatever the default engine is. HUF-237 moved
+    // it to `harper`, because LanguageTool is no longer on a fresh install.
     assert!(
         run.stdout
-            .contains("must not drop the catch rate of the default engine, `languagetool`"),
+            .contains("must not drop the catch rate of the default engine, `harper`"),
         "{}",
         run.stdout
     );

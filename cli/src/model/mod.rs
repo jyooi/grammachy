@@ -359,7 +359,11 @@ pub fn ensure(model: &str, directory: &Path, download: &Downloader) -> Result<Ou
 /// would ask for a range past the end of the file and re-hash the same wrong
 /// bytes for ever: only a clean start can recover, and the next Download is
 /// what makes it. A cancel is the other case and keeps its `.part` file.
-fn promote(partial: &Path, final_path: &Path, expected_sha256: &str) -> Result<(), String> {
+pub(crate) fn promote(
+    partial: &Path,
+    final_path: &Path,
+    expected_sha256: &str,
+) -> Result<(), String> {
     let actual = digest::sha256_path(partial)?;
     if !actual.eq_ignore_ascii_case(expected_sha256) {
         let next = match std::fs::remove_file(partial) {

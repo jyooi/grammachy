@@ -25,7 +25,7 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   The dictionary and rule set are built inside `Harper::check` only, so the default path never pays for them; `cli/tests/harper_lazy.rs` guards that with a counter.
   `harper-core` is edition 2024, which is why the crate `rust-version` is 1.85.
 - `languagetool` and `openai` both run a local server in a transient unit, and `cli/src/engines/local.rs` holds what that costs them in common.
-  Each `unit.rs` documents its own server command and its sharp edges: `/usr/bin/languagetool` needs `JAVA_HOME` and `--http`; `/usr/bin/llama-server` comes from `llama-cpp` plus a separate `ggml-cpu` or `ggml-vulkan` backend package.
+  Each `unit.rs` documents its own server command and its sharp edges: LanguageTool has two routes onto the machine (see the `grammachy engine` entry below); `/usr/bin/llama-server` comes from `llama-cpp` plus a separate `ggml-cpu` or `ggml-vulkan` backend package.
   Tests must never reach a real server or a real unit.
   The seams are `GRAMMACHY_LANGUAGETOOL_ADDRESS`, `GRAMMACHY_LANGUAGETOOL_START=never`, and `GRAMMACHY_LLAMA_START=never`; `cli/tests/cli.rs` sets all three.
   `GRAMMACHY_LLAMA_START=never` stops a start and never a connection.
@@ -80,6 +80,7 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   The default lives twice, in `settings::DEFAULT_LOCAL_THINKING` and in the `localThinking` descriptor of `ui/settings.js`.
   `cli/tests/overlay_thinking.rs` keeps the two equal and keeps the Toggle inside the group the engine hides.
 - `grammachy model` lives in `cli/src/model/`, spec section 5.3: `list`, `download`, and `remove` for the Local LLM weights, plus the `ensure` that `setup` still calls.
+  `cli/src/engines/install/` is the same module for engine components and borrows most of this one; see its entry below.
   `setup/model.rs` moved here.
   `setup/mod.rs` calls `model::ensure` and owns nothing about weights any more.
   The catalogue is `mod.rs` and every row is pinned twice, by sha256 and by byte size.
@@ -122,6 +123,32 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   A key file that exists but cannot be used reads as `loose` or `empty`, which the hint labels apart from a missing key.
   `BarWidget.qml` draws the cloud glyph from `settings`, the inline entry the bar host re-assigns on every write, so the glyph moves with no reload.
   `cli/tests/overlay_cloud.rs` keeps `Overlay.qml`, both cards, `ui/SettingsView.qml`, and the bar widget on those calls, and `ui/settings.test.js` runs the rules and the gate against a counting stub.
+- `grammachy engine` lives in `cli/src/engines/install/`, spec section 5.4: `list`, `install`, and `remove` for the optional engine components.
+  It is `cli/src/model/` for engines rather than for weights and reuses that module's `Downloader`, `Transfer`, `Stopper`, `promote`, `disk`, `digest`, `cancel`, `State`, and `Failure` wholesale, because an install is the same download with one more step.
+  `archive.rs` is that step: `bsdtar`, which reads a zip and is in the Arch base group, behind an `Extractor` value so no test unpacks a real archive.
+  `languagetool` is the only component (HUF-237); `harper` is in the binary, `openai` is a server the user runs, and `openrouter` is a URL.
+  Its row is pinned twice, by the sha256 the Arch `languagetool` package pins for the same file and by the byte size an unauthenticated HEAD reports, plus `installed_bytes` from the package's installed size, so the free-space check measures the peak of the install rather than the archive alone.
+  The install unpacks into `<dir>/<slug>.unpack` and renames into `<dir>/<slug>` only once the row's `entry` file is there, because a `bsdtar` that died half way leaves a directory behind and `install::installed` must never call that an engine.
+  `install::installed` is the one reader the adapter, `doctor`, and the row state share.
+  Seams are `GRAMMACHY_ENGINES_DIR`, `GRAMMACHY_ENGINE_BASE_URL`, `GRAMMACHY_ENGINE_SHA256`, `GRAMMACHY_ENGINE_SIZE_BYTES`, plus the three values.
+  `cli/tests/engine_install.rs` owns its whole binary, because it pins a digest for the process.
+- The default engine is `harper` (spec section 4, HUF-237), so a fresh install runs no download and no pacman command.
+  It lives in `args::CheckOptions::default`, the `engine` descriptor of `ui/settings.js`, `Settings.BUILT_IN_ENGINE`, and `ui/SettingsView.qml`; `cli/tests/overlay_engines.rs` keeps the four equal.
+  `bench::Report::default_engine` reads `CheckOptions::default()`, so the regression rule follows the default rather than naming an engine.
+  A test that runs the binary with no `--engine` now gets a Harper result envelope rather than an `engine_unavailable` error.
+- `languagetool::unit::server_command` reads two routes in order: the tree `engine install` unpacked, run as `java -cp <tree>/languagetool-server.jar:<tree>/libs/*`, then `/usr/bin/languagetool --http` from the pacman package.
+  The tree wins, because a user who added it from Settings asked for the release this build pins.
+  Neither being there is not a fault of the machine: `doctor` calls that `optional` rather than `missing`.
+  `Check::optional` is that word, and only `languagetool` and `java` ever set it, `java` only while LanguageTool is absent.
+  `ok` still answers the engine question, so `doctor --engine languagetool` on such a machine still exits 1.
+  The `languagetool` check carries a `state` word (`installed`, `package`, `absent`) the way the `key` check does, documented in `docs/doctor.md` and held by `cli/tests/overlay_engines.rs`.
+  `report::LANGUAGETOOL_INSTALL_COMMAND` is the one command every line that offers it names, and it carries no `sudo`.
+- The Engines list of spec sections 5.4 and 7 is `ui/engines.js` plus `ui/EnginesView.qml`, embedded by `SettingsView.qml` and drawn for every engine, because the whole point is to add one the dropdown cannot offer yet.
+  `engines.js` is `models.js` with the row swapped and carries its own `bytes()`, because QML gives a `.js` no import a node `require` also understands.
+  `Engines.unavailable` feeds `Settings.engineOptions`, which drops an absent engine from the dropdown and always keeps the value the reader is on, so the box is never blank while the file says otherwise.
+  `Settings.engineAfterRemoval` is the fallback rule and `Overlay.fallBackFromRemovedEngine` is its one caller; a component the pacman package still supplies moves no setting, which `Engines.isAvailable` decides.
+  `confirmEngine` is a `phase` with its own `Keymap.MODE_ENGINE_CONFIRM`, and `resetRun` leaves `engines`, `engineBusy`, `engineActionProcess`, and `enginePoll` alone so closing the overlay never cancels an install.
+  `cli/tests/overlay_engines.rs` keeps `Overlay.qml`, `ui/SettingsView.qml`, and both sides of every shared constant in step, and `ui/engines.test.js` runs the whole route against a stub binary.
 - `grammachy setup` lives in `cli/src/setup/`, spec section 10.
   It prints one JSON envelope (`SetupEnvelope`).
   Exit 1 uses `setup_failed`.
@@ -208,7 +235,7 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   `draw.rs` draws with a fixed seed, and `sidecar.rs` is the committed text-free selection.
   A cache the machine cannot fill is a skipped table with a reason, never an error.
   Redraw `cli/tests/fixtures/eval-set.sidecar.json` with `cargo test --test evalset_sidecar -- --ignored`, which needs a filled cache.
-  `docs/dev.md` section 17 has the steps.
+  `docs/dev.md` section 18 has the steps.
   No test may fetch the corpus: the seams are `GRAMMACHY_EVAL_CACHE`, `GRAMMACHY_EVAL_FETCH=never`, `GRAMMACHY_EVAL_BASE_URL`, and `GRAMMACHY_EVAL_SHA256`.
 - The judge of `docs/spec/evals.md` section 4.4 is two halves that must agree on one rule.
   `cli/bench/judge.py` grades a recorded run, and `cli/src/bench/judge.rs` reads the answer into the Useful fix column.

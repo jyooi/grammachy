@@ -12,6 +12,7 @@ Terms used in the Grammachy domain. No implementation detail.
 - **Apply**: delivery of the Corrected text back to the user. Two modes: **Clipboard** (default) and **Auto-replace** (opt-in, overwrites the Selection only).
 - **Engine**: the component that performs a Check. Engines are pluggable. Examples: LanguageTool, Harper, a local LLM, the Claude API.
 - **Cloud engine**: an Engine that sends the text of a Check to a service outside this machine. Every other Engine keeps the text on the machine. Never the default.
+- **Component**: a piece of an Engine that is fetched and unpacked onto this machine rather than shipped in the binary. The user adds one from Settings and takes it away again, without a password. LanguageTool is the one Component today; Harper needs none, which is why Harper is the default Engine.
 - **Consent**: the user's one-time agreement that a Cloud engine may send text. Given once on a card, kept by the shell, and asked again only if it was never given.
 - **Check size limit**: the most text one Check may carry. The limit belongs to the Engine, so each Engine names its own.
 - **Native language**: the language the user thinks in. Tunes which mistakes an Engine looks for. A user picks one from a list at a time. **None** is the default and means no tuning.

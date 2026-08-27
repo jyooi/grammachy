@@ -27,6 +27,9 @@ fn server_answers() -> bool {
 fn check(text: &str) -> Value {
     let mut child = Command::new(env!("CARGO_BIN_EXE_grammachy"))
         .arg("check")
+        // The default engine is `harper` since HUF-237, so this engine is now
+        // named rather than assumed.
+        .args(["--engine", "languagetool"])
         .env(
             "GRAMMACHY_SHELL_JSON",
             Path::new(env!("CARGO_TARGET_TMPDIR")).join("no-such-shell.json"),
