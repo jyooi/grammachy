@@ -111,6 +111,7 @@ Runner behaviour the pilot fixed or required ([HUF-209](https://linear.app/huffm
 - A per-Check output stop rule so one capped answer does not own p95: the answer cap of section 6.
 - `weights.rs` maps `gemma-4` to Apache-2.0, matches `qwen3.5-*`, has rows for ministral, granite, and smollm3, and a `hosted` class for cloud rows.
 - Every engine and model row that is unreachable before its first sentence is skipped with a reason, never an error, as today.
+- Before the first Check of every row, the `openai` adapter reads the model the server serves and reloads or refuses on a mismatch, so no row is measured against weights it did not ask for ([HUF-236](https://linear.app/huffman/issue/HUF-236)).
 
 ### 4.2 Tables
 
@@ -121,6 +122,7 @@ Cloud rows print whole-request rates, because providers report no timings.
 Output tokens per Issue is the number section 6 halves, so the file shows whether the compact answer landed.
 The Chunk table (section 1) prints wall time, validity, and recall per local row.
 Wall time per row and the run's cloud spend print under the tables.
+A row whose server named the weights it holds prints them too, so the file says what was measured and not only what the Settings called it.
 
 ### 4.3 Record file
 
@@ -199,6 +201,10 @@ Measured on the 890M: gemma-4-E4B-it writes 25 tokens per second; thinking raise
   On llama-server with thinking off, the request sends a raw `grammar` with no whitespace between tokens in place of the `json_schema` response format, so compactness is forced.
   A raw grammar bounds the whole generation, so thinking on keeps `json_schema` and the wording alone, and so do cloud rows.
   About 30 tokens per Issue against 56 before, on the thinking-off route.
+- The served model is read before the first Check of an adapter, over `GET /v1/models` and then `GET /props`.
+  A server that holds other weights than `openaiModel` names is reloaded, and one that no stop of the unit can reload is `bad_arguments` that names both models.
+  A server that names no model is checked as before, because `openaiBaseUrl` accepts any OpenAI-compatible server and only llama-server says what it loaded.
+  llama-server ignores the `model` field of the request, so nothing else can hold this promise ([HUF-236](https://linear.app/huffman/issue/HUF-236)).
 - The Check timeout stays 90 s for the local engine, on every surface.
   Compose is no exception, and thinking is no exception.
   Every other engine keeps its own timeout from the v1 section 4 table, where `openrouter` is 30 s.

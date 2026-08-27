@@ -111,12 +111,55 @@ impl Stub {
     }
 }
 
+/// One request a stub read: its first line, and its body.
+struct Request {
+    line: String,
+    body: String,
+}
+
+impl Request {
+    /// Whether this is a Check rather than the served-model probe the `openai`
+    /// adapter sends before the first Check of a row (HUF-236).
+    fn is_check(&self) -> bool {
+        self.line.starts_with("POST ")
+    }
+}
+
+/// Answer one served-model probe: the OpenAI model list, or a 404.
+///
+/// `None` is a server that names no model, which the guard reads as an open
+/// question and never as a mismatch. Every stub of this suite answers that way
+/// unless a case is about the guard itself.
+fn write_probe(stream: &mut TcpStream, served: Option<&str>) {
+    let Some(served) = served else {
+        let _ = write!(
+            stream,
+            "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+        );
+        let _ = stream.flush();
+        return;
+    };
+    let body = format!(r#"{{"object":"list","data":[{{"id":"{served}","object":"model"}}]}}"#);
+    let _ = write!(
+        stream,
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    let _ = stream.flush();
+}
+
 /// A stub that answers `answers` Checks and refuses every later one.
 ///
 /// The refusal is HTTP 503, the answer llama.cpp gives before its weights are
 /// loaded, which the adapter reads as a server that cannot run a Check yet.
 /// That is how a case ends one row and leaves an earlier one measured.
 fn stub(answer: String, answers: usize) -> Stub {
+    stub_holding(answer, answers, None)
+}
+
+/// The same stub, naming the weights it serves to the served-model probe.
+fn stub_holding(answer: String, answers: usize, holds: Option<&str>) -> Stub {
+    let holds = holds.map(str::to_string);
     let listener = TcpListener::bind("127.0.0.1:0").expect("a loopback port is free");
     let address = listener
         .local_addr()
@@ -130,11 +173,15 @@ fn stub(answer: String, answers: usize) -> Stub {
     thread::spawn(move || {
         for stream in listener.incoming() {
             let Ok(mut stream) = stream else { break };
-            let body = read_request(&mut stream);
+            let request = read_request(&mut stream);
+            if !request.is_check() {
+                write_probe(&mut stream, holds.as_deref());
+                continue;
+            }
             recorder
                 .lock()
                 .expect("the recorder is readable")
-                .push(body);
+                .push(request.body);
             if counter.fetch_add(1, Ordering::SeqCst) >= answers {
                 let _ = write!(
                     stream,
@@ -323,11 +370,15 @@ fn concurrent_stub(answer: String, tickets: &Tickets, gate: &Arc<Gate>, role: Ro
                 answer.clone(),
             );
             thread::spawn(move || {
-                let body = read_body(&mut stream);
+                let request = read_request(&mut stream);
+                if !request.is_check() {
+                    write_probe(&mut stream, None);
+                    return;
+                }
                 recorder
                     .lock()
                     .expect("the log is not poisoned")
-                    .push((tickets.take(), model_of(&body)));
+                    .push((tickets.take(), model_of(&request.body)));
                 gate.arrive(role);
                 let _ = write!(
                     stream,
@@ -380,11 +431,15 @@ fn rate_limiting_stub(answer: String) -> Stub {
     thread::spawn(move || {
         for stream in listener.incoming() {
             let Ok(mut stream) = stream else { break };
-            let body = read_request(&mut stream);
+            let request = read_request(&mut stream);
+            if !request.is_check() {
+                write_probe(&mut stream, None);
+                continue;
+            }
             recorder
                 .lock()
                 .expect("the recorder is readable")
-                .push(body);
+                .push(request.body);
             if counter.fetch_add(1, Ordering::SeqCst) == 0 {
                 let _ = write!(
                     stream,
@@ -486,7 +541,7 @@ fn table<'a>(report: &'a str, heading: &str) -> &'a str {
 /// The body must be drained too. A stub that answers and closes on an unread
 /// body resets the connection, and the adapter then reports the server as
 /// unreachable rather than reading the answer.
-fn read_request(stream: &mut TcpStream) -> String {
+fn read_request(stream: &mut TcpStream) -> Request {
     let mut head = Vec::new();
     let mut byte = [0u8; 1];
     while stream.read(&mut byte).unwrap_or(0) == 1 {
@@ -496,37 +551,20 @@ fn read_request(stream: &mut TcpStream) -> String {
         }
     }
 
-    let head = String::from_utf8_lossy(&head).to_ascii_lowercase();
+    let head = String::from_utf8_lossy(&head).to_string();
+    let line = head.lines().next().unwrap_or_default().to_string();
     let length: usize = head
+        .to_ascii_lowercase()
         .lines()
         .find_map(|line| line.strip_prefix("content-length:"))
         .and_then(|value| value.trim().parse().ok())
         .unwrap_or(0);
     let mut body = vec![0u8; length];
     let _ = stream.read_exact(&mut body);
-    String::from_utf8_lossy(&body).to_string()
-}
-
-/// Read one whole request and answer its body.
-fn read_body(stream: &mut TcpStream) -> String {
-    let mut head = Vec::new();
-    let mut byte = [0u8; 1];
-    while stream.read(&mut byte).unwrap_or(0) == 1 {
-        head.push(byte[0]);
-        if head.ends_with(b"\r\n\r\n") {
-            break;
-        }
+    Request {
+        line,
+        body: String::from_utf8_lossy(&body).to_string(),
     }
-
-    let headers = String::from_utf8_lossy(&head).to_ascii_lowercase();
-    let length: usize = headers
-        .lines()
-        .find_map(|line| line.strip_prefix("content-length:"))
-        .and_then(|value| value.trim().parse().ok())
-        .unwrap_or(0);
-    let mut body = vec![0u8; length];
-    let _ = stream.read_exact(&mut body);
-    String::from_utf8_lossy(&body).to_string()
 }
 
 /// An address on the loopback interface with nothing listening on it.
@@ -2116,5 +2154,98 @@ fn thinking_both_checks_the_drafts_once_per_mode() {
         endpoint.requests(),
         fixture_ids().len() * 3 + chunk_ids().len() * 2,
         "the Engines row plus two Models rows, each with a Chunk pass"
+    );
+}
+
+/// HUF-236. A `grammachy-llama` left serving one model answered every Check of
+/// a run that named another, and the file printed the wrong name over those
+/// numbers. The guard reads the served model before the first Check of a row,
+/// so no row is ever measured against weights it did not ask for.
+#[test]
+fn a_server_that_serves_another_model_measures_no_row() {
+    let stub = stub_holding(
+        answer_body(None),
+        usize::MAX,
+        Some("granite-4.2-3b-Q4_K_M.gguf"),
+    );
+    let settings = settings_file(
+        "served-mismatch.json",
+        &format!(
+            r#""openaiBaseUrl": "{}", "openaiModel": "gemma-4-e4b-it""#,
+            stub.url()
+        ),
+    );
+
+    let run = bench(
+        &settings,
+        &["--engine", "openai", "--model", "gemma-4-e4b-it"],
+    );
+
+    assert_eq!(run.status, 0);
+    assert_eq!(
+        stub.requests(),
+        0,
+        "no Check reaches a server holding another model:\n{}",
+        run.stdout
+    );
+    // Both the Engines row and the Models row stop before their first Check,
+    // and each names the two models the run could not reconcile.
+    for skipped in [
+        "- Engine `openai`: The model server on",
+        "- Model `gemma-4-e4b-it`: The model server on",
+    ] {
+        assert!(run.stdout.contains(skipped), "{}", run.stdout);
+    }
+    assert!(
+        run.stdout
+            .contains("serves granite-4.2-3b-Q4_K_M.gguf, and this Check asks for gemma-4-e4b-it"),
+        "{}",
+        run.stdout
+    );
+    // Nothing that was never measured may reach the tables or the ranking.
+    assert!(
+        !run.stdout.contains("| `gemma-4-e4b-it` | 1 of 30"),
+        "{}",
+        run.stdout
+    );
+}
+
+/// The other side of the same guard: a server holding the weights the run asked
+/// for measures every row, and the file names what was served rather than only
+/// what the Settings called it.
+#[test]
+fn a_server_that_serves_the_named_model_measures_every_row_and_names_the_weights() {
+    let served = "gemma-4-e4b-it-Q4_K_M.gguf";
+    let stub = stub_holding(answer_body(None), usize::MAX, Some(served));
+    let settings = settings_file(
+        "served-match.json",
+        &format!(
+            r#""openaiBaseUrl": "{}", "openaiModel": "gemma-4-e4b-it""#,
+            stub.url()
+        ),
+    );
+
+    let run = bench(
+        &settings,
+        &["--engine", "openai", "--model", "gemma-4-e4b-it"],
+    );
+
+    assert_eq!(run.status, 0);
+    // The Engines `openai` row and the first Models row both passed the guard,
+    // so both ran the whole fixture.
+    let engine = row(&run.stdout, "openai");
+    assert!(engine.contains("| 1 of 30 (3.3%) |"), "{engine}");
+    let model = row(&run.stdout, "gemma-4-e4b-it");
+    assert!(model.contains("| 1 of 30 (3.3%) |"), "{model}");
+    for named in [
+        format!("Weights served for `openai`: `{served}`."),
+        format!("Weights served for `gemma-4-e4b-it`: `{served}`."),
+    ] {
+        assert!(run.stdout.contains(&named), "{}", run.stdout);
+    }
+    assert!(
+        !run.stdout.contains("- Engine `openai`:"),
+        "the row is measured, not skipped:\n{}",
+        run.stdout
     );
 }

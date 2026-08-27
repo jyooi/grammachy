@@ -75,6 +75,15 @@ pub trait Engine {
     /// units into the exact text given (spec section 5.1).
     fn check(&self, text: &str, options: &CheckOptions) -> Result<Vec<Issue>, EngineFailure>;
 
+    /// The weights the server behind this adapter was confirmed to hold.
+    ///
+    /// `None` for every engine that serves no weights of its own, and for a
+    /// local server that names no model. Only the `openai` adapter answers it,
+    /// and only after its first Check (HUF-236).
+    fn served_model(&self) -> Option<String> {
+        None
+    }
+
     /// The Issues and the cost of one Check. A local engine has no cost, so
     /// only a cloud adapter overrides this.
     fn answer(&self, text: &str, options: &CheckOptions) -> Result<Answer, EngineFailure> {

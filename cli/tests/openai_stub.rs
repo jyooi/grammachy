@@ -22,6 +22,17 @@ const TEXT: &str = "She bought three book from the store.";
 const ANSWER: &str = r#"{"choices":[{"index":0,"message":{"role":"assistant",
     "content":"[{\"original\": \"book\", \"fix\": \"books\", \"reason\": \"plural\", \"category\": \"grammar\"}]"}}]}"#;
 
+/// What the stub tells the served-model probe of HUF-236 it holds.
+///
+/// The adapter reads this before its first Check, so every case here answers
+/// it. `None` is the HTTP 404 of a server that names no model, and the guard
+/// proceeds on that: `openaiBaseUrl` may name any OpenAI-compatible server.
+type ServedModel = Option<&'static str>;
+
+/// The model the recorded fixture's Settings ask for, which is what a server
+/// has to hold for a Check to run at all.
+const REQUESTED: &str = "qwen3.8-4b";
+
 /// How the stub answers one request.
 #[derive(Clone, Copy)]
 enum Answer {
@@ -45,6 +56,11 @@ struct Stub {
 
 impl Stub {
     fn serving(answer: Answer) -> Stub {
+        Stub::holding(answer, None)
+    }
+
+    /// The same stub, naming the weights it serves to the probe.
+    fn holding(answer: Answer, served: ServedModel) -> Stub {
         let listener = TcpListener::bind("127.0.0.1:0").expect("a loopback port is free");
         let address = listener
             .local_addr()
@@ -54,15 +70,30 @@ impl Stub {
         let recorder = Arc::clone(&seen);
 
         thread::spawn(move || {
-            let mut served = 0usize;
+            // Checks answered so far. The served-model probe stays out of the
+            // count: it is not the request any case is about, and a llama.cpp
+            // that is still loading answers it exactly as it answers a Check.
+            let mut checks = 0usize;
             for stream in listener.incoming() {
                 let Ok(mut stream) = stream else { break };
                 let request = read_request(&mut stream);
+                let is_check = request.starts_with("POST ");
                 recorder
                     .lock()
                     .expect("the log is not poisoned")
                     .push(request);
-                served += 1;
+                let loading = match answer {
+                    Answer::LoadingThenJson(budget, _) => checks < budget,
+                    _ => false,
+                };
+                if is_check {
+                    checks += 1;
+                }
+                if !is_check && !matches!(answer, Answer::Silence) && !loading {
+                    write_probe(&mut stream, served);
+                    continue;
+                }
+                let served = checks;
                 match answer {
                     Answer::Json(body) => {
                         let _ = write!(
@@ -79,7 +110,7 @@ impl Stub {
                     }
                     // Hold the connection open until the client gives up.
                     Answer::Silence => thread::sleep(Duration::from_secs(30)),
-                    Answer::LoadingThenJson(loading, _) if served <= loading => {
+                    Answer::LoadingThenJson(budget, _) if served <= budget => {
                         let _ = write!(
                             stream,
                             "HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
@@ -97,6 +128,50 @@ impl Stub {
         });
 
         Stub { address, seen }
+    }
+
+    /// A stub that swaps the weights it names once the unit is stopped.
+    ///
+    /// That is what a reload looks like from the client side: the wrong model
+    /// until the stop lands, and the right one after it.
+    fn reloading(answer: Answer, before: &'static str, after: &'static str) -> (Stub, Stops) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("a loopback port is free");
+        let address = listener
+            .local_addr()
+            .expect("the port is known")
+            .to_string();
+        let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let recorder = Arc::clone(&seen);
+        let stops = Stops::default();
+        let stopped = Arc::clone(&stops.0);
+
+        thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else { break };
+                let request = read_request(&mut stream);
+                let is_check = request.starts_with("POST ");
+                recorder
+                    .lock()
+                    .expect("the log is not poisoned")
+                    .push(request);
+                if !is_check {
+                    let served = match stopped.load(Ordering::SeqCst) {
+                        0 => before,
+                        _ => after,
+                    };
+                    write_probe(&mut stream, Some(served));
+                    continue;
+                }
+                let Answer::Json(body) = answer else { continue };
+                let _ = write!(
+                    stream,
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+            }
+        });
+
+        (Stub { address, seen }, stops)
     }
 
     /// A 307 whose Location is another server, so a follow would be visible.
@@ -135,6 +210,32 @@ impl Stub {
     fn requests(&self) -> Vec<String> {
         self.seen.lock().expect("the log is not poisoned").clone()
     }
+
+    /// The Checks alone, without the served-model probes the adapter sends
+    /// before the first Check of its life (HUF-236).
+    fn checks(&self) -> Vec<String> {
+        self.requests()
+            .into_iter()
+            .filter(|request| request.starts_with("POST "))
+            .collect()
+    }
+}
+
+/// Answer one served-model probe: the OpenAI model list, or a 404.
+fn write_probe(stream: &mut TcpStream, served: ServedModel) {
+    let Some(served) = served else {
+        let _ = write!(
+            stream,
+            "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+        );
+        return;
+    };
+    let body = format!(r#"{{"object":"list","data":[{{"id":"{served}","object":"model"}}]}}"#);
+    let _ = write!(
+        stream,
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    );
 }
 
 /// Read one request, headers and body, and answer it as text.
@@ -175,6 +276,16 @@ impl Starts {
     }
 }
 
+/// How many times the adapter asked for the server to be stopped.
+#[derive(Default)]
+struct Stops(Arc<AtomicUsize>);
+
+impl Stops {
+    fn count(&self) -> usize {
+        self.0.load(Ordering::SeqCst)
+    }
+}
+
 /// An adapter that records its start calls instead of running systemd.
 ///
 /// Nothing comes up behind a recording starter, so one probe is all the retry
@@ -200,6 +311,30 @@ fn adapter_with_budget(
         },
         Box::new(move |_model: &str, _endpoint: &Endpoint| {
             counter.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }),
+    )
+}
+
+/// A recording adapter that also records the stop a reload runs.
+///
+/// No case may reach the unit the live shell uses, so the stopper is the test's
+/// own here exactly as the starter is.
+fn adapter_with_stopper(start_unit: bool, starts: &Starts, stops: &Stops) -> Openai {
+    let started = Arc::clone(&starts.0);
+    let stopped = Arc::clone(&stops.0);
+    Openai::with_server_control(
+        Config {
+            timeout: Duration::from_secs(2),
+            start_unit,
+            startup_budget: Duration::from_millis(0),
+        },
+        Box::new(move |_model: &str, _endpoint: &Endpoint| {
+            started.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }),
+        Box::new(move |_unit: &str| {
+            stopped.fetch_add(1, Ordering::SeqCst);
             Ok(())
         }),
     )
@@ -400,9 +535,10 @@ fn a_server_still_loading_its_weights_is_waited_out_rather_than_failed() {
         .expect("the server finishes loading and answers");
 
     assert_eq!(issues.len(), 1);
-    // One request found it loading, the retry loop found it loading again, and
-    // the third one got the answer.
-    assert_eq!(stub.requests().len(), 3);
+    // One Check found it loading, the retry loop found it loading again, and
+    // the third one got the answer. The probes before them found it loading
+    // too, which is what a llama.cpp reading its weights answers everything.
+    assert_eq!(stub.checks().len(), 3);
     // The unit is asked once and never again: `systemctl start` on a unit that
     // is already running is a no-op, so waiting is what earns the answer. A
     // count that climbed with the retries would mean the loop was restarting a
@@ -486,7 +622,7 @@ fn the_request_carries_the_prompt_the_model_and_the_key() {
         .check(TEXT, &options)
         .expect("the stub answers");
 
-    let requests = stub.requests();
+    let requests = stub.checks();
     assert_eq!(requests.len(), 1);
     let request = &requests[0];
 
@@ -541,7 +677,7 @@ fn sent_body(thinking: bool) -> serde_json::Value {
         .check(TEXT, &options)
         .expect("the stub answers");
 
-    let request = stub.requests().remove(0);
+    let request = stub.checks().remove(0);
     serde_json::from_str(
         request
             .split_once("\r\n\r\n")
@@ -562,7 +698,7 @@ fn a_redirect_is_not_followed() {
         .check(TEXT, &options(&stub.base_url()))
         .expect_err("a redirect is not a chat completion");
 
-    assert_eq!(stub.requests().len(), 1, "the local port is contacted once");
+    assert_eq!(stub.checks().len(), 1, "the local port is checked once");
     assert!(
         target.requests().is_empty(),
         "the POST must not repeat to Location"
@@ -582,10 +718,137 @@ fn an_empty_api_key_sends_no_authorization_header() {
         .check(TEXT, &options(&stub.base_url()))
         .expect("the stub answers");
 
-    let requests = stub.requests();
+    let requests = stub.checks();
     assert!(
         !requests[0].to_ascii_lowercase().contains("authorization:"),
         "{}",
         requests[0]
+    );
+}
+
+/// HUF-236. llama-server ignores the `model` field of the request, so a server
+/// left over from an earlier session answers with the weights it already
+/// holds. The guard reads what it serves before the first Check, and a named
+/// mismatch is refused rather than checked.
+#[test]
+fn a_server_that_serves_another_model_never_answers_a_check() {
+    let stub = Stub::holding(Answer::Json(ANSWER), Some("granite-4.2-3b-Q4_K_M.gguf"));
+    let (starts, stops) = (Starts::default(), Stops::default());
+
+    let failure = adapter_with_stopper(false, &starts, &stops)
+        .check(TEXT, &options(&stub.base_url()))
+        .expect_err("the server holds another model");
+
+    assert!(
+        stub.checks().is_empty(),
+        "nothing is checked against the wrong model: {:?}",
+        stub.requests()
+    );
+    match failure {
+        EngineFailure::BadArguments(message) => {
+            assert!(message.contains("granite-4.2-3b-Q4_K_M.gguf"), "{message}");
+            assert!(message.contains(REQUESTED), "{message}");
+        }
+        other => panic!("expected bad_arguments, got {other:?}"),
+    }
+}
+
+/// The weights the server named are the weights the Check asked for, so the
+/// Check runs and the row can report what it measured on.
+#[test]
+fn a_server_that_serves_the_requested_weights_is_checked_and_named() {
+    let served = "qwen3.8-4b-Q4_K_M.gguf";
+    let stub = Stub::holding(Answer::Json(ANSWER), Some(served));
+    let (starts, stops) = (Starts::default(), Stops::default());
+    let adapter = adapter_with_stopper(true, &starts, &stops);
+
+    let issues = adapter
+        .check(TEXT, &options(&stub.base_url()))
+        .expect("the stub answers");
+
+    assert_eq!(issues.len(), 1);
+    assert_eq!(adapter.served_weights().as_deref(), Some(served));
+    assert_eq!(stops.count(), 0, "a server that matches is never reloaded");
+    assert_eq!(starts.count(), 0);
+}
+
+/// A mismatch the adapter may reload is reloaded, not refused: the stop frees
+/// the port and the server comes back on the weights the Check asked for.
+#[test]
+fn a_mismatch_is_reloaded_before_the_first_check() {
+    let (stub, stops) = Stub::reloading(
+        Answer::Json(ANSWER),
+        "granite-4.2-3b-Q4_K_M.gguf",
+        "qwen3.8-4b-Q4_K_M.gguf",
+    );
+    let starts = Starts::default();
+    let adapter = adapter_with_stopper(true, &starts, &stops);
+
+    let issues = adapter
+        .check(TEXT, &options(&stub.base_url()))
+        .expect("the reloaded server answers");
+
+    assert_eq!(issues.len(), 1);
+    assert_eq!(stops.count(), 1, "the wrong weights are dropped once");
+    assert_eq!(
+        adapter.served_weights().as_deref(),
+        Some("qwen3.8-4b-Q4_K_M.gguf")
+    );
+    assert_eq!(starts.count(), 0, "the reloaded port never fell silent");
+    assert_eq!(stub.checks().len(), 1);
+}
+
+/// `openaiBaseUrl` may name any OpenAI-compatible server, and only llama-server
+/// says which weights it loaded. A server that names none leaves the question
+/// open, and an open question is not a mismatch.
+#[test]
+fn a_server_that_names_no_model_is_checked_rather_than_refused() {
+    let stub = Stub::serving(Answer::Json(ANSWER));
+    let (starts, stops) = (Starts::default(), Stops::default());
+    let adapter = adapter_with_stopper(true, &starts, &stops);
+
+    let issues = adapter
+        .check(TEXT, &options(&stub.base_url()))
+        .expect("the stub answers");
+
+    assert_eq!(issues.len(), 1);
+    assert_eq!(adapter.served_weights(), None);
+    assert_eq!(stops.count(), 0);
+}
+
+/// The guard is one question per row, not one per sentence: a benchmark row of
+/// hundreds of items must not pay for hundreds of probes.
+#[test]
+fn the_server_is_asked_what_it_serves_once_for_the_whole_row() {
+    let stub = Stub::holding(Answer::Json(ANSWER), Some("qwen3.8-4b-Q4_K_M.gguf"));
+    let (starts, stops) = (Starts::default(), Stops::default());
+    let adapter = adapter_with_stopper(true, &starts, &stops);
+    let options = options(&stub.base_url());
+
+    for _ in 0..3 {
+        adapter.check(TEXT, &options).expect("the stub answers");
+    }
+
+    let probes = stub.requests().len() - stub.checks().len();
+    assert_eq!(probes, 1, "{:?}", stub.requests());
+    assert_eq!(stub.checks().len(), 3);
+}
+
+/// A silent port needs no guard: the start path brings the server up for
+/// `openaiModel` itself, so nothing is left to disagree with.
+#[test]
+fn a_silent_port_is_started_rather_than_refused() {
+    let address = silent_address();
+    let (starts, stops) = (Starts::default(), Stops::default());
+
+    let failure = adapter_with_stopper(true, &starts, &stops)
+        .check(TEXT, &options(&format!("http://{address}")))
+        .expect_err("nothing listens on the port");
+
+    assert_eq!(starts.count(), 1, "the start path still runs");
+    assert_eq!(stops.count(), 0, "there is nothing to reload");
+    assert!(
+        matches!(failure, EngineFailure::Unavailable(_)),
+        "{failure:?}"
     );
 }

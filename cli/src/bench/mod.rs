@@ -958,6 +958,9 @@ fn measure(
         tally: Tally::of(&recorded),
         memory: memory_reading(slug, before),
         wall_ms: started_row.elapsed().as_millis() as u64,
+        // What the server said it held, read by the guard before the first
+        // Check of this row (HUF-236).
+        served: adapter.served_model(),
     };
     (Outcome::Measured(Box::new(measurement)), checks)
 }

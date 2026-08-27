@@ -40,6 +40,13 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   Until they are loaded it answers HTTP 503, which is minutes for a 5 GB file.
   `openai/mod.rs` maps that one status to `engine_unavailable`.
   `start_and_retry` then waits it out rather than failing the first Check of a session.
+- llama-server ignores the `model` field of the request, so the weights it already holds answer every Check.
+  `cli/src/engines/openai/served.rs` is the whole guard against that (HUF-236): the adapter reads `GET /v1/models` and then `GET /props` once, before its first Check, and `served::matches` compares what the server named with `openaiModel` on the prefix rule `unit::model_file` uses.
+  A named mismatch stops the unit through the `Stopper` value and lets the start path load the right weights; a port that still holds the wrong model is `bad_arguments` naming both.
+  A server that names no model is checked as before, because `openaiBaseUrl` accepts any OpenAI-compatible server.
+  The answer is cached per adapter, and one adapter is built per bench row and per `check` run, so a 365-item row pays one probe.
+  `Engine::served_model` carries it to `Measurement::served`, which is the "Weights served for" line under both bench tables.
+  Every stub of `cli/tests/bench.rs` and `cli/tests/openai_stub.rs` therefore has to route on the request line: a probe is not a Check and must not reach the counters.
 - The `openai` base URL host must be loopback, and `cli/src/engines/openai/endpoint.rs` is the only place that decides it.
   A remote host is `bad_arguments` and no request is made; that is a product guarantee, so keep it tested.
   Its prompt in `prompt.rs` is the wording HUF-181 measured, and the "shortest exact substring" rule is what makes the spans usable rather than whole-sentence rewrites.

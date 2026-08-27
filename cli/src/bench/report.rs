@@ -51,6 +51,12 @@ pub struct Measurement {
     pub memory: Reading,
     /// How long the whole row took, every Check of the fixture included.
     pub wall_ms: u64,
+    /// The weights the model server reported for this row (HUF-236).
+    ///
+    /// `None` for every engine that serves no weights of its own, and for a
+    /// server that names no model. A row that ran carries what was served, so
+    /// the file says what was measured and not only what was asked for.
+    pub served: Option<String>,
 }
 
 /// Whether one row ran, and why it did not.
@@ -301,10 +307,9 @@ impl Report {
         }
         out.push('\n');
         for row in &set.engines {
-            out.push_str(&memory_source_line(
-                &format!("`{}`", row.engine),
-                &row.outcome,
-            ));
+            let label = format!("`{}`", row.engine);
+            out.push_str(&memory_source_line(&label, &row.outcome));
+            out.push_str(&served_line(&label, &row.outcome));
         }
         out.push('\n');
         out
@@ -368,6 +373,7 @@ impl Report {
         out.push_str("Thinking is the local mode the row ran in, from `--thinking`. A cloud row prints `-`: the mode is a llama.cpp chat-template argument and never reaches a provider.\n");
         for row in &set.models {
             out.push_str(&memory_source_line(&self.row_label(set, row), &row.outcome));
+            out.push_str(&served_line(&self.row_label(set, row), &row.outcome));
         }
         for row in &set.models {
             if let Outcome::Measured(measurement) = &row.outcome {
@@ -1020,6 +1026,19 @@ fn missed_items(set: &SetTables) -> String {
 /// engine and two different numbers. A skipped row measured nothing, so it has
 /// no source to name and prints no line. `name` arrives quoted, because a
 /// Models row may name its thinking mode outside the backticks.
+/// The line that names the weights the server behind one row actually held.
+///
+/// A row whose server named no model prints nothing: `openaiBaseUrl` may name
+/// any OpenAI-compatible server, and only llama-server says what it loaded.
+/// The row is still guarded, because the guard refuses a named mismatch before
+/// the first Check and never runs on a silence (HUF-236).
+fn served_line(name: &str, outcome: &Outcome) -> String {
+    match outcome.measurement().and_then(|it| it.served.as_deref()) {
+        None => String::new(),
+        Some(served) => format!("Weights served for {name}: `{served}`.\n"),
+    }
+}
+
 fn memory_source_line(name: &str, outcome: &Outcome) -> String {
     match outcome {
         Outcome::Skipped(_) => String::new(),
@@ -1197,6 +1216,7 @@ mod tests {
             tally,
             memory: Reading::new(memory_bytes, source),
             wall_ms: 12_000,
+            served: None,
         }))
     }
 
