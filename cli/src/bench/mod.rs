@@ -52,6 +52,7 @@
 //! pass the cap by at most one Check for each cloud row in flight. The report
 //! prints what the run actually paid rather than the cap.
 
+pub mod chunks;
 pub mod evalset;
 pub mod fixture;
 pub mod judge;
@@ -79,7 +80,10 @@ use fixture::Sentence;
 use machine::Machine;
 use memory::{Reading, Source};
 use metrics::{Recorded, Tally};
-use report::{EngineRow, Measurement, ModelRow, Outcome, Report, ServerUse, SetTables};
+use report::{
+    ChunkMeasurement, ChunkOutcome, ChunkRow, EngineRow, Measurement, ModelRow, Outcome, Report,
+    ServerUse, SetTables,
+};
 
 /// The engines of the Engines table, in the order the table prints them.
 ///
@@ -110,12 +114,23 @@ pub struct Run {
 pub fn run(args: &BenchArgs, stored: &StoredSettings) -> Result<Run, String> {
     let plan = Plan::of(args)?;
     let base = base_options(stored, args.thinking);
+    let drafts = chunks::drafts();
     let spend = Mutex::new(Spend::new(args.max_cost));
 
     let mut checks: Vec<RecordedCheck> = Vec::new();
     let mut sets: Vec<SetTables> = Vec::new();
 
-    let (fixture_set, fixture_checks) = tables(FIXTURE, fixture::sentences(), &plan, &base, &spend);
+    // The Drafts are one gate on the local rows rather than a set of their
+    // own, so they run beside the fixture alone. A second set would check
+    // them twice and print a table the run cannot tell apart.
+    let (fixture_set, fixture_checks, chunk_rows) = tables(
+        FIXTURE,
+        fixture::sentences(),
+        Some(&drafts),
+        &plan,
+        &base,
+        &spend,
+    );
     sets.push(fixture_set);
     checks.extend(fixture_checks);
 
@@ -125,7 +140,7 @@ pub fn run(args: &BenchArgs, stored: &StoredSettings) -> Result<Run, String> {
     if args.eval_set {
         match evalset::load() {
             Ok(sentences) => {
-                let (set, set_checks) = tables(EVAL_SET, sentences, &plan, &base, &spend);
+                let (set, set_checks, _) = tables(EVAL_SET, sentences, None, &plan, &base, &spend);
                 sets.push(set);
                 checks.extend(set_checks);
             }
@@ -147,6 +162,7 @@ pub fn run(args: &BenchArgs, stored: &StoredSettings) -> Result<Run, String> {
         max_cost: args.max_cost,
         cloud_spend_usd: spend.spent_usd(),
         sets,
+        chunks: chunk_rows,
         eval_set_skipped,
     }
     .render();
@@ -168,14 +184,18 @@ const EVAL_SET: &str = "Eval set";
 /// The cloud rows start first, so they wait on their provider while this
 /// thread runs the rows that need the machine. A run with two sets runs the
 /// sets one after the other, because both share one machine and one cost cap.
+///
+/// `drafts` is the Chunk fixture, given by the one caller that wants the
+/// Chunk gate. The returned Chunk rows are empty for every other caller.
 fn tables(
     name: &'static str,
     sentences: Vec<Sentence>,
+    drafts: Option<&[Sentence]>,
     plan: &Plan,
     base: &CheckOptions,
     spend: &Mutex<Spend>,
-) -> (SetTables, Vec<RecordedCheck>) {
-    let (engines, models) = std::thread::scope(|scope| {
+) -> (SetTables, Vec<RecordedCheck>, Vec<ChunkRow>) {
+    let (engines, models, chunk_rows) = std::thread::scope(|scope| {
         let cloud: Vec<(usize, _)> = plan
             .rows
             .iter()
@@ -196,6 +216,9 @@ fn tables(
 
         let mut models: Vec<Option<(ModelRow, Vec<RecordedCheck>)>> =
             plan.rows.iter().map(|_| None).collect();
+        // One Chunk row per local Models row, filled beside it so both share
+        // the server start that row already paid for.
+        let mut chunk_rows: Vec<ChunkRow> = Vec::new();
         // The model the llama.cpp unit currently serves, so two rows that
         // differ only by thinking mode share one server start.
         let mut serving: Option<&str> = None;
@@ -208,7 +231,11 @@ fn tables(
                 restart_model_server();
                 serving = Some(row.model.as_str());
             }
-            models[index] = Some(model_row(row, server_use, base, &sentences, spend));
+            let measured = model_row(row, server_use, base, &sentences, spend);
+            if let Some(drafts) = drafts {
+                chunk_rows.push(chunk_row(row, &measured.0.outcome, base, drafts, spend));
+            }
+            models[index] = Some(measured);
         }
         for (index, handle) in cloud {
             models[index] = Some(handle.join().expect("a benchmark row does not panic"));
@@ -218,7 +245,7 @@ fn tables(
             .into_iter()
             .map(|row| row.expect("every planned row ran"))
             .collect();
-        (engines, models)
+        (engines, models, chunk_rows)
     });
 
     // The record file keeps plan order however the rows finished, so two runs
@@ -241,7 +268,7 @@ fn tables(
         models: models.into_iter().map(|(row, _)| row).collect(),
         judge: assessment(plan, &checks),
     };
-    (set, checks)
+    (set, checks, chunk_rows)
 }
 
 /// What the judgements file says about one set, when the run was given one.
@@ -668,6 +695,29 @@ fn command_line(args: &BenchArgs) -> String {
     line
 }
 
+/// Which fixture one pass of an engine runs.
+///
+/// A local Models row runs both: the sentences of the interference fixture and
+/// then the Drafts of the Chunk fixture. The two passes reach the same engine
+/// with the same Settings, so the pass is what tells their progress lines apart.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Pass {
+    /// The interference fixture, one sentence per item.
+    Sentences,
+    /// The Chunk fixture, one Draft per item (evals spec section 1).
+    Chunk,
+}
+
+impl Pass {
+    /// What the progress line adds to the row label.
+    fn label_suffix(self) -> &'static str {
+        match self {
+            Pass::Sentences => "",
+            Pass::Chunk => " chunk",
+        }
+    }
+}
+
 fn engine_row(
     slug: EngineSlug,
     base: &CheckOptions,
@@ -678,7 +728,7 @@ fn engine_row(
         engine: slug,
         ..base.clone()
     };
-    let (outcome, checks) = measure(slug, &options, sentences, spend);
+    let (outcome, checks) = measure(slug, &options, sentences, spend, Pass::Sentences);
     (
         EngineRow {
             engine: slug.as_str().to_string(),
@@ -708,7 +758,7 @@ fn model_row(
     } else {
         weights::of(&row.model)
     };
-    let (outcome, checks) = measure(row.slug, &options, sentences, spend);
+    let (outcome, checks) = measure(row.slug, &options, sentences, spend, Pass::Sentences);
     (
         ModelRow {
             model: row.model.clone(),
@@ -720,6 +770,45 @@ fn model_row(
         },
         checks,
     )
+}
+
+/// Run the Chunk fixture for one local Models row.
+///
+/// The Drafts run right after the sentences of the same row, on the server that
+/// row is already using, so no Chunk row pays for a server start of its own.
+/// A row whose sentence pass was skipped never reaches the engine again: the
+/// reason it gave is why the Drafts were not checked either.
+///
+/// The Checks stay out of `--record`. That file is the input of the judge
+/// (evals spec section 4.4), which grades one sentence against one reference
+/// correction, and a Draft of several paragraphs is not that.
+fn chunk_row(
+    row: &Row,
+    sentences: &Outcome,
+    base: &CheckOptions,
+    drafts: &[Sentence],
+    spend: &Mutex<Spend>,
+) -> ChunkRow {
+    let outcome = match sentences {
+        Outcome::Skipped(why) => ChunkOutcome::Skipped(why.clone()),
+        Outcome::Measured(_) => {
+            let (outcome, _) = measure(row.slug, &row.options(base), drafts, spend, Pass::Chunk);
+            match outcome {
+                Outcome::Skipped(why) => ChunkOutcome::Skipped(why),
+                Outcome::Measured(measurement) => {
+                    ChunkOutcome::Measured(Box::new(ChunkMeasurement {
+                        tally: measurement.tally,
+                        wall_ms: measurement.wall_ms,
+                    }))
+                }
+            }
+        }
+    };
+    ChunkRow {
+        model: row.model.clone(),
+        thinking: row.thinking,
+        outcome,
+    }
 }
 
 /// Run the whole fixture through one engine and read its resident memory.
@@ -734,6 +823,7 @@ fn measure(
     options: &CheckOptions,
     sentences: &[Sentence],
     spend: &Mutex<Spend>,
+    pass: Pass,
 ) -> (Outcome, Vec<RecordedCheck>) {
     let mut checks: Vec<RecordedCheck> = Vec::with_capacity(sentences.len());
     let Some(adapter) = adapter(slug) else {
@@ -746,7 +836,11 @@ fn measure(
     let mut recorded = Vec::with_capacity(sentences.len());
     let model = row_model(slug, options);
     let thinking = row_thinking(slug, options);
-    let label = row_label(slug, &model, thinking);
+    let label = format!(
+        "{}{}",
+        row_label(slug, &model, thinking),
+        pass.label_suffix()
+    );
 
     for (index, sentence) in sentences.iter().enumerate() {
         // The cap and the reason another row ended are read together, so a row

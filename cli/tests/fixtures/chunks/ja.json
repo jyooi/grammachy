@@ -1,0 +1,190 @@
+{
+  "id": "chunk-ja",
+  "native": "ja",
+  "text": "Dear Mr. Brown,\n\nThank you very much for your kind mail of last week. About the schedule of the workshop, it will delay by two weeks. I am very sorry to make you trouble, because our meeting room is under repair until the end of the month. I think that is difficult to find another room in the same building. Almost of the members can come on the twentieth, so I would like to choose that day. Please teach me whether that date is convenient to you.\n\nAbout the content, I want that you explain the new safety rules in the first hour. Our engineers discussed about these rules many times, but they still have some question. Last year the session was long, and some of them were boring in the afternoon. So this year I would like to challenge a shorter format with two breaks. I have a plan to making a small handout, and I will send it to you before the day. If you have a good idea, please write to me at any time.\n\nOne more thing about the dinner after the workshop. The restaurant near the station have a quiet room for ten people. I already reserve it, but I can change the number until the day before. Recently I busy with the annual report, so my answer may be slow. Even so, I will do my best for preparing everything before you arrive. I am looking forward to meet you again in Osaka.\n\nPlease let me explain two more points about the workshop room. The projector in that room do not work well, so I will borrow a new one from the head office. Our staff will prepares the chairs in the morning of that day. I think that is better to put the tables in a U shape. Last time the engineers could not to see the screen from the back row. If you need a microphone, please teach me one week before the day. About the handout, I will print thirty copy and bring them by myself. I am sorry for many questions, and thank you for your kind support.\n\nSincerely,\nKenji",
+  "edits": [
+    {
+      "start": 41,
+      "end": 55,
+      "text": "your kind mail",
+      "fix": "your kind email",
+      "type": "collocation"
+    },
+    {
+      "start": 70,
+      "end": 119,
+      "text": "About the schedule of the workshop, it will delay",
+      "fix": "The schedule of the workshop will be delayed",
+      "type": "topic"
+    },
+    {
+      "start": 150,
+      "end": 169,
+      "text": "to make you trouble",
+      "fix": "to cause you trouble",
+      "type": "collocation"
+    },
+    {
+      "start": 253,
+      "end": 265,
+      "text": "is difficult",
+      "fix": "it is difficult",
+      "type": "missing_subject"
+    },
+    {
+      "start": 309,
+      "end": 315,
+      "text": "Almost",
+      "fix": "Most",
+      "type": "false_friend"
+    },
+    {
+      "start": 401,
+      "end": 409,
+      "text": "teach me",
+      "fix": "tell me",
+      "type": "false_friend"
+    },
+    {
+      "start": 442,
+      "end": 444,
+      "text": "to",
+      "fix": "for",
+      "type": "preposition"
+    },
+    {
+      "start": 477,
+      "end": 493,
+      "text": "that you explain",
+      "fix": "you to explain",
+      "type": "clause"
+    },
+    {
+      "start": 548,
+      "end": 563,
+      "text": "discussed about",
+      "fix": "discussed",
+      "type": "preposition"
+    },
+    {
+      "start": 613,
+      "end": 621,
+      "text": "question",
+      "fix": "questions",
+      "type": "plural"
+    },
+    {
+      "start": 672,
+      "end": 683,
+      "text": "were boring",
+      "fix": "were bored",
+      "type": "participle"
+    },
+    {
+      "start": 731,
+      "end": 740,
+      "text": "challenge",
+      "fix": "try",
+      "type": "false_friend"
+    },
+    {
+      "start": 789,
+      "end": 798,
+      "text": "to making",
+      "fix": "to make",
+      "type": "gerund"
+    },
+    {
+      "start": 870,
+      "end": 881,
+      "text": "a good idea",
+      "fix": "any good ideas",
+      "type": "plural"
+    },
+    {
+      "start": 1000,
+      "end": 1004,
+      "text": "have",
+      "fix": "has",
+      "type": "agreement"
+    },
+    {
+      "start": 1036,
+      "end": 1051,
+      "text": "already reserve",
+      "fix": "have already reserved",
+      "type": "tense"
+    },
+    {
+      "start": 1106,
+      "end": 1121,
+      "text": "Recently I busy",
+      "fix": "Recently I have been busy",
+      "type": "copula"
+    },
+    {
+      "start": 1183,
+      "end": 1212,
+      "text": "will do my best for preparing",
+      "fix": "will do my best to prepare",
+      "type": "gerund"
+    },
+    {
+      "start": 1245,
+      "end": 1271,
+      "text": "am looking forward to meet",
+      "fix": "am looking forward to meeting",
+      "type": "gerund"
+    },
+    {
+      "start": 1383,
+      "end": 1394,
+      "text": "do not work",
+      "fix": "does not work",
+      "type": "agreement"
+    },
+    {
+      "start": 1460,
+      "end": 1473,
+      "text": "will prepares",
+      "fix": "will prepare",
+      "type": "agreement"
+    },
+    {
+      "start": 1526,
+      "end": 1535,
+      "text": "is better",
+      "fix": "it is better",
+      "type": "missing_subject"
+    },
+    {
+      "start": 1592,
+      "end": 1608,
+      "text": "could not to see",
+      "fix": "could not see",
+      "type": "modal"
+    },
+    {
+      "start": 1672,
+      "end": 1680,
+      "text": "teach me",
+      "fix": "tell me",
+      "type": "false_friend"
+    },
+    {
+      "start": 1745,
+      "end": 1749,
+      "text": "copy",
+      "fix": "copies",
+      "type": "plural"
+    },
+    {
+      "start": 1791,
+      "end": 1805,
+      "text": "many questions",
+      "fix": "the many questions",
+      "type": "article"
+    }
+  ],
+  "expected_text": "Dear Mr. Brown,\n\nThank you very much for your kind email of last week. The schedule of the workshop will be delayed by two weeks. I am very sorry to cause you trouble, because our meeting room is under repair until the end of the month. I think that it is difficult to find another room in the same building. Most of the members can come on the twentieth, so I would like to choose that day. Please tell me whether that date is convenient for you.\n\nAbout the content, I want you to explain the new safety rules in the first hour. Our engineers discussed these rules many times, but they still have some questions. Last year the session was long, and some of them were bored in the afternoon. So this year I would like to try a shorter format with two breaks. I have a plan to make a small handout, and I will send it to you before the day. If you have any good ideas, please write to me at any time.\n\nOne more thing about the dinner after the workshop. The restaurant near the station has a quiet room for ten people. I have already reserved it, but I can change the number until the day before. Recently I have been busy with the annual report, so my answer may be slow. Even so, I will do my best to prepare everything before you arrive. I am looking forward to meeting you again in Osaka.\n\nPlease let me explain two more points about the workshop room. The projector in that room does not work well, so I will borrow a new one from the head office. Our staff will prepare the chairs in the morning of that day. I think that it is better to put the tables in a U shape. Last time the engineers could not see the screen from the back row. If you need a microphone, please tell me one week before the day. About the handout, I will print thirty copies and bring them by myself. I am sorry for the many questions, and thank you for your kind support.\n\nSincerely,\nKenji"
+}

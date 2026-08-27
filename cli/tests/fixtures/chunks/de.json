@@ -1,0 +1,190 @@
+{
+  "id": "chunk-de",
+  "native": "de",
+  "text": "Dear colleagues,\n\nHere is the protocol of our planning meeting from Tuesday. Since three years we run the same release process, and everybody agreed that it is now too slow. Yesterday we discussed first the test stage, because it holds every other step. Klaus said he becomes the report only two days after the build, which is far too late. I have collected many informations from the last four releases, and the pattern is always the same. The build itself need forty minutes, but the waiting between the stages takes two whole days.\n\nWe collected three meanings on how to fix it, and I write them here in order. First, the nightly job should start till eleven o'clock, so the results are ready in the morning. Second, we want that the test team writes a short note for every failure. Third, eventually we can move the slow browser tests to the weekend. Anna will make a photo of the whiteboard and put it in the shared folder. She also asked whether the new handy numbers are already in the on-call list.\n\nFor the next meeting I would propose the following agenda. We start with the open bugs, then look we at the budget and finally we decide the release date. The actual plan says the second of July, but that week has two public holidays. If we move it one week later, we have enough time for a proper regression run. Please write me until Friday if you are not agree with the new date. I look forward to hear your remarks.\n\nOne last point about the documentation. Our wiki become a new page for every release, but nobody reads them. I mean that one short changelog would help the support team more. Since last autumn we write the same three sentences in four places. Therefore proposes Klaus one template with three fields and nothing else. If nobody contradict, we start with the next release. Please give me a short feedback before Wednesday.\n\nKind regards,\nStefan",
+  "edits": [
+    {
+      "start": 30,
+      "end": 38,
+      "text": "protocol",
+      "fix": "record",
+      "type": "false_friend"
+    },
+    {
+      "start": 77,
+      "end": 94,
+      "text": "Since three years",
+      "fix": "For three years",
+      "type": "preposition"
+    },
+    {
+      "start": 98,
+      "end": 101,
+      "text": "run",
+      "fix": "have run",
+      "type": "tense"
+    },
+    {
+      "start": 184,
+      "end": 217,
+      "text": "we discussed first the test stage",
+      "fix": "we first discussed the test stage",
+      "type": "word_order"
+    },
+    {
+      "start": 268,
+      "end": 275,
+      "text": "becomes",
+      "fix": "gets",
+      "type": "false_friend"
+    },
+    {
+      "start": 363,
+      "end": 375,
+      "text": "informations",
+      "fix": "pieces of information",
+      "type": "countability"
+    },
+    {
+      "start": 458,
+      "end": 462,
+      "text": "need",
+      "fix": "needs",
+      "type": "agreement"
+    },
+    {
+      "start": 555,
+      "end": 563,
+      "text": "meanings",
+      "fix": "opinions",
+      "type": "false_friend"
+    },
+    {
+      "start": 650,
+      "end": 654,
+      "text": "till",
+      "fix": "by",
+      "type": "false_friend"
+    },
+    {
+      "start": 720,
+      "end": 753,
+      "text": "we want that the test team writes",
+      "fix": "we want the test team to write",
+      "type": "clause"
+    },
+    {
+      "start": 793,
+      "end": 803,
+      "text": "eventually",
+      "fix": "possibly",
+      "type": "false_friend"
+    },
+    {
+      "start": 865,
+      "end": 877,
+      "text": "make a photo",
+      "fix": "take a photo",
+      "type": "collocation"
+    },
+    {
+      "start": 960,
+      "end": 965,
+      "text": "handy",
+      "fix": "mobile phone",
+      "type": "false_friend"
+    },
+    {
+      "start": 1031,
+      "end": 1044,
+      "text": "would propose",
+      "fix": "propose",
+      "type": "mood"
+    },
+    {
+      "start": 1101,
+      "end": 1122,
+      "text": "look we at the budget",
+      "fix": "we look at the budget",
+      "type": "word_order"
+    },
+    {
+      "start": 1167,
+      "end": 1173,
+      "text": "actual",
+      "fix": "current",
+      "type": "false_friend"
+    },
+    {
+      "start": 1273,
+      "end": 1280,
+      "text": "we have",
+      "fix": "we will have",
+      "type": "tense"
+    },
+    {
+      "start": 1322,
+      "end": 1343,
+      "text": "Please write me until",
+      "fix": "Please write to me by",
+      "type": "false_friend"
+    },
+    {
+      "start": 1358,
+      "end": 1371,
+      "text": "are not agree",
+      "fix": "do not agree",
+      "type": "copula"
+    },
+    {
+      "start": 1393,
+      "end": 1413,
+      "text": "look forward to hear",
+      "fix": "look forward to hearing",
+      "type": "gerund"
+    },
+    {
+      "start": 1478,
+      "end": 1484,
+      "text": "become",
+      "fix": "gets",
+      "type": "false_friend"
+    },
+    {
+      "start": 1540,
+      "end": 1544,
+      "text": "mean",
+      "fix": "think",
+      "type": "false_friend"
+    },
+    {
+      "start": 1625,
+      "end": 1630,
+      "text": "write",
+      "fix": "have written",
+      "type": "tense"
+    },
+    {
+      "start": 1672,
+      "end": 1696,
+      "text": "Therefore proposes Klaus",
+      "fix": "Klaus therefore proposes",
+      "type": "word_order"
+    },
+    {
+      "start": 1756,
+      "end": 1766,
+      "text": "contradict",
+      "fix": "objects",
+      "type": "false_friend"
+    },
+    {
+      "start": 1823,
+      "end": 1831,
+      "text": "feedback",
+      "fix": "reply",
+      "type": "false_friend"
+    }
+  ],
+  "expected_text": "Dear colleagues,\n\nHere is the record of our planning meeting from Tuesday. For three years we have run the same release process, and everybody agreed that it is now too slow. Yesterday we first discussed the test stage, because it holds every other step. Klaus said he gets the report only two days after the build, which is far too late. I have collected many pieces of information from the last four releases, and the pattern is always the same. The build itself needs forty minutes, but the waiting between the stages takes two whole days.\n\nWe collected three opinions on how to fix it, and I write them here in order. First, the nightly job should start by eleven o'clock, so the results are ready in the morning. Second, we want the test team to write a short note for every failure. Third, possibly we can move the slow browser tests to the weekend. Anna will take a photo of the whiteboard and put it in the shared folder. She also asked whether the new mobile phone numbers are already in the on-call list.\n\nFor the next meeting I propose the following agenda. We start with the open bugs, then we look at the budget and finally we decide the release date. The current plan says the second of July, but that week has two public holidays. If we move it one week later, we will have enough time for a proper regression run. Please write to me by Friday if you do not agree with the new date. I look forward to hearing your remarks.\n\nOne last point about the documentation. Our wiki gets a new page for every release, but nobody reads them. I think that one short changelog would help the support team more. Since last autumn we have written the same three sentences in four places. Klaus therefore proposes one template with three fields and nothing else. If nobody objects, we start with the next release. Please give me a short reply before Wednesday.\n\nKind regards,\nStefan"
+}

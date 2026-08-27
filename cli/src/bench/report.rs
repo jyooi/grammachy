@@ -23,6 +23,7 @@
 //! missed print as ids, which is what ADR 0003 allows a committed file to
 //! carry.
 
+use crate::bench::chunks;
 use crate::bench::judge::{Assessment, RowKey, AGREEMENT_GATE, MINIMUM_LABELLED};
 use crate::bench::machine::Machine;
 use crate::bench::memory::Reading;
@@ -115,10 +116,7 @@ impl ModelRow {
 
     /// The Thinking cell of the Cost table (evals spec section 3).
     fn thinking_cell(&self) -> String {
-        match self.thinking {
-            Some(on) => mode_word(on).to_string(),
-            None => "-".to_string(),
-        }
+        thinking_cell(self.thinking)
     }
 
     /// The key this row's Useful fix count is filed under.
@@ -176,6 +174,36 @@ impl SetTables {
     }
 }
 
+/// One row of the Chunk table, `docs/spec/evals.md` sections 1 and 4.2.
+///
+/// The Chunk fixture is a local-engine gate rather than a ranking, so the row
+/// carries the three numbers that say whether a Compose Chunk finishes: how
+/// long the whole pass took, how many Checks came back, and how much of the
+/// expected correction the answers reached.
+#[derive(Debug, Clone)]
+pub struct ChunkRow {
+    pub model: String,
+    /// The local thinking mode the row ran in. Every Chunk row is local.
+    pub thinking: Option<bool>,
+    pub outcome: ChunkOutcome,
+}
+
+/// The numbers of one Chunk row that ran.
+#[derive(Debug, Clone)]
+pub struct ChunkMeasurement {
+    pub tally: Tally,
+    /// How long every Draft of the fixture took together.
+    pub wall_ms: u64,
+}
+
+/// Whether one Chunk row ran, and why it did not.
+#[derive(Debug, Clone)]
+pub enum ChunkOutcome {
+    Measured(Box<ChunkMeasurement>),
+    /// The one sentence that says why the Drafts were not checked.
+    Skipped(String),
+}
+
 /// Everything one run of the benchmark found.
 #[derive(Debug, Clone)]
 pub struct Report {
@@ -194,6 +222,11 @@ pub struct Report {
     pub cloud_spend_usd: f64,
     /// The fixture first, and the eval set after it when the run had one.
     pub sets: Vec<SetTables>,
+    /// The Chunk fixture pass of every local Models row, in the same order.
+    ///
+    /// It is one list for the whole run rather than one per set: the Drafts
+    /// are a gate on the local rows, and a second set would check them twice.
+    pub chunks: Vec<ChunkRow>,
     /// Why the eval set did not run, when `--eval-set` asked for it.
     ///
     /// A machine with no corpus cache is a skipped table with a reason, never
@@ -373,8 +406,69 @@ impl Report {
         out.push('\n');
 
         out.push_str(&missed_items(set));
+        // The Chunk gate runs once for the whole run, so it prints under the
+        // first set alone rather than again beside the eval set.
+        if first {
+            out.push_str(&self.chunk_table());
+        }
         out.push_str(&self.recommendation_lines(set, &verdicts, ranking));
         out
+    }
+
+    /// The Chunk table, the local-engine gate of evals spec section 1.
+    ///
+    /// It answers one question the sentence tables cannot: does a whole
+    /// Compose Chunk come back inside the timeout. So it prints wall time,
+    /// validity, and recall, and it never ranks anything.
+    fn chunk_table(&self) -> String {
+        let mut out = String::from("### Chunk\n\n");
+        if self.chunks.is_empty() {
+            out.push_str(&format!(
+                "No local row ran, so no Draft of `{}` was checked.\n\n",
+                chunks::DIRECTORY
+            ));
+            return out;
+        }
+
+        out.push_str("| Model | Thinking | Wall time | Valid | Recall |\n");
+        out.push_str("|---|---|---|---|---|\n");
+        for row in &self.chunks {
+            out.push_str(&format!(
+                "| `{}` | {} | {} |\n",
+                row.model,
+                thinking_cell(row.thinking),
+                chunk_cells(&row.outcome).join(" | ")
+            ));
+        }
+        out.push('\n');
+        out.push_str(&format!(
+            "Every local row checks one Draft per native language from `{}`, each a few paragraphs at the Check size limit of the local engine. The table is a gate rather than a ranking: it says whether a whole Compose Chunk comes back inside the timeout.\n",
+            chunks::DIRECTORY
+        ));
+        for row in &self.chunks {
+            if let ChunkOutcome::Skipped(why) = &row.outcome {
+                out.push_str(&format!(
+                    "The Drafts of {} were not checked: {why}\n",
+                    self.chunk_label(row)
+                ));
+            }
+        }
+        out.push('\n');
+        out
+    }
+
+    /// The name the prose under the Chunk table gives one row.
+    fn chunk_label(&self, row: &ChunkRow) -> String {
+        let shared = self
+            .chunks
+            .iter()
+            .filter(|other| other.model == row.model)
+            .count()
+            > 1;
+        match (shared, row.thinking) {
+            (true, Some(on)) => format!("`{}` with thinking {}", row.model, mode_word(on)),
+            _ => format!("`{}`", row.model),
+        }
     }
 
     /// The name the prose under the tables gives one row.
@@ -822,6 +916,26 @@ fn engine_cells(outcome: &Outcome) -> Vec<String> {
     }
 }
 
+/// The three measured cells of one Chunk row, in table order.
+fn chunk_cells(outcome: &ChunkOutcome) -> Vec<String> {
+    match outcome {
+        ChunkOutcome::Skipped(_) => vec![SKIPPED.to_string(); 3],
+        ChunkOutcome::Measured(measurement) => vec![
+            format!("{} s", measurement.wall_ms / 1_000),
+            measurement.tally.validity_cell(),
+            measurement.tally.recall_cell(),
+        ],
+    }
+}
+
+/// How a thinking mode is written in a table cell, `-` for a row with none.
+fn thinking_cell(thinking: Option<bool>) -> String {
+    match thinking {
+        Some(on) => mode_word(on).to_string(),
+        None => "-".to_string(),
+    }
+}
+
 /// The four measured cells of one Throughput row.
 fn throughput_cells(outcome: &Outcome) -> Vec<String> {
     let Outcome::Measured(measurement) = outcome else {
@@ -892,13 +1006,17 @@ const MEASUREMENT_NOTE: &str = "\
 - Cost per 1,000 Checks: the sum of `usage.cost` over the row divided by the number of Checks that reported a cost, times 1,000. A cloud answer that reports no cost ends its row as skipped, because the run cannot then measure what it spends. A cloud row where no Check answered prints `n/a`. Local rows cost nothing per Check.
 - Every sentence is checked with the Native language the set records for it, which is what the shell passes on a real Check.
 - Thinking: the mode `--thinking` gave the local rows. `both` runs every local model twice, once in each mode. The Engines table's `openai` row runs once, in the mode the flag names, and under `both` in the product default. A cloud row prints `-`.
+- Chunk: one Draft per native language, each a few paragraphs at the Check size limit of the local engine, run once per local row after its sentences. Wall time is the whole pass, Valid counts the Drafts that came back, and Recall pairs the same way as above. It is a gate on whether a Compose Chunk finishes, never a ranking.
 ";
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::bench::fixture;
     use crate::bench::memory::Source;
+    use crate::bench::metrics::Recorded;
     use crate::bench::weights;
+    use crate::envelope::{Category, Issue};
 
     fn tally(caught: usize, exact: usize, false_positives: usize, valid: usize) -> Tally {
         Tally {
@@ -959,6 +1077,58 @@ mod tests {
         }
     }
 
+    /// One recorded Chunk pass: every Draft of the fixture, answered by an
+    /// engine that found the first `hits` edits of each and nothing else.
+    ///
+    /// The answers are recorded rather than fetched, so the table is proved
+    /// without a network and without a live model server.
+    fn recorded_chunk_pass(hits: usize, invalid: usize) -> Tally {
+        let recorded: Vec<Recorded> = chunks::drafts()
+            .into_iter()
+            .enumerate()
+            .map(|(index, draft)| {
+                let valid = index >= invalid;
+                Recorded {
+                    id: draft.id.clone(),
+                    native: draft.native.clone(),
+                    edits: draft.edits.iter().map(fixture::Edit::span).collect(),
+                    issues: match valid {
+                        false => Vec::new(),
+                        true => draft
+                            .edits
+                            .iter()
+                            .take(hits)
+                            .map(|edit| Issue {
+                                start: edit.start,
+                                end: edit.end,
+                                original: edit.text.clone(),
+                                fix: edit.fix.clone(),
+                                reason: "recorded".to_string(),
+                                category: Category::Grammar,
+                                rule_id: None,
+                            })
+                            .collect(),
+                    },
+                    text: draft.text,
+                    expected_text: draft.expected_text,
+                    valid,
+                    latency_ms: 41_000,
+                    cost: None,
+                    usage: None,
+                }
+            })
+            .collect();
+        Tally::of(&recorded)
+    }
+
+    fn chunk_row(model: &str, thinking: Option<bool>, outcome: ChunkOutcome) -> ChunkRow {
+        ChunkRow {
+            model: model.to_string(),
+            thinking,
+            outcome,
+        }
+    }
+
     /// The judge key of one Models row, the way the tests name them.
     fn key(engine: &str, model: &str) -> RowKey {
         RowKey {
@@ -1010,6 +1180,7 @@ mod tests {
             max_cost: None,
             cloud_spend_usd: 0.0,
             sets: vec![fixture_set()],
+            chunks: Vec::new(),
             eval_set_skipped: None,
         }
     }
@@ -2006,6 +2177,105 @@ mod tests {
         );
         assert!(
             rendered.contains("Ranking: exact fix rate, then F0.5"),
+            "{rendered}"
+        );
+    }
+
+    #[test]
+    fn the_chunk_table_prints_wall_time_validity_and_recall_per_local_row() {
+        let mut report = report();
+        report.chunks = vec![chunk_row(
+            "gemma-4-e4b-it",
+            Some(true),
+            ChunkOutcome::Measured(Box::new(ChunkMeasurement {
+                tally: recorded_chunk_pass(12, 0),
+                wall_ms: 287_400,
+            })),
+        )];
+
+        let rendered = report.render();
+
+        assert!(rendered.contains("### Chunk"), "{rendered}");
+        let row = rendered
+            .lines()
+            .find(|line| line.starts_with("| `gemma-4-e4b-it` | on | 287 s"))
+            .unwrap_or_else(|| panic!("the Chunk row is printed:\n{rendered}"));
+        // Seven Drafts answered, and twelve of each Draft's edits paired.
+        assert!(row.contains("| 7 of 7 (100.0%) |"), "{row}");
+        assert!(row.contains("| 84 of "), "{row}");
+        assert!(
+            rendered.contains("cli/tests/fixtures/chunks/"),
+            "the table names the Drafts:\n{rendered}"
+        );
+    }
+
+    #[test]
+    fn a_chunk_row_counts_a_draft_that_never_answered_against_its_validity() {
+        let mut report = report();
+        report.chunks = vec![chunk_row(
+            "gemma-4-e4b-it",
+            Some(true),
+            ChunkOutcome::Measured(Box::new(ChunkMeasurement {
+                tally: recorded_chunk_pass(10, 2),
+                wall_ms: 300_000,
+            })),
+        )];
+
+        let rendered = report.render();
+        let row = rendered
+            .lines()
+            .find(|line| line.starts_with("| `gemma-4-e4b-it` | on |"))
+            .unwrap_or_else(|| panic!("the Chunk row is printed:\n{rendered}"));
+
+        assert!(row.contains("| 5 of 7 (71.4%) |"), "{row}");
+        // An invalid Check found nothing, so its Draft's edits stay unpaired.
+        assert!(row.contains("| 50 of "), "{row}");
+    }
+
+    #[test]
+    fn both_modes_of_one_model_are_two_chunk_rows_the_file_can_tell_apart() {
+        let mut report = report();
+        report.chunks = vec![
+            chunk_row(
+                "gemma-4-e4b-it",
+                Some(true),
+                ChunkOutcome::Measured(Box::new(ChunkMeasurement {
+                    tally: recorded_chunk_pass(12, 0),
+                    wall_ms: 287_000,
+                })),
+            ),
+            chunk_row(
+                "gemma-4-e4b-it",
+                Some(false),
+                ChunkOutcome::Skipped("The model server did not answer in 90 s.".to_string()),
+            ),
+        ];
+
+        let rendered = report.render();
+
+        assert!(
+            rendered.contains("| `gemma-4-e4b-it` | on | 287 s |"),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains("| `gemma-4-e4b-it` | off | skipped | skipped | skipped |"),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains("The Drafts of `gemma-4-e4b-it` with thinking off were not checked: The model server did not answer in 90 s."),
+            "{rendered}"
+        );
+    }
+
+    #[test]
+    fn a_run_with_no_local_row_says_no_draft_was_checked() {
+        let rendered = report().render();
+
+        assert!(rendered.contains("### Chunk"), "{rendered}");
+        assert!(
+            rendered.contains(
+                "No local row ran, so no Draft of `cli/tests/fixtures/chunks/` was checked."
+            ),
             "{rendered}"
         );
     }
