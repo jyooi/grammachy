@@ -253,6 +253,26 @@ def judge(item: dict, model: str) -> dict:
         return {"item": item, "error": error}
 
 
+def read_judgements(out: Path) -> dict[str, dict[str, dict]]:
+    """The judgements already in the file, or nothing when it is not one.
+
+    A truncated write, an empty file, or a hand edit all leave something this
+    script cannot merge. That is a file with nothing to keep rather than a
+    reason to end the run, so the operator is told and the run writes over it.
+    """
+    try:
+        existing = json.loads(out.read_text())
+    except (OSError, ValueError) as failure:
+        print(f"{out} cannot be read, so it is replaced: {failure}", file=sys.stderr)
+        return {}
+    if not isinstance(existing, dict) or not all(
+        isinstance(answers, dict) for answers in existing.values()
+    ):
+        print(f"{out} is not a judgements file, so it is replaced.", file=sys.stderr)
+        return {}
+    return existing
+
+
 def write_judgements(out: Path, judgements: dict, replace: bool) -> int:
     """Fold this run's judgements over the file already there, and say how many.
 
@@ -262,10 +282,14 @@ def write_judgements(out: Path, judgements: dict, replace: bool) -> int:
 
     The write lands on a `.pending` sibling and is renamed, so a run that dies
     part way leaves the earlier file whole.
+
+    A file this script cannot read is merged as if it were absent. There is
+    nothing to keep from it, and refusing would throw away the calls this run
+    just paid for, so it says so on stderr and writes anyway.
     """
     merged: dict[str, dict[str, dict]] = {}
     if out.exists() and not replace:
-        merged = json.loads(out.read_text())
+        merged = read_judgements(out)
     kept = sum(len(answers) for answers in merged.values())
     for item_id, answers in judgements.items():
         merged.setdefault(item_id, {}).update(answers)

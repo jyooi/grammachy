@@ -16,7 +16,7 @@
 //! the validity floor and never with more false positives than the default
 //! engine. Cloud rows compete only for the separate cloud line.
 
-use crate::bench::judge::Assessment;
+use crate::bench::judge::{Assessment, AGREEMENT_GATE, MINIMUM_LABELLED};
 use crate::bench::machine::Machine;
 use crate::bench::memory::Reading;
 use crate::bench::metrics::Tally;
@@ -177,7 +177,7 @@ impl Report {
         out.push('\n');
         if let Some(judge) = &self.judge {
             out.push_str(&judge.lines());
-            out.push_str(&self.unjudged_rows_line());
+            out.push_str(&self.ranking_sentence());
             out.push('\n');
         }
 
@@ -287,7 +287,7 @@ impl Report {
         cells
     }
 
-    /// Whether the judgements file covers every row that produced a hit.
+    /// The measured rows that produced a non-exact hit the file grades none of.
     ///
     /// The swapped measure adds useful non-exact hits to exact fixes, so a row
     /// the file grades no hit of competes on a strictly smaller measure than a
@@ -297,15 +297,32 @@ impl Report {
     ///
     /// A row that produced no non-exact hit at all was offered nothing to
     /// grade, so it is not unjudged and it never blocks the swap.
-    fn every_row_is_judged(&self) -> bool {
+    ///
+    /// A skipped row is not one of these either. A cloud row the cost cap ended
+    /// keeps the Checks it already ran, so the judge input carries its hits,
+    /// but the row has no tally, prints `skipped` in every column, and can
+    /// never be recommended. Letting it drop the swap would decide the
+    /// recommendation on a row the report did not measure.
+    fn unjudged_rows(&self) -> Vec<String> {
         let Some(judge) = self.judge.as_ref() else {
-            return true;
+            return Vec::new();
         };
-        !self.models.iter().any(|row| {
-            judge
-                .row(&row.engine, &row.model)
-                .is_some_and(|graded| graded.hits > 0 && graded.judged == 0)
-        })
+        self.models
+            .iter()
+            .filter(|row| row.outcome.tally().is_some())
+            .filter(|row| {
+                judge
+                    .row(&row.engine, &row.model)
+                    .is_some_and(|graded| graded.hits > 0 && graded.judged == 0)
+            })
+            .map(|row| format!("`{}`", row.model))
+            .collect()
+    }
+
+    /// Whether the judgements file covers every measured row that produced a
+    /// hit, the second condition of the ranking swap.
+    fn every_row_is_judged(&self) -> bool {
+        self.unjudged_rows().is_empty()
     }
 
     /// What one row is ranked on, in percent of its interference sentences.
@@ -336,32 +353,32 @@ impl Report {
         100.0 * (tally.exact + useful) as f64 / tally.interference as f64
     }
 
-    /// The models the judgements file graded not one hit of, named under the
-    /// Quality table so a reader can see why the ranking fell back.
+    /// The one sentence that says whether the Useful fix column ranks.
     ///
-    /// The sentence is worth printing only when the gate itself passed, because
-    /// the whole table is on exact fix rate otherwise.
-    fn unjudged_rows_line(&self) -> String {
-        let Some(judge) = self.judge.as_ref().filter(|judge| judge.ranks()) else {
+    /// `Assessment::lines` reports what the judge measured and stops there, so
+    /// this is the only claim the file makes about the ranking. It reads the
+    /// same two conditions `rank_score` and `ranking_measure` do, which is what
+    /// keeps the three paragraphs from disagreeing.
+    fn ranking_sentence(&self) -> String {
+        let Some(judge) = self.judge.as_ref() else {
             return String::new();
         };
-        let unjudged: Vec<String> = self
-            .models
-            .iter()
-            .filter(|row| {
-                judge
-                    .row(&row.engine, &row.model)
-                    .is_some_and(|graded| graded.hits > 0 && graded.judged == 0)
-            })
-            .map(|row| format!("`{}`", row.model))
-            .collect();
-        if unjudged.is_empty() {
-            return String::new();
+        if judge.ranks() && self.every_row_is_judged() {
+            return "The Useful fix column counts in the ranking.\n".to_string();
         }
-        format!(
-            "The judgements file covers no non-exact hit of {}.\nThat gap is coverage rather than quality, so the whole table keeps the raw exact fix ranking.\n",
-            unjudged.join(", ")
-        )
+        let reason = if judge.labelled == 0 {
+            "no hand label covers a hit of this run".to_string()
+        } else if judge.labelled < MINIMUM_LABELLED {
+            format!("this run matched under the {MINIMUM_LABELLED} hand labels the gate needs")
+        } else if !judge.ranks() {
+            format!("the judge is under the {AGREEMENT_GATE:.0}% gate")
+        } else {
+            format!(
+                "the judgements file covers no non-exact hit of {}",
+                self.unjudged_rows().join(", ")
+            )
+        };
+        format!("The Useful fix column does not count in the ranking, because {reason}.\n")
     }
 
     /// The Recommended cell of every row, in row order.
@@ -1139,7 +1156,7 @@ mod tests {
         let rendered = judged_report(4).render();
 
         assert!(
-            rendered.contains("The judge agreed with the hand labels on 4 of 5 (80.0%), at or above the 80% gate, so the Useful fix column counts in the ranking."),
+            rendered.contains("The judge agreed with the hand labels on 4 of 5 (80.0%), at or above the 80% gate.\nThe Useful fix column counts in the ranking.\n"),
             "{rendered}"
         );
         // 10 exact plus 4 useful beats 12 exact plus 1 useful.
@@ -1158,7 +1175,7 @@ mod tests {
         let rendered = judged_report(3).render();
 
         assert!(
-            rendered.contains("The judge agreed with the hand labels on 3 of 5 (60.0%), under the 80% gate, so the Useful fix column is printed but excluded from the ranking."),
+            rendered.contains("The judge agreed with the hand labels on 3 of 5 (60.0%), under the 80% gate.\nThe Useful fix column does not count in the ranking, because the judge is under the 80% gate.\n"),
             "{rendered}"
         );
         assert!(rendered.contains("| 4 of 5 (80.0%) |"), "{rendered}");
@@ -1240,13 +1257,13 @@ mod tests {
         .render();
 
         assert!(
-            rendered.contains("counts in the ranking."),
+            rendered.contains("at or above the 80% gate.\n"),
             "the gate itself passed: {rendered}"
         );
         assert!(rendered.contains("| not judged (10 hits) |"), "{rendered}");
         assert!(
             rendered.contains(
-                "The judgements file covers no non-exact hit of `gemma-4-e4b-it`.\nThat gap is coverage rather than quality, so the whole table keeps the raw exact fix ranking.\n"
+                "The Useful fix column does not count in the ranking, because the judgements file covers no non-exact hit of `gemma-4-e4b-it`.\n"
             ),
             "{rendered}"
         );
@@ -1274,7 +1291,7 @@ mod tests {
 
         assert!(rendered.contains("| no non-exact hit |"), "{rendered}");
         assert!(
-            !rendered.contains("The judgements file covers no non-exact hit of"),
+            rendered.contains("The Useful fix column counts in the ranking.\n"),
             "{rendered}"
         );
         assert!(
@@ -1282,6 +1299,38 @@ mod tests {
             "{rendered}"
         );
         // 10 exact plus 5 useful beats 12 exact and nothing to add to it.
+        assert!(
+            rendered.contains("Recommended local model, the Settings default and the README line: `phi-4-mini-instruct`."),
+            "{rendered}"
+        );
+    }
+    /// A cloud row the cost cap ended keeps the Checks it already ran, so the
+    /// judge input carries its hits. The report never measured that row, so it
+    /// must not decide what the measured rows are ranked on.
+    #[test]
+    fn a_skipped_row_that_ran_some_checks_does_not_drop_the_swapped_measure() {
+        let mut report = coverage_report(&[
+            ("gemma-4-e4b-it", 12, 0, None),
+            ("phi-4-mini-instruct", 10, 5, Some(5)),
+            ("deepseek/deepseek-v4-flash-0731", 0, 2, None),
+        ]);
+        report.models[2].outcome = Outcome::Skipped("the cost cap ended this row.".to_string());
+        let rendered = report.render();
+
+        assert!(
+            !rendered.contains("covers no non-exact hit of"),
+            "a row the report did not measure is never named unjudged: {rendered}"
+        );
+        assert!(
+            rendered.contains("The Useful fix column counts in the ranking.\n"),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains("Ranking: exact fix rate plus the non-exact hits the judge called useful, over the interference sentences, then F0.5"),
+            "{rendered}"
+        );
+        // 10 exact plus 5 useful beats 12 exact, which is only true while the
+        // skipped row leaves the swapped measure in place.
         assert!(
             rendered.contains("Recommended local model, the Settings default and the README line: `phi-4-mini-instruct`."),
             "{rendered}"

@@ -15,12 +15,14 @@
 //!   writer gets after Accept. Nesting the two keys is what keeps a result text
 //!   that holds any delimiter readable, and it is what folds the identical
 //!   answers of two models onto one judgement.
-//! - The **gate** is spec section 4.4: the column counts in the ranking only
-//!   when the judge agrees with the committed hand labels on at least 80% of
-//!   the labelled items of that run, over a sample of at least
-//!   [`MINIMUM_LABELLED`] of them. Below the gate, under that sample, or with
-//!   no label matched, the column still prints and the file says it is
-//!   excluded.
+//! - The **gate** is spec section 4.4: the judge is proven on a run only when
+//!   it agrees with the committed hand labels on at least 80% of the labelled
+//!   items of that run, over a sample of at least [`MINIMUM_LABELLED`] of them.
+//!   Below the gate, under that sample, or with no label matched, the column
+//!   still prints and the file says the judge is unproven.
+//!
+//! The gate is one of the two conditions the ranking swap needs, so this module
+//! never claims the column ranks. `Report::ranking_sentence` owns that claim.
 //!
 //! The hand labels are compiled in from `tests/fixtures/judge-labels.json`, so
 //! a released binary needs no repository checkout, the same rule the fixture
@@ -213,6 +215,10 @@ impl Assessment {
     }
 
     /// The sentences the benchmark file carries under the Quality table.
+    ///
+    /// These report what the judge measured and stop there. Whether the column
+    /// ranks is `Report::ranking_sentence`, because the gate is only one of the
+    /// two conditions and this half cannot see the other.
     pub fn lines(&self) -> String {
         let mut out = String::new();
         out.push_str(&format!(
@@ -221,22 +227,22 @@ impl Assessment {
         ));
         match self.agreement_percent() {
             Some(_) if self.labelled < MINIMUM_LABELLED => out.push_str(&format!(
-                "This run matched {}, under the {MINIMUM_LABELLED} the {AGREEMENT_GATE:.0}% gate needs, so the judge is unproven here.\nThe report keeps the raw ranking of exact fix rate.\n",
+                "This run matched {}, under the {MINIMUM_LABELLED} the {AGREEMENT_GATE:.0}% gate needs, so the judge is unproven here.\n",
                 match self.labelled {
                     1 => "1 hand label".to_string(),
                     labelled => format!("{labelled} hand labels"),
                 }
             )),
             Some(percent) if self.ranks() => out.push_str(&format!(
-                "The judge agreed with the hand labels on {} of {} ({percent:.1}%), at or above the {AGREEMENT_GATE:.0}% gate, so the Useful fix column counts in the ranking.\n",
+                "The judge agreed with the hand labels on {} of {} ({percent:.1}%), at or above the {AGREEMENT_GATE:.0}% gate.\n",
                 self.agreed, self.labelled
             )),
             Some(percent) => out.push_str(&format!(
-                "The judge agreed with the hand labels on {} of {} ({percent:.1}%), under the {AGREEMENT_GATE:.0}% gate, so the Useful fix column is printed but excluded from the ranking.\n",
+                "The judge agreed with the hand labels on {} of {} ({percent:.1}%), under the {AGREEMENT_GATE:.0}% gate.\n",
                 self.agreed, self.labelled
             )),
             None => out.push_str(&format!(
-                "No hand label of `cli/tests/fixtures/judge-labels.json` covers a hit of this run, so the {AGREEMENT_GATE:.0}% gate could not be measured and the Useful fix column is excluded from the ranking.\n",
+                "No hand label of `cli/tests/fixtures/judge-labels.json` covers a hit of this run, so the {AGREEMENT_GATE:.0}% gate could not be measured.\n",
             )),
         }
         out
@@ -386,7 +392,7 @@ mod tests {
         assert!(!assessment.ranks(), "four labels is under the sample");
         assert!(
             assessment.lines().contains(
-                "This run matched 4 hand labels, under the 5 the 80% gate needs, so the judge is unproven here.\nThe report keeps the raw ranking of exact fix rate.\n"
+                "This run matched 4 hand labels, under the 5 the 80% gate needs, so the judge is unproven here.\n"
             ),
             "{}",
             assessment.lines()
