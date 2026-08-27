@@ -106,7 +106,7 @@ Run this item with **two windows side by side**, because one window cannot tell 
 
 Expected: the popup opens beside the **left** terminal, at its top edge, on its trailing side, and not in the top-right corner of the screen.
 It never runs off the screen: its trailing edge stays inside the monitor and its top edge stays under the bar.
-The whole sentence shows, `has` and `book` carry a solid underline, and the hero reads `2 issues, 0 accepted, languagetool, <n> ms`.
+The whole sentence shows, `has` and `book` carry a solid underline, and the hero reads `2 issues, 0 accepted, harper, <n> ms`.
 Accept moves the mark to green and shows the Fix in place.
 Skip dims the mark and drops its underline.
 Both advance the focus to the next open Issue.
@@ -186,7 +186,7 @@ The capture tries the primary selection, then the Ctrl + C fallback, so this ite
 
 ## 8. Smoke item 4: a 6,000 unit selection
 
-The Check size limit belongs to the Engine, and the default `languagetool` engine takes 5,000 UTF-16 code units (spec section 4).
+The Check size limit belongs to the Engine, and the default `harper` engine takes 5,000 UTF-16 code units (spec section 4).
 A longer selection earns the too-long card.
 
 1. Make a file of about 6,000 characters and open it in a terminal pager or an editor:
@@ -261,7 +261,7 @@ Expected: the hero reads `draft, 20,000 units` and `Check` is on.
 
 2. Press `Check`.
 
-Expected: the hero meta line reads `Checking 1 of n, languagetool, <elapsed>`, with a `Cancel` button beside it.
+Expected: the hero meta line reads `Checking 1 of n, harper, <elapsed>`, with a `Cancel` button beside it.
 The number climbs, the elapsed time counts up, and the bar under `Checking chunk k of n...` fills as each Chunk lands.
 `n` is what `grammachy chunk` answered; check it by hand with the same Draft:
 
