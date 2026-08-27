@@ -356,6 +356,67 @@ fn neither_card_draws_the_consent_over_the_settings_view() {
     }
 }
 
+/// Spec section 9: a chunked run that stops keeps what the engine already
+/// answered. A `Retry remaining` after a failed Chunk can reach the consent
+/// card with the Issues of the finished Chunks in hand, so Cancel puts the
+/// reader back where the run was rather than in a blank Draft.
+#[test]
+fn cancel_keeps_a_partial_chunked_review() {
+    let source = read("Overlay.qml");
+    let body = function_body(&source, "cancelCloudCheck");
+
+    let keep = body
+        .find(r#"root.surface === "compose" && root.issues.length > 0"#)
+        .expect("Cancel tells a run that found Issues from one that found none");
+    let clear = body
+        .find("root.clearChunkRun()")
+        .expect("a run that found nothing still ends");
+    assert!(
+        keep < clear,
+        "the Issues in hand are answered for before the run is cleared: {body}"
+    );
+    assert!(
+        body.contains("root.stopChunkRun()") && body.contains("root.backToChunkStop()"),
+        "Cancel stops the run where it stands and draws the card it stood in front of: {body}"
+    );
+
+    // `Retry remaining` resumes at the Chunk that stopped the run, so the list
+    // and the index have to outlive the Cancel.
+    let stop = function_body(&source, "stopChunkRun");
+    for gone in [
+        "root.chunks = []",
+        "root.chunkIndex = 0",
+        "root.chunkEngine",
+    ] {
+        assert!(
+            !stop.contains(gone),
+            "stopChunkRun keeps {gone} for the retry: {stop}"
+        );
+    }
+
+    // The retry clears the error card before the first Chunk goes out, so it
+    // records what it cleared and the Cancel puts that back.
+    assert!(
+        function_body(&source, "retryRemaining").contains("root.chunkResume = root.errorCard"),
+        "the retry records the failure it is leaving"
+    );
+    let back = function_body(&source, "backToChunkStop");
+    assert!(
+        back.contains(r#"root.phase = "error""#) && back.contains(r#"root.phase = "result""#),
+        "Cancel lands on the failure it came from, or on the partial result: {back}"
+    );
+
+    // A pending failure never outlives the run it belongs to.
+    assert!(
+        function_body(&source, "clearChunkRun").contains("root.chunkResume = null"),
+        "a cleared run drops the failure it was resuming from"
+    );
+    assert!(
+        function_body(&source, "continueCloudCheck").contains("root.chunkResume = null"),
+        "a Check that goes out drops the failure it was resuming from"
+    );
+}
+
 /// The reader's decision time is not engine time. A chunked Check reaches the
 /// card with the compose progress clock already running, so the card stops it
 /// and Continue starts it again.
@@ -391,14 +452,20 @@ fn the_consent_card_stops_the_compose_progress_clock() {
         "the clock is running again before the Chunk goes out: {cont}"
     );
 
-    // Cancel ends the run, so it leaves no ticker behind.
+    // Cancel leaves no ticker behind, whether it ends the run or stops it where
+    // it stands to keep a partial review.
+    let cancel = function_body(&source, "cancelCloudCheck");
     assert!(
-        function_body(&source, "cancelCloudCheck").contains("root.clearChunkRun()"),
-        "Cancel ends the chunked run, which stops the ticker"
+        cancel.contains("root.clearChunkRun()") && cancel.contains("root.stopChunkRun()"),
+        "both ways out of Cancel stop the run: {cancel}"
     );
     assert!(
-        function_body(&source, "clearChunkRun").contains("chunkTicker.stop()"),
-        "clearChunkRun stops the ticker"
+        function_body(&source, "stopChunkRun").contains("chunkTicker.stop()"),
+        "stopping the run stops the ticker"
+    );
+    assert!(
+        function_body(&source, "clearChunkRun").contains("root.stopChunkRun()"),
+        "clearing the run stops it first, so the ticker never outlives it"
     );
 }
 

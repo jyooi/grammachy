@@ -139,7 +139,10 @@ An older binary then degrades rather than breaks.
 
 The first missing piece in that order is the diagnosis.
 When nothing is missing, the diagnosis says the engine can run.
-For `openrouter` the ready line names the model and says that Checks send text to openrouter.ai.
+For `openrouter` the ready line has two forms, because `openrouterModel` has no built-in default.
+With a model set it reads `The key is in place and the model is <model>. Checks send text to openrouter.ai.`
+With no model set it reads `The key is in place. Set the cloud model in Settings before a Check.`
+The second form names no model, because a report that named an empty one would name a Check that cannot run.
 For `languagetool` and `openai` it also names the address its unit answers on.
 
 ## Hardware tiers

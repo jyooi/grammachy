@@ -93,6 +93,7 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   Neither card draws the consent over the Settings view, so `onSettingsOpenChanged` cancels the pending Check and `keyMode` answers for `settingsOpen` before the `cloudConsent` phase.
   That is the same rule `onShowsModelsChanged` keeps for the Models Remove confirm: a question that is off the screen must never still be answerable.
   `Overlay.pauseChunkClock` and `Overlay.resumeChunkClock` keep the reader's decision time out of the compose progress line, because a chunked Check reaches the card with that clock already running.
+  Cancel keeps a partial chunked review: `Overlay.stopChunkRun` leaves the Chunk list and the index for `Retry remaining`, and `Overlay.chunkResume` is the failure `retryRemaining` cleared, which `backToChunkStop` puts back.
   `Overlay.refreshCloudKey` is the only reader of the key state, through `doctor --engine openrouter --json`; no QML may open the key file.
   The `key` check of the `doctor` envelope carries a `state` word, documented in `docs/doctor.md`, and `ui/settings.js` reads that rather than the prose of `detail`.
   A key file that exists but cannot be used reads as `loose` or `empty`, which the hint labels apart from a missing key.

@@ -125,6 +125,11 @@ Item {
   property int chunkIndex: 0
   property bool chunkRun: false
   property bool chunkCancelled: false
+  // The failure a `Retry remaining` left behind, or null. The retry clears the
+  // error card before the first Chunk goes out, and the cloud consent card can
+  // stand in front of that Chunk. The Issues the finished Chunks found are
+  // reachable from that card alone, so Cancel has to put it back.
+  property var chunkResume: null
   // The engine slug the Chunk list was packed for. The limit belongs to the
   // Engine (spec section 4), so a Chunk list only fits the size that Engine
   // reads: a Chunk packed for a wider Engine is refused by a narrower one.
@@ -838,6 +843,7 @@ Item {
     root.cloudConsentGiven = true
     root.persistSetting("cloudConsent", true)
     root.clearCloudConsent()
+    root.chunkResume = null
     root.phase = "checking"
     root.resumeChunkClock()
     root.launchCheck(text, engineSlug)
@@ -851,6 +857,15 @@ Item {
     // Nothing is in flight and nothing is going to be, so a late answer from an
     // earlier run must not land on the card this leaves behind.
     root.runGeneration += 1
+    // Spec section 9: a run that stops keeps what the engine already answered.
+    // The Chunk list and the Chunk index stay with it, so `Retry remaining`
+    // resumes at the Chunk that stopped the run.
+    if (root.surface === "compose" && root.issues.length > 0) {
+      root.stopChunkRun()
+      root.backToChunkStop()
+      Qt.callLater(root.restoreFocus)
+      return
+    }
     root.clearChunkRun()
     if (root.surface === "compose") {
       root.phase = "editing"
@@ -867,6 +882,23 @@ Item {
   function clearCloudConsent() {
     root.cloudPendingText = ""
     root.cloudPendingEngine = ""
+  }
+
+  // Back to the card the consent card stood in front of: the failure the retry
+  // came from, or the partial result when the run reached the card any other
+  // way. Both keep every Issue the finished Chunks found.
+  function backToChunkStop() {
+    if (root.chunkResume) {
+      root.errorCard = root.chunkResume.card
+      root.errorDiagnosis = root.chunkResume.diagnosis
+      root.engineMessage = root.chunkResume.message
+      root.chunkResume = null
+      root.phase = "error"
+      return
+    }
+    root.focusIndex = 0
+    root.elapsedMs = root.chunkElapsedMs
+    root.phase = "result"
   }
 
   // One `grammachy check` on this text. What the answer means belongs to the
@@ -969,14 +1001,21 @@ Item {
 
   // No run is in flight and nothing of one is left behind.
   function clearChunkRun() {
-    chunkTicker.stop()
-    root.chunkRun = false
-    root.chunkCancelled = false
+    root.stopChunkRun()
+    root.chunkResume = null
     root.chunks = []
     root.chunkIndex = 0
     root.chunkEngine = ""
     root.chunkElapsedMs = 0
     root.chunkTickMs = 0
+  }
+
+  // The run stops where it stands. The Chunk list and the Chunk index stay, so
+  // `Retry remaining` still resumes at the Chunk that stopped it.
+  function stopChunkRun() {
+    chunkTicker.stop()
+    root.chunkRun = false
+    root.chunkCancelled = false
   }
 
   function runChunkList() {
@@ -1119,6 +1158,11 @@ Item {
   function retryRemaining() {
     if (root.surface !== "compose" || root.phase !== "error") return
     root.runGeneration += 1
+    root.chunkResume = root.errorCard ? {
+      card: root.errorCard,
+      diagnosis: root.errorDiagnosis,
+      message: root.engineMessage
+    } : null
     root.errorCard = null
     root.errorDiagnosis = ""
     root.engineMessage = ""

@@ -670,6 +670,38 @@ Checks send text to openrouter.ai."
     );
 }
 
+/// Spec section 7: `openrouterModel` has no built-in default, so the ready
+/// line names that case rather than an empty model id.
+#[test]
+fn a_ready_cloud_engine_with_no_model_asks_for_one() {
+    let mut facts = ready();
+    facts.openrouter_model = String::new();
+
+    let report = Report::new(&facts, EngineSlug::Openrouter);
+
+    assert!(report.ready, "{report:?}");
+    assert_eq!(report.exit_code(), 0);
+    assert_eq!(
+        report.diagnosis,
+        "The key is in place. Set the cloud model in Settings before a Check."
+    );
+}
+
+/// A field of blanks is a field nobody filled in, and `settings::non_empty` is
+/// the one rule that says so.
+#[test]
+fn a_blank_cloud_model_reads_as_no_model_at_all() {
+    let mut facts = ready();
+    facts.openrouter_model = "   ".to_string();
+
+    let report = Report::new(&facts, EngineSlug::Openrouter);
+
+    assert_eq!(
+        report.diagnosis,
+        "The key is in place. Set the cloud model in Settings before a Check."
+    );
+}
+
 #[test]
 fn a_missing_key_names_the_command_that_stores_one() {
     let mut facts = ready();
