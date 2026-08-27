@@ -111,7 +111,9 @@ Runner behaviour the pilot fixed or required ([HUF-209](https://linear.app/huffm
 
 The Engines table keeps its four columns.
 Models splits into three tables per set: Quality (Catch, Precision, Recall, F0.5, Exact fix, FP, Creep, Valid, Useful fix when present), Cost (Thinking, p50, p95, Memory, Cost / 1k, Licence, Recommended), and Recall by native language.
-A Throughput table (time to first token p50, output tokens per second, output tokens per Check p50) follows for local rows; cloud rows print whole-request rates because providers report no timings.
+A Throughput table follows for local rows: time to first token p50, output tokens per second, output tokens per Check p50, and output tokens per Issue.
+Cloud rows print whole-request rates, because providers report no timings.
+Output tokens per Issue is the number section 6 halves, so the file shows whether the compact answer landed.
 The Chunk table (section 1) prints wall time, validity, and recall per local row.
 Wall time per row and the run's cloud spend print under the tables.
 
@@ -168,8 +170,9 @@ Measured on the 890M: gemma-4-E4B-it writes 25 tokens per second; thinking raise
 - The Check size limit belongs to the Engine: 2,000 UTF-16 units for `openai`, 5,000 for `languagetool`, `harper`, and `openrouter`.
   `grammachy chunk` packs to the selected engine's limit, and the Quick popup's too-long card fires at it.
 - One prompt for every engine: compact JSON, and a `reason` of at most six words.
-  On llama-server the request sends a raw `grammar` with no whitespace between tokens in place of the `json_schema` response format, so compactness is forced; cloud rows keep `json_schema` and the wording.
-  About 30 tokens per Issue against 56 before.
+  On llama-server with thinking off, the request sends a raw `grammar` with no whitespace between tokens in place of the `json_schema` response format, so compactness is forced.
+  A raw grammar bounds the whole generation, so thinking on keeps `json_schema` and the wording alone, and so do cloud rows.
+  About 30 tokens per Issue against 56 before, on the thinking-off route.
 - The Check timeout stays 90 s for the local engine, on every surface.
   Compose is no exception, and thinking is no exception.
   Every other engine keeps its own timeout from the v1 section 4 table, where `openrouter` is 30 s.

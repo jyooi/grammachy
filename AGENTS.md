@@ -43,11 +43,20 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 - The `openai` base URL host must be loopback, and `cli/src/engines/openai/endpoint.rs` is the only place that decides it.
   A remote host is `bad_arguments` and no request is made; that is a product guarantee, so keep it tested.
   Its prompt in `prompt.rs` is the wording HUF-181 measured, and the "shortest exact substring" rule is what makes the spans usable rather than whole-sentence rewrites.
+  That wording is one prompt for every engine, so a change to it moves the cloud rows too.
+  `prompt::request_body` takes a `Force`: the raw GBNF of `prompt::GRAMMAR`, which no rule lets emit whitespace between tokens, or the `json_schema` response format (HUF-219, evals spec section 6).
+  A raw grammar bounds the whole generation, so it leaves a thinking model no room to think.
+  `openai::force_of` is the one place that picks the route, from the Local thinking Setting: thinking off takes the grammar and thinking on keeps the response format.
+  `openrouter` always passes `Force::JsonSchema`, because no cloud provider reads a grammar.
+  On the thinking-off route the grammar is the only thing that makes the answer compact, which is what drops a local Issue from about 56 output tokens to about 30.
   Thinking (spec section 4) travels on the request as `chat_template_kwargs.enable_thinking` and never on the unit.
   That is what makes a change of the Setting need no restart.
   The unit only bounds and routes the think, with `--reasoning-budget` and `--reasoning-format deepseek`.
   That format keeps the think in `message.reasoning_content`.
+  `--reasoning-budget` bounds the think alone: a probe measured a grammar-forced answer arriving in `content` with `reasoning_content` empty, so `prompt::MAX_TOKENS` is what bounds it.
   `response::parse_array` drops a leading think anyway, because `openaiBaseUrl` may name a server this adapter did not start.
+  `response::answer_of` falls back to `message.reasoning_content` for a server that filed the answer there, but only when the whole trimmed field parses as the Issue array.
+  That reader is shared with `openrouter`, where no grammar rules out a rejected draft, so prose around a draft must never qualify (HUF-224).
   The default lives twice, in `settings::DEFAULT_LOCAL_THINKING` and in the `localThinking` descriptor of `ui/settings.js`.
   `cli/tests/overlay_thinking.rs` keeps the two equal and keeps the Toggle inside the group the engine hides.
 - `grammachy model` lives in `cli/src/model/`, spec section 5.3: `list`, `download`, and `remove` for the Local LLM weights, plus the `ensure` that `setup` still calls.

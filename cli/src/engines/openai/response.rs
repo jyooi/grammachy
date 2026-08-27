@@ -33,6 +33,11 @@ pub struct Choice {
 pub struct Message {
     #[serde(default)]
     pub content: Option<String>,
+    /// Where `--reasoning-format deepseek` files the think, and where a server
+    /// with no closing tag to go on may file the answer instead. See
+    /// [`answer_of`].
+    #[serde(default)]
+    pub reasoning_content: Option<String>,
 }
 
 /// One element of the array the model returns.
@@ -81,10 +86,44 @@ pub fn issues_from(text: &str, response: &ChatResponse) -> Result<Vec<Issue>, St
         .choices
         .first()
         .and_then(|choice| choice.message.as_ref())
-        .and_then(|message| message.content.as_deref())
+        .and_then(answer_of)
         .ok_or_else(|| "The model server answered with no message.".to_string())?;
 
     Ok(issues_from_content(text, content))
+}
+
+/// The answer text, wherever the server filed it.
+///
+/// `content` is the answer whenever the server put anything there. A reasoning
+/// parser that never saw a closing tag may file the whole generation under
+/// `reasoning_content` instead and leave `content` empty, so that field is the
+/// fallback.
+///
+/// A think is never the answer, though. A model drafts a candidate array while
+/// it reasons and then declines it, so reading a think would report an Issue
+/// the model rejected (HUF-224). This route reaches every engine, and no cloud
+/// request carries a grammar to rule that out, which is why the fallback takes
+/// `reasoning_content` only when the whole trimmed field parses as the array.
+/// Prose around a draft therefore never qualifies, on any route.
+///
+/// llama.cpp does not need the fallback on the grammar route. A probe measured
+/// it: a grammar-forced answer arrived in `content` with `reasoning_content`
+/// empty. The `MAX_TOKENS` comment of `super::prompt` records the numbers.
+fn answer_of(message: &Message) -> Option<&str> {
+    let content = message.content.as_deref();
+    if content.is_some_and(|text| !text.trim().is_empty()) {
+        return content;
+    }
+    message
+        .reasoning_content
+        .as_deref()
+        .filter(|text| is_whole_array(text))
+        .or(content)
+}
+
+/// True when the trimmed text is the suggestion array and nothing else.
+fn is_whole_array(text: &str) -> bool {
+    serde_json::from_str::<Vec<Suggestion>>(text.trim()).is_ok()
 }
 
 /// Map the message content, whatever it is wrapped in, to Issues.
@@ -317,6 +356,76 @@ mod tests {
 
         assert_eq!(place(text, "book", &[], Some(30)), Some((30, 34)));
         assert_eq!(place(text, "book", &[(30, 34)], Some(30)), Some((11, 15)));
+    }
+
+    fn message(content: Option<&str>, reasoning: Option<&str>) -> Message {
+        Message {
+            content: content.map(str::to_string),
+            reasoning_content: reasoning.map(str::to_string),
+        }
+    }
+
+    /// A reasoning parser with no closing tag to go on files the whole answer
+    /// as reasoning and leaves the content empty. The array is all it holds,
+    /// so it is the answer.
+    #[test]
+    fn a_reasoning_field_that_holds_only_the_array_is_the_answer() {
+        let answer =
+            r#"[{"original":"go","fix":"went","reason":"past tense","category":"grammar"}]"#;
+        let filed = message(Some(""), Some(answer));
+
+        assert_eq!(answer_of(&filed), Some(answer));
+        assert_eq!(answer_of(&message(None, Some(answer))), Some(answer));
+    }
+
+    /// A cloud provider mirrors its think into `reasoning_content` and carries
+    /// no grammar to bound it. A reasoning model that hit its cap drafts an
+    /// array, declines it, and answers an empty content. The draft is not an
+    /// Issue (HUF-224).
+    #[test]
+    fn a_rejected_draft_in_the_reasoning_field_is_never_the_answer() {
+        let text = "She bought three book from the store.";
+        let draft = concat!(
+            r#"I could report "#,
+            r#"[{"original":"book","fix":"books","reason":"plural","category":"grammar"}] "#,
+            r#"here, but the sentence reads fine."#
+        );
+        let filed = message(Some(""), Some(draft));
+
+        assert_eq!(answer_of(&filed), Some(""));
+
+        let response = ChatResponse {
+            choices: vec![Choice {
+                message: Some(filed),
+            }],
+            error: None,
+        };
+
+        assert_eq!(issues_from(text, &response), Ok(Vec::new()));
+    }
+
+    /// With no content at all there is nothing to fall back to, so a prose
+    /// think leaves the Check with no answer rather than with a draft.
+    #[test]
+    fn a_prose_reasoning_field_with_no_content_is_no_answer() {
+        let filed = message(None, Some("The sentence reads fine to me."));
+
+        assert_eq!(answer_of(&filed), None);
+    }
+
+    /// A think the model really wrote is never the answer, so a non-empty
+    /// content always wins (HUF-224).
+    #[test]
+    fn a_think_beside_a_real_answer_is_ignored() {
+        let filed = message(Some("[]"), Some("I could report \"go\" here."));
+
+        assert_eq!(answer_of(&filed), Some("[]"));
+    }
+
+    #[test]
+    fn a_message_with_neither_field_is_no_answer() {
+        assert_eq!(answer_of(&message(None, None)), None);
+        assert_eq!(answer_of(&message(Some(""), None)), Some(""));
     }
 
     #[test]

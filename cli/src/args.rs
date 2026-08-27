@@ -284,6 +284,8 @@ pub struct CheckOptions {
     pub openrouter_model: String,
     /// Whether the local engine thinks before it answers (spec section 4).
     /// The adapter sends it per request, so a change needs no unit restart.
+    /// It also picks the forcing route of the `openai` request; see
+    /// `engines::openai::force_of`.
     pub local_thinking: bool,
 }
 

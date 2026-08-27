@@ -7,6 +7,11 @@
 //! `usage.cost` so the benchmark can price a Check. The key lives in a 0600
 //! file under `~/.config/grammachy/`, never in `shell.json`.
 //!
+//! It always keeps the `json_schema` response format, where the local engine
+//! sends a raw grammar on the thinking-off route (HUF-219): no provider here
+//! reads a GBNF, so the compact answer is asked for in the shared wording
+//! alone.
+//!
 //! The loopback rule of the `openai` engine is untouched: `endpoint::parse` is
 //! not consulted here because there is no base URL to parse.
 //!
@@ -118,7 +123,7 @@ pub fn request_body(text: &str, options: &CheckOptions) -> Value {
         openai_model: options.openrouter_model.clone(),
         ..options.clone()
     };
-    let mut body = prompt::request_body(text, &local);
+    let mut body = prompt::request_body(text, &local, prompt::Force::JsonSchema);
     if let Some(fields) = body.as_object_mut() {
         fields.insert("usage".to_string(), json!({ "include": true }));
         fields.insert(
@@ -375,6 +380,23 @@ mod tests {
         assert_eq!(body["reasoning"]["enabled"], false);
         assert_eq!(body["temperature"], 0);
         assert_eq!(body["response_format"]["type"], "json_schema");
+        // HUF-219: the grammar route belongs to llama-server. A provider that
+        // took a `grammar` field it does not know would answer HTTP 400.
+        assert!(body.get("grammar").is_none(), "{body}");
+    }
+
+    #[test]
+    fn a_cloud_row_is_asked_for_the_compact_answer_in_words() {
+        let body = request_body("He go home.", &options("google/gemini-3.7-flash"));
+        let prompt = body["messages"][0]["content"]
+            .as_str()
+            .expect("the message is a string");
+
+        assert!(prompt.contains("at most six words"), "{prompt}");
+        assert!(
+            prompt.contains("no spaces and no newlines between tokens"),
+            "{prompt}"
+        );
     }
 
     #[test]
@@ -387,9 +409,11 @@ mod tests {
         quiet.local_thinking = false;
 
         for local in [&thinking, &quiet] {
-            assert!(prompt::request_body("He go home.", local)
-                .get("chat_template_kwargs")
-                .is_some());
+            assert!(
+                prompt::request_body("He go home.", local, prompt::Force::Grammar)
+                    .get("chat_template_kwargs")
+                    .is_some()
+            );
         }
 
         for cloud in [&thinking, &quiet] {

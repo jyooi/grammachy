@@ -9,6 +9,12 @@
 //! The host rule is the product guarantee of this engine: `localhost`,
 //! `127.0.0.1`, or `::1` and nothing else, so a Check never leaves the machine.
 //! A base URL naming any other host is `bad_arguments`, and no request is made.
+//!
+//! The Local thinking Setting picks the forcing route, and [`force_of`] is the
+//! one place that decides it. A raw grammar bounds the whole generation, so it
+//! leaves a thinking model no room to think. Thinking on therefore keeps the
+//! `json_schema` response format, and thinking off takes the grammar and the
+//! compact answer of HUF-219.
 
 pub mod endpoint;
 pub mod prompt;
@@ -44,6 +50,20 @@ const PROBE_INTERVAL: Duration = Duration::from_millis(500);
 /// test ever touches systemd. Not a user-facing setting; settings live in
 /// `shell.json` (spec section 7).
 pub const START_ENV: &str = "GRAMMACHY_LLAMA_START";
+
+/// Which forcing route one Check takes, from the Local thinking Setting.
+///
+/// The two accepted contracts ask for different things of the same request.
+/// HUF-224 and HUF-225 want a think, and HUF-219 wants the compact answer a
+/// raw grammar forces. A grammar bounds the whole generation, so no think fits
+/// inside it. Thinking on therefore keeps the `json_schema` response format,
+/// which leaves the think possible, and thinking off takes the grammar.
+pub fn force_of(options: &CheckOptions) -> prompt::Force {
+    match options.local_thinking {
+        true => prompt::Force::JsonSchema,
+        false => prompt::Force::Grammar,
+    }
+}
 
 /// How long the adapter waits, and whether it may start a server.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -211,7 +231,7 @@ impl Engine for Openai {
         let endpoint =
             endpoint::parse(&options.openai_base_url).map_err(EngineFailure::BadArguments)?;
 
-        let body = prompt::request_body(text, options).to_string();
+        let body = prompt::request_body(text, options, force_of(options)).to_string();
 
         let answer = match self.request(&endpoint, options, &body) {
             Err(EngineFailure::Unavailable(message)) => {
