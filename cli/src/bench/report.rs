@@ -2282,4 +2282,35 @@ mod tests {
             "{rendered}"
         );
     }
+
+    /// The Drafts are one gate on the local rows, not a measure of a set, so
+    /// a run that holds two sets still checks them once and prints one table.
+    #[test]
+    fn the_chunk_table_prints_once_however_many_sets_the_run_holds() {
+        let mut report = with_eval_set();
+        report.chunks = vec![chunk_row(
+            "gemma-4-e4b-it",
+            Some(true),
+            ChunkOutcome::Measured(Box::new(ChunkMeasurement {
+                tally: recorded_chunk_pass(12, 0),
+                wall_ms: 287_400,
+            })),
+        )];
+
+        let rendered = report.render();
+
+        assert_eq!(
+            rendered.matches("### Chunk").count(),
+            1,
+            "one Chunk table:\n{rendered}"
+        );
+        let chunk_at = rendered.find("### Chunk").expect("the table is printed");
+        let eval_at = rendered
+            .find("## Models (eval set)")
+            .expect("the eval set prints its own Models section");
+        assert!(
+            chunk_at < eval_at,
+            "the table sits under the fixture set:\n{rendered}"
+        );
+    }
 }

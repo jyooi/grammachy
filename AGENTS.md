@@ -148,6 +148,7 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   A skipped sentence pass skips the Drafts with the same reason.
   The Chunk Checks never reach `--record`, because that file is the input of a judge that grades one sentence against one reference correction.
   The Chunk table is a gate, not a ranking: wall time, validity, and recall only.
+  The Drafts run beside the fixture set alone, so `--eval-set` still checks them once and prints one table.
   `cli/tests/bench.rs` must seam every server the run can reach, LanguageTool and the OpenAI base URL both.
   The OpenAI default is a fixed loopback port, so a machine that already runs llama.cpp there answers a case meant to find nothing.
   `--eval-set` runs the 365-item eval set of `docs/spec/evals.md` section 2 beside the fixture tables, and only the eval set names a recommendation.
