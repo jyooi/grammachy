@@ -165,6 +165,10 @@ Item {
   // reads the same selection.
   property string lastCapturedText: ""
   property string lastCapturedWindow: ""
+  // A Replace has closed the popup and has still to type, spec section 6. The
+  // source window keeps its highlight until then, so the primary selection is
+  // held back until the keystroke is out.
+  property bool replacePending: false
 
   // ------------------------------------------------------------- models
   //
@@ -393,9 +397,11 @@ Item {
     // A chunked run launches one Check after another, so a card that is gone
     // must not leave one walking the rest of the Draft.
     root.cancelChunkRun()
-    // Spec section 3: the capture is done with, whether or not a Check ran on
-    // it, so the primary selection it came from is released here too.
+    // Spec section 3: the run is over, whether it ended in Apply, Replace,
+    // Clear, or Close, so what it captured is recorded and the primary
+    // selection it came from is released.
     root.consumeCapture(root.capturedText, Anchor.windowAddress(root.sourceWindow))
+    root.releasePrimary()
     root.opened = false
   }
 
@@ -457,6 +463,8 @@ Item {
     root.errorDiagnosis = ""
     root.pendingDraft = ""
     root.sourceWindow = null
+    // Whatever the last Replace was waiting on, this summon is not it.
+    root.replacePending = false
     // Spec section 5.3: closing the overlay does not cancel a download, so a
     // summon leaves `models`, `modelBusy`, and the process in flight alone. The
     // confirm is a question about a card that is gone, so it goes.
@@ -581,19 +589,28 @@ Item {
     return Capture.kept(root.lastCapturedText, root.lastCapturedWindow)
   }
 
-  // The capture is in hand, so the compositor may let the primary selection
-  // go. Spec section 3: this runs only once the capture is consumed, never
-  // before it, or a selection the reader still owns in another application
-  // would be taken away before the Check had read it.
-  //
-  // Consuming the same capture twice clears nothing again: the record already
-  // names it, and the selection is already gone.
+  // The record of what this run captured, spec section 3. It is what the next
+  // summon is measured against, and it is all this does: the primary selection
+  // is released later, when the popup closes.
   function consumeCapture(text, address) {
     if (typeof text !== "string" || text.length === 0) return
     var window = typeof address === "string" ? address : ""
     if (Capture.isStale(text, window, root.lastCapture())) return
     root.lastCapturedText = text
     root.lastCapturedWindow = window
+  }
+
+  // Spec section 3: the primary selection goes when the popup closes, and not
+  // before. A terminal drops its own highlight when it loses primary
+  // ownership, and Replace pastes over that highlight, so a release at capture
+  // time would take the Selection away from under the Apply the reader is
+  // still deciding on.
+  //
+  // Replace is the one path that outlives the close: it closes the popup, asks
+  // for the source window, and only then types. `replacePending` is what makes
+  // the release wait for that keystroke.
+  function releasePrimary() {
+    if (root.replacePending) return
     clearPrimary.running = true
   }
 
@@ -658,6 +675,7 @@ Item {
       root.restoreBorrowedClipboard()
     root.borrowedClipboard = ""
     root.clipboardBorrowed = false
+    root.releasePrimary()
     root.showNothingNew()
     Qt.callLater(root.restoreFocus)
   }
@@ -1565,6 +1583,8 @@ Item {
   // typed anywhere, and the card comes back to say where the text went.
   function showSourceGone(generation) {
     if (!root.isLive(generation)) return
+    // No keystroke is coming, so nothing is holding the release back.
+    root.replacePending = false
     root.opened = true
     root.surface = "quick"
     root.settingsOpen = false
@@ -1573,6 +1593,7 @@ Item {
 
   function launchPasteKeystroke(generation) {
     if (!root.isLive(generation)) return
+    pasteKeystroke.generation = generation
     pasteKeystroke.running = true
   }
 
@@ -1731,10 +1752,10 @@ Item {
     }
   }
 
-  // Spec section 3: the primary selection is released once the capture is
-  // consumed, so the summon after this one reads what the reader highlights
-  // next rather than what they highlighted before. `consumeCapture` is the
-  // only caller, and it runs after the Check has the text in hand.
+  // Spec section 3: the primary selection is released when the popup closes,
+  // so the summon after this one reads what the reader highlights next rather
+  // than what they highlighted before. `releasePrimary` is the only caller,
+  // and it holds this back until a Replace has typed.
   Process {
     id: clearPrimary
     command: ["wl-copy", "--primary", "--clear"]
@@ -1978,6 +1999,9 @@ Item {
       if (!copyProcess.pasteAfter) return
       copyProcess.pasteAfter = false
       if (!root.isLive(copyProcess.generation)) return
+      // The source window still holds the highlight this is about to paste
+      // over, so the primary selection is held back until the keystroke is out.
+      root.replacePending = true
       // wl-copy has claimed the selection by now, so the paste will find it.
       root.close()
       pasteTimer.generation = copyProcess.generation
@@ -2043,9 +2067,17 @@ Item {
     }
   }
 
+  // The Replace is over once this is out, so the primary selection the
+  // Selection came from may go, spec section 3.
   Process {
     id: pasteKeystroke
+    property int generation: 0
     command: ["wtype", "-M", "ctrl", "v", "-m", "ctrl"]
+    onExited: {
+      root.replacePending = false
+      if (!root.isLive(pasteKeystroke.generation)) return
+      root.releasePrimary()
+    }
   }
 
   // ----------------------------------------------------------------- window

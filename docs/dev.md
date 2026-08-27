@@ -137,10 +137,12 @@ Finish the item on the placement, which is the half two windows are here for (sp
   The card sits inside the window, held to its trailing edge.
 - **No source window.** Clear the selection, click the desktop background so no window is focused, and click `G`.
   The nothing-new state opens in the bar widget's own corner, which is the fallback.
-- **The same selection twice.** With the popup closed, press SUPER + G again without highlighting anything new.
+- **The same selection twice.** Run the item once and press Esc, then press SUPER + G again without highlighting anything new.
   The popup opens on the nothing-new state and runs no Check (spec section 3).
-  The terminal keeps its own highlight, because releasing the primary selection is not a command to deselect.
   Press `Check last text again` and the same text is checked with no new capture.
+- **The highlight survives the check.** Run the item again and watch the source terminal while the card is up.
+  The highlight is still there, because the primary selection is released only when the popup closes.
+  Turn auto-replace on and press Ctrl + Enter: the paste lands over that highlight rather than beside it.
 - **Clear.** Run the item again, then press `Clear` in the hero, or Ctrl + L.
   The popup stays open on the nothing-new state with the Issues gone.
   Open Compose afterwards: the Draft is exactly as it was.

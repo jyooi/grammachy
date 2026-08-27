@@ -78,7 +78,9 @@ function machine(values) {
     draft: state.draft === undefined ? "" : state.draft,
     // How many times the primary selection was read, which is what says
     // whether a run captured or reused the kept text.
-    reads: 0
+    reads: 0,
+    // A Replace has closed the popup and has still to type.
+    replacePending: false
   }
 }
 
@@ -94,20 +96,39 @@ function nothingNew(run) {
   return run
 }
 
-// `Overlay.consumeCapture`: the record is kept and the primary selection is
-// released, and only once the capture is in hand.
-function consume(box, text, address, run) {
+// `Overlay.consumeCapture`: the record the next summon is measured against,
+// and nothing else. The compositor is not touched here.
+function consume(box, text, address) {
   if (Capture.isStale(text, address, box.last)) return
   box.last = Capture.kept(text, address)
+}
+
+// `Overlay.close` and `Overlay.releasePrimary`: the run is over, so the
+// primary selection it came from goes. A Replace still to type holds it back,
+// because the source window keeps the highlight it is about to paste over.
+function closePopup(box, run) {
+  if (box.replacePending) return run
   box.primary = ""
-  run.cleared += 1
+  run.released += 1
+  return run
+}
+
+// `Overlay.applyCorrected` with auto-replace on: the popup closes, the source
+// window is asked for, and only then is the keystroke typed.
+function replace(box, run) {
+  box.replacePending = true
+  closePopup(box, run)
+  // The paste lands on the highlight the source window still holds.
+  run.pasted = box.primary
+  box.replacePending = false
+  return closePopup(box, run)
 }
 
 // One SUPER + G, driven the way `Overlay.startQuick` drives it: the source
 // window, then the primary selection of step 1, then the Ctrl + C fallback of
 // step 2, then the freshness rule, then one Check.
 function summon(binary, box) {
-  const run = { phase: "capturing", capturedText: "", issues: null, cleared: 0 }
+  const run = { phase: "capturing", capturedText: "", issues: null, released: 0 }
 
   const address = box.address
   box.reads += 1
@@ -130,7 +151,7 @@ function summon(binary, box) {
   if (Capture.isStale(text, address, box.last)) return nothingNew(run)
 
   run.capturedText = text
-  consume(box, text, address, run)
+  consume(box, text, address)
   return check(binary, text, run)
 }
 
@@ -145,7 +166,7 @@ function check(binary, text, run) {
 
 // `Overlay.checkLastAgain`: the kept text with no capture at all.
 function checkLastAgain(binary, box) {
-  const run = { phase: "checking", capturedText: box.last.text, issues: null, cleared: 0 }
+  const run = { phase: "checking", capturedText: box.last.text, issues: null, released: 0 }
   if (box.last.text.length === 0) return nothingNew(run)
   return check(binary, box.last.text, run)
 }
@@ -157,6 +178,9 @@ function clearCapture(box, run) {
   run.issues = null
   run.focusIndex = 0
   run.applied = false
+  // Clear ends the run, so the selection it came from goes the same way a
+  // close releases it.
+  closePopup(box, run)
   return nothingNew(run)
 }
 
@@ -183,14 +207,26 @@ test("the same selection from the same window is checked once", () => {
   assert.equal(box.last.text, "Their going to the park.")
 })
 
-// The capture is consumed before the primary selection is released, so the
-// Check has the text in hand by the time the compositor loses it.
-test("a consumed capture releases the primary selection", () => {
-  const binary = stub("release")
+// Spec section 3: the capture takes nothing from the compositor. A terminal
+// drops its own highlight when it loses primary ownership, and the reader is
+// still deciding on the Apply that pastes over it.
+test("a capture leaves the primary selection where it is", () => {
+  const binary = stub("keeps")
   const box = machine({ primary: "Their going to the park." })
 
   const run = summon(binary, box)
-  assert.equal(run.cleared, 1)
+  assert.equal(run.phase, "result")
+  assert.equal(run.released, 0)
+  assert.equal(box.primary, "Their going to the park.", "the selection is still there")
+})
+
+// The release is the close, whatever ended the run.
+test("a popup that closes releases the primary selection", () => {
+  const binary = stub("release")
+  const box = machine({ primary: "Their going to the park." })
+
+  const run = closePopup(box, summon(binary, box))
+  assert.equal(run.released, 1)
   assert.equal(box.primary, "", "the primary selection was cleared")
 
   // With the selection gone and the clipboard empty, the next summon finds
@@ -200,11 +236,25 @@ test("a consumed capture releases the primary selection", () => {
   assert.equal(checkCount("release"), 1)
 })
 
+// Replace closes the popup and only then types over the highlight the source
+// window still holds, so the release waits for that keystroke.
+test("a Replace types over the selection before the release takes it", () => {
+  const binary = stub("replace")
+  const box = machine({ primary: "Their going to the park." })
+
+  const run = replace(box, summon(binary, box))
+
+  assert.equal(run.pasted, "Their going to the park.",
+    "the highlight was still there when the keystroke landed")
+  assert.equal(run.released, 1)
+  assert.equal(box.primary, "", "and it goes once the keystroke is out")
+})
+
 test("a different selection from the same window is fresh", () => {
   const binary = stub("fresh-text")
   const box = machine({ primary: "Their going to the park." })
 
-  summon(binary, box)
+  closePopup(box, summon(binary, box))
   box.primary = "Its a nice day."
   const second = summon(binary, box)
 
@@ -217,7 +267,7 @@ test("the same words from another window are fresh", () => {
   const binary = stub("fresh-window")
   const box = machine({ primary: "Their going to the park." })
 
-  summon(binary, box)
+  closePopup(box, summon(binary, box))
   box.primary = "Their going to the park."
   box.address = "0xbbb"
   const second = summon(binary, box)

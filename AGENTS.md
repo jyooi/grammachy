@@ -295,7 +295,8 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   `cli/tests/overlay_anchor.rs` keeps `Overlay.qml` on those steps and in that order.
 - `ui/capture.js` owns the freshness rule of spec section 3 (HUF-235) and the wording of the nothing-new state.
   The compositor keeps the primary selection, so `Overlay.lastCapturedText` and `lastCapturedWindow` are what say a capture is the one the last Check already ran on.
-  `Overlay.consumeCapture` is the one place that keeps that record and the one place that runs `wl-copy --primary --clear`, and it runs only once the text is in hand.
+  `Overlay.consumeCapture` keeps that record and touches the compositor not at all; `Overlay.releasePrimary` is the one place that runs `wl-copy --primary --clear`, and it runs when the popup closes, never at capture time.
+  A terminal drops its own highlight when it loses primary ownership and Replace pastes over that highlight, so `replacePending` holds the release back until the `wtype` keystroke is out.
   Step 2 has the same shape: a Ctrl + C that leaves the clipboard unmoved copied nothing, which `Capture.copiedNothing` decides.
   Nothing new is one card, so the capture no longer routes to `Errors.EMPTY_SELECTION`; that code stays for the CLI contract alone.
   `Overlay.clearCapture` is the Clear of spec section 6, and the one thing it must never touch is `draftText`.

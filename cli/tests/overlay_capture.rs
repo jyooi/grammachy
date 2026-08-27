@@ -81,11 +81,12 @@ fn a_capture_is_measured_against_the_last_consumed_one_before_any_check() {
     );
 }
 
-/// Spec section 3: the primary selection is released only once the capture is
-/// consumed. Clearing it earlier would take a selection the reader still owns
-/// in another application away before the Check had read it.
+/// Spec section 3: the capture is recorded where it is taken, and nothing more
+/// happens to the compositor there. A terminal drops its own highlight when it
+/// loses primary ownership, so a release at capture time would take the
+/// Selection away from under the Apply the reader is still deciding on.
 #[test]
-fn the_primary_selection_is_cleared_only_after_the_capture_is_consumed() {
+fn the_capture_is_recorded_where_it_is_taken_and_releases_nothing() {
     let source = read("Overlay.qml");
     let consume = function_body(&source, "consumeCapture");
 
@@ -95,31 +96,88 @@ fn the_primary_selection_is_cleared_only_after_the_capture_is_consumed() {
         "the consumed capture is kept by text and by source window: {consume}"
     );
     assert!(
-        consume.contains("clearPrimary.running = true"),
-        "the primary selection is released there: {consume}"
+        !consume.contains("clearPrimary.running") && !consume.contains("root.releasePrimary()"),
+        "the capture releases no selection: {consume}"
     );
+
+    let captured = function_body(&source, "captured");
+    assert!(
+        !captured.contains("root.releasePrimary()"),
+        "and neither does the step that takes it: {captured}"
+    );
+}
+
+/// Spec section 3: the primary selection goes when the popup closes, whether
+/// the run ended in Apply, Replace, Clear, or Close. One function decides it
+/// and one process does it.
+#[test]
+fn the_primary_selection_is_released_when_the_popup_closes() {
+    let source = read("Overlay.qml");
+
     assert!(
         source.contains(r#"command: ["wl-copy", "--primary", "--clear"]"#),
         "the release is `wl-copy --primary --clear`"
     );
-
-    // The capture is in hand before anything is cleared, in both callers.
-    let captured = function_body(&source, "captured");
-    let consumed = captured
-        .find("root.consumeCapture(")
-        .expect("a fresh capture is consumed");
+    let release = function_body(&source, "releasePrimary");
     assert!(
-        captured
-            .find("root.capturedText = text")
-            .expect("the capture is kept")
-            < consumed,
-        "the text is in hand before the selection goes: {captured}"
+        release.contains("clearPrimary.running = true"),
+        "one function runs it: {release}"
     );
 
     let close = function_body(&source, "close");
     assert!(
         close.contains("root.consumeCapture(root.capturedText"),
-        "a popup that closes consumes the capture it holds: {close}"
+        "a popup that closes records the capture it holds: {close}"
+    );
+    assert!(
+        close.contains("root.releasePrimary()"),
+        "and releases the selection it came from: {close}"
+    );
+    assert!(
+        function_body(&source, "clearCapture").contains("root.releasePrimary()"),
+        "Clear ends a run too, so it releases the same way"
+    );
+}
+
+/// Replace is the one path that outlives the close: it closes the popup, asks
+/// for the source window, and only then types over the highlight that is still
+/// there. Releasing the primary selection at the close would take that
+/// highlight away before the keystroke landed.
+#[test]
+fn a_replace_holds_the_release_back_until_it_has_typed() {
+    let source = read("Overlay.qml");
+
+    let release = function_body(&source, "releasePrimary");
+    assert!(
+        release.contains("if (root.replacePending) return"),
+        "a Replace still to type holds the release back: {release}"
+    );
+
+    assert!(
+        source.contains("root.replacePending = true"),
+        "the Replace path arms that wait before it closes the popup"
+    );
+    let armed = source
+        .find("root.replacePending = true")
+        .expect("the Replace arms the wait");
+    let closed = source[armed..]
+        .find("root.close()")
+        .expect("the Replace closes the popup after it");
+    assert!(closed > 0, "the wait is armed before the close");
+
+    // The keystroke is what ends it, and a Replace that never types must not
+    // leave the release waiting for ever.
+    let keystroke = source
+        .find("id: pasteKeystroke")
+        .expect("the overlay types with wtype");
+    let tail = &source[keystroke..];
+    assert!(
+        tail.contains("root.replacePending = false") && tail.contains("root.releasePrimary()"),
+        "the keystroke ends the wait and releases the selection: {tail}"
+    );
+    assert!(
+        function_body(&source, "showSourceGone").contains("root.replacePending = false"),
+        "a source window that is gone ends the wait too"
     );
 }
 
