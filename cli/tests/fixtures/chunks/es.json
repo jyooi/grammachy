@@ -1,0 +1,183 @@
+{
+  "id": "chunk-es",
+  "native": "es",
+  "text": "Dear hiring manager,\n\nI am writing to apply to the junior analyst position you published last week. I have twenty six years and I finished my degree in economics two years ago. Since three years I work in a small consulting office in Valencia, where I prepare monthly reports. During that time I assisted to many meetings with clients from the food industry. My manager asked me to realize a study of their delivery costs, and the result was very satisfactory for the whole team. I am agree with your idea that a good analyst must explain numbers in simple words.\n\nIn my present work I use spreadsheets every day, and actually I am learning the basics of Python. The people in my office is very kind, so I could ask them for help whenever a formula failed. I think the quality of a report depends of the questions you ask before you open the file. In the other hand, a clean table is useless when nobody reads it. That is why I always explain them my tables in a short call before I send the file. My colleagues say I am a sensible listener, and I take it as a compliment.\n\nI would like to move to a bigger company because I want to learn more good methods of forecasting. Your job advertisement says the team works with retail data, and that interest me a lot. I can start in the first of September, and I do not need any relocation support. I pretend to bring the same care I give to my present clients. Thank you for reading my letter, and I stay at your disposal for any question.\n\nI also want to mention my formation in statistics, because your advertisement asks for it. Last winter I follow an online course about regression models. The teacher give us a final project with real sales data, and my report received a good mark. Since that course I am reading one article about forecasting every week. I know theory alone is not enough, and for that I practise with the data of my own office. I can send you a short example of my work for email.\n\nKind regards,\nLucia",
+  "edits": [
+    {
+      "start": 44,
+      "end": 46,
+      "text": "to",
+      "fix": "for",
+      "type": "preposition"
+    },
+    {
+      "start": 102,
+      "end": 123,
+      "text": "have twenty six years",
+      "fix": "am twenty six years old",
+      "type": "age"
+    },
+    {
+      "start": 177,
+      "end": 194,
+      "text": "Since three years",
+      "fix": "For three years",
+      "type": "preposition"
+    },
+    {
+      "start": 197,
+      "end": 201,
+      "text": "work",
+      "fix": "have worked",
+      "type": "tense"
+    },
+    {
+      "start": 296,
+      "end": 307,
+      "text": "assisted to",
+      "fix": "attended",
+      "type": "false_friend"
+    },
+    {
+      "start": 382,
+      "end": 389,
+      "text": "realize",
+      "fix": "carry out",
+      "type": "false_friend"
+    },
+    {
+      "start": 438,
+      "end": 463,
+      "text": "was very satisfactory for",
+      "fix": "was very satisfactory to",
+      "type": "preposition"
+    },
+    {
+      "start": 482,
+      "end": 490,
+      "text": "am agree",
+      "fix": "agree",
+      "type": "copula"
+    },
+    {
+      "start": 618,
+      "end": 626,
+      "text": "actually",
+      "fix": "currently",
+      "type": "false_friend"
+    },
+    {
+      "start": 687,
+      "end": 689,
+      "text": "is",
+      "fix": "are",
+      "type": "agreement"
+    },
+    {
+      "start": 789,
+      "end": 799,
+      "text": "depends of",
+      "fix": "depends on",
+      "type": "preposition"
+    },
+    {
+      "start": 848,
+      "end": 865,
+      "text": "In the other hand",
+      "fix": "On the other hand",
+      "type": "idiom"
+    },
+    {
+      "start": 935,
+      "end": 957,
+      "text": "explain them my tables",
+      "fix": "explain my tables to them",
+      "type": "pronoun"
+    },
+    {
+      "start": 1023,
+      "end": 1031,
+      "text": "sensible",
+      "fix": "sensitive",
+      "type": "false_friend"
+    },
+    {
+      "start": 1139,
+      "end": 1148,
+      "text": "more good",
+      "fix": "better",
+      "type": "comparative"
+    },
+    {
+      "start": 1243,
+      "end": 1251,
+      "text": "interest",
+      "fix": "interests",
+      "type": "agreement"
+    },
+    {
+      "start": 1274,
+      "end": 1276,
+      "text": "in",
+      "fix": "on",
+      "type": "preposition"
+    },
+    {
+      "start": 1345,
+      "end": 1352,
+      "text": "pretend",
+      "fix": "intend",
+      "type": "false_friend"
+    },
+    {
+      "start": 1445,
+      "end": 1449,
+      "text": "stay",
+      "fix": "remain",
+      "type": "false_friend"
+    },
+    {
+      "start": 1512,
+      "end": 1521,
+      "text": "formation",
+      "fix": "training",
+      "type": "false_friend"
+    },
+    {
+      "start": 1591,
+      "end": 1597,
+      "text": "follow",
+      "fix": "took",
+      "type": "false_friend"
+    },
+    {
+      "start": 1652,
+      "end": 1656,
+      "text": "give",
+      "fix": "gave",
+      "type": "tense"
+    },
+    {
+      "start": 1754,
+      "end": 1764,
+      "text": "am reading",
+      "fix": "have been reading",
+      "type": "tense"
+    },
+    {
+      "start": 1846,
+      "end": 1854,
+      "text": "for that",
+      "fix": "that is why",
+      "type": "idiom"
+    },
+    {
+      "start": 1940,
+      "end": 1949,
+      "text": "for email",
+      "fix": "by email",
+      "type": "preposition"
+    }
+  ],
+  "expected_text": "Dear hiring manager,\n\nI am writing to apply for the junior analyst position you published last week. I am twenty six years old and I finished my degree in economics two years ago. For three years I have worked in a small consulting office in Valencia, where I prepare monthly reports. During that time I attended many meetings with clients from the food industry. My manager asked me to carry out a study of their delivery costs, and the result was very satisfactory to the whole team. I agree with your idea that a good analyst must explain numbers in simple words.\n\nIn my present work I use spreadsheets every day, and currently I am learning the basics of Python. The people in my office are very kind, so I could ask them for help whenever a formula failed. I think the quality of a report depends on the questions you ask before you open the file. On the other hand, a clean table is useless when nobody reads it. That is why I always explain my tables to them in a short call before I send the file. My colleagues say I am a sensitive listener, and I take it as a compliment.\n\nI would like to move to a bigger company because I want to learn better methods of forecasting. Your job advertisement says the team works with retail data, and that interests me a lot. I can start on the first of September, and I do not need any relocation support. I intend to bring the same care I give to my present clients. Thank you for reading my letter, and I remain at your disposal for any question.\n\nI also want to mention my training in statistics, because your advertisement asks for it. Last winter I took an online course about regression models. The teacher gave us a final project with real sales data, and my report received a good mark. Since that course I have been reading one article about forecasting every week. I know theory alone is not enough, and that is why I practise with the data of my own office. I can send you a short example of my work by email.\n\nKind regards,\nLucia"
+}

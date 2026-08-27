@@ -126,6 +126,7 @@ Wall time per row and the run's cloud spend print under the tables.
 
 `--record <dir>` writes `checks.json`: one entry per (engine, model, thinking, item id) with validity, latency, cost, token counts, server timings, and the normalised Issues.
 Every entry also carries the item and the sentence after Accept, because that pair is the whole input of the judge.
+The Chunk fixture Checks stay out of that file, because the judge grades one sentence against one reference correction.
 The directory is gitignored, and so is the `judgements.json` the judge writes beside the record.
 Those two files are the only place model output text and eval-set text ever land.
 
@@ -257,7 +258,7 @@ Out: Muse Glimmer (16.8 GB, over the tier and the device), LFM2.5 (restricted li
 - Section 6: the too-long card fires at the selected engine's limit.
 - Section 7: `localThinking`, `openrouterModel`, `cloudConsent`; the dropdown label.
 - Section 10: `setup --openrouter-key` joins the subcommand list and writes the key file; `setup --remove` deletes it.
-- Section 11: the layout tree gains `spec/evals.md`, the two ADRs, `LICENSE`, and the `openrouter` engine.
+- Section 11: the layout tree gains `spec/evals.md`, the two ADRs, `LICENSE`, the `openrouter` engine, and `cli/tests/fixtures/chunks/`.
 - Section 13.1: replaced by a pointer to this spec for sets, metrics, tables, flags, and recommendation rules; the regression rule sentence stays.
 - `CONTEXT.md`: Check size limit belongs to the Engine; terms Edit, Pair, Exact fix, Style creep, Valid Check, Eval set, Record file, Cloud engine, Consent (from the glossary branches).
 

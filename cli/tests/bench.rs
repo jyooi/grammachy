@@ -452,6 +452,35 @@ fn fixture_ids() -> Vec<String> {
     items.into_iter().map(|item| item.id).collect()
 }
 
+/// The ids of the Chunk fixture, one Draft per native language.
+fn chunk_ids() -> Vec<String> {
+    let directory = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/chunks");
+    let mut ids: Vec<String> = std::fs::read_dir(directory)
+        .expect("the Chunk fixture is readable")
+        .map(|entry| {
+            let path = entry.expect("the entry is readable").path();
+            let text = std::fs::read_to_string(&path).expect("the Draft is readable");
+            let item: FixtureItem = serde_json::from_str(&text).expect("the Draft is one item");
+            item.id
+        })
+        .collect();
+    ids.sort();
+    ids
+}
+
+/// One table of the report, from its heading up to the next one.
+///
+/// A model prints one row in every table, so a case that means the Cost row
+/// alone has to say which table it is reading.
+fn table<'a>(report: &'a str, heading: &str) -> &'a str {
+    let start = report
+        .find(heading)
+        .unwrap_or_else(|| panic!("the report holds {heading}:\n{report}"));
+    let rest = &report[start + heading.len()..];
+    let end = rest.find("\n#").map(|at| at + 1).unwrap_or(rest.len());
+    &rest[..end]
+}
+
 /// Read one whole request and answer with its body.
 ///
 /// The body must be drained too. A stub that answers and closes on an unread
@@ -850,8 +879,7 @@ fn thinking_both_prints_two_rows_for_one_local_model() {
         run.stdout
     );
 
-    let cost: Vec<&str> = run
-        .stdout
+    let cost: Vec<&str> = table(&run.stdout, "### Cost")
         .lines()
         .filter(|line| {
             line.starts_with("| `qwen2.5-7b-instruct` | on |")
@@ -1352,16 +1380,16 @@ fn a_model_named_twice_runs_the_fixture_once() {
     assert_eq!(run.status, 0, "{}", run.stderr);
     assert_eq!(
         endpoint.requests(),
-        fixture_ids().len() * 2,
-        "the Engines row and one Models row, not two Models rows"
+        fixture_ids().len() * 2 + chunk_ids().len(),
+        "the Engines row and one Models row, not two Models rows, plus one Chunk pass"
     );
     assert_eq!(
         run.stdout
             .lines()
             .filter(|line| line.starts_with("| `qwen3.5-4b` |"))
             .count(),
-        4,
-        "one row in each of the four Models tables:\n{}",
+        5,
+        "one row in each of the five Models tables:\n{}",
         run.stdout
     );
 }
@@ -1883,5 +1911,148 @@ fn a_judgements_file_that_cannot_be_read_is_refused_before_any_row_runs() {
             .expect("a message")
             .contains("--judgements"),
         "{envelope}"
+    );
+}
+
+/// The Chunk fixture is the local-engine gate of evals spec section 1: every
+/// local row checks one Draft per native language and the table says whether
+/// they came back.
+#[test]
+fn a_local_row_checks_every_draft_and_prints_the_chunk_table() {
+    // The quote is a mistake three Drafts hold and no fixture sentence does,
+    // so it pairs on those three and leaves the sentence rows alone.
+    let endpoint = stub(
+        answer_with("depends of", "depends on", "Wrong preposition.", None),
+        usize::MAX,
+    );
+    let settings = settings_file(
+        "chunk-table.json",
+        &format!(r#""openaiBaseUrl": "{}""#, endpoint.url()),
+    );
+
+    let run = bench(
+        &settings,
+        &["--engine", "openai", "--model", "gemma-4-e4b-it"],
+    );
+
+    assert_eq!(run.status, 0, "{}", run.stderr);
+    let chunk = table(&run.stdout, "### Chunk");
+    let row = chunk
+        .lines()
+        .find(|line| line.starts_with("| `gemma-4-e4b-it` | on |"))
+        .unwrap_or_else(|| panic!("the Chunk table holds the row:\n{}", run.stdout));
+    assert!(row.contains(" s | 7 of 7 (100.0%) | 3 of "), "{row}");
+    assert!(
+        chunk.contains("cli/tests/fixtures/chunks/"),
+        "the table names the Drafts:\n{chunk}"
+    );
+
+    // The Engines row and the Models row each ran the fixture, and the Models
+    // row alone ran the Drafts.
+    assert_eq!(
+        endpoint.requests(),
+        fixture_ids().len() * 2 + chunk_ids().len(),
+        "one Chunk pass, for the one local Models row"
+    );
+}
+
+/// The record is the input of the judge, which grades one sentence against one
+/// reference correction. A Draft of several paragraphs is not that, so a Chunk
+/// Check never reaches the file.
+#[test]
+fn the_drafts_stay_out_of_the_record_file() {
+    let endpoint = stub(answer_body(None), usize::MAX);
+    let settings = settings_file(
+        "chunk-record.json",
+        &format!(r#""openaiBaseUrl": "{}""#, endpoint.url()),
+    );
+    let directory = scratch_dir().join("chunk-record");
+
+    let run = bench(
+        &settings,
+        &[
+            "--engine",
+            "openai",
+            "--model",
+            "gemma-4-e4b-it",
+            "--record",
+            directory.to_str().expect("the path is UTF-8"),
+        ],
+    );
+
+    assert_eq!(run.status, 0, "{}", run.stderr);
+    let text =
+        std::fs::read_to_string(directory.join("checks.json")).expect("the record is written");
+    let checks: Vec<RecordedCheck> = serde_json::from_str(&text).expect("the record is entries");
+    let ids: Vec<String> = checks.iter().map(|check| check.id.clone()).collect();
+
+    for id in chunk_ids() {
+        assert!(!ids.contains(&id), "{id} is in the record:\n{ids:?}");
+    }
+    assert!(ids.contains(&"zh-01".to_string()), "{ids:?}");
+}
+
+/// A local row the engine could not answer never reaches it again for the
+/// Drafts, and the table says why they were not checked.
+#[test]
+fn a_skipped_local_row_says_why_its_drafts_were_not_checked() {
+    let settings = settings_file("chunk-skipped.json", r#""engine": "harper""#);
+
+    let run = bench(
+        &settings,
+        &["--engine", "openai", "--model", "gemma-4-e4b-it"],
+    );
+
+    assert_eq!(run.status, 0, "a skipped row is not a failure");
+    let chunk = table(&run.stdout, "### Chunk");
+    assert!(
+        chunk.contains("| `gemma-4-e4b-it` | on | skipped | skipped | skipped |"),
+        "{chunk}"
+    );
+    assert!(
+        chunk.contains("The Drafts of `gemma-4-e4b-it` were not checked: No model server answered"),
+        "{chunk}"
+    );
+}
+
+/// `--thinking both` is two local rows, so it is two Chunk passes, one per
+/// mode, on the server the pair shares.
+#[test]
+fn thinking_both_checks_the_drafts_once_per_mode() {
+    let endpoint = stub(answer_body(None), usize::MAX);
+    let settings = settings_file(
+        "chunk-both.json",
+        &format!(r#""openaiBaseUrl": "{}""#, endpoint.url()),
+    );
+
+    let run = bench(
+        &settings,
+        &[
+            "--engine",
+            "openai",
+            "--model",
+            "gemma-4-e4b-it",
+            "--thinking",
+            "both",
+        ],
+    );
+
+    assert_eq!(run.status, 0, "{}", run.stderr);
+    let chunk = table(&run.stdout, "### Chunk");
+    let rows: Vec<&str> = chunk
+        .lines()
+        .filter(|line| line.starts_with("| `gemma-4-e4b-it` |"))
+        .collect();
+    assert_eq!(rows.len(), 2, "one Chunk row per mode:\n{chunk}");
+    assert!(rows[0].starts_with("| `gemma-4-e4b-it` | on |"), "{rows:?}");
+    assert!(
+        rows[1].starts_with("| `gemma-4-e4b-it` | off |"),
+        "{rows:?}"
+    );
+
+    assert_eq!(
+        endpoint.requests(),
+        fixture_ids().len() * 3 + chunk_ids().len() * 2,
+        "the Engines row plus two Models rows, each with a Chunk pass"
     );
 }

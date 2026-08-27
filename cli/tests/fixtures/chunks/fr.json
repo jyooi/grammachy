@@ -1,0 +1,183 @@
+{
+  "id": "chunk-fr",
+  "native": "fr",
+  "text": "Dear Sarah,\n\nThank you for your kind mail of last Friday about the summer workshop. I am agree with the programme, and I have only two small remarks. Since two years I teach the same module in Lyon, so I know how the students react. Actually, the morning block lasts three hours without any pause. I think we should cut it, because after ninety minutes the most of them stop taking notes. Could you explain me why the room was booked until one o'clock? About forty teachers will assist to the workshop, so a small room is not enough.\n\nThe second remark concern the material. You sent me many useful informations about the case study, but the slides are still missing. I would like to add two advices for the group work, because last year the teams lost time at the start. The success of the workshop depends of a clear brief in the first ten minutes. Eventually, we can also print a summary for every table. I am responsible of the printing budget, so that costs us nothing. Please tell me before Thursday, because the shop closes in the weekend.\n\nOne last point concerns the evening dinner. Marc said he will come with his wife, and they are waiting the visit of the old town. In the same time, the museum closes at six, so we should book the guide early. I have thirty two years and I still get lost there, so a guide is a good idea. Tell me if you prefer the restaurant near the river or the one besides the theatre. I stay available all week for a call.\n\nTwo words about the budget. The university give us the same amount as last year, so we must be careful. The coffee break cost nine euros per person, and the room takes half of the total. If we invite more than thirty people, we will can not pay for the printed folders. I propose to send the slides as one file and print nothing at all. That solution permit us to keep a reserve for the guest speaker. Tell me what you think, because the university asks for the plan until Friday.\n\nBest wishes,\nCamille",
+  "edits": [
+    {
+      "start": 37,
+      "end": 41,
+      "text": "mail",
+      "fix": "email",
+      "type": "false_friend"
+    },
+    {
+      "start": 86,
+      "end": 94,
+      "text": "am agree",
+      "fix": "agree",
+      "type": "copula"
+    },
+    {
+      "start": 150,
+      "end": 165,
+      "text": "Since two years",
+      "fix": "For two years",
+      "type": "preposition"
+    },
+    {
+      "start": 168,
+      "end": 173,
+      "text": "teach",
+      "fix": "have taught",
+      "type": "tense"
+    },
+    {
+      "start": 233,
+      "end": 241,
+      "text": "Actually",
+      "fix": "Currently",
+      "type": "false_friend"
+    },
+    {
+      "start": 353,
+      "end": 361,
+      "text": "the most",
+      "fix": "most",
+      "type": "article"
+    },
+    {
+      "start": 399,
+      "end": 409,
+      "text": "explain me",
+      "fix": "explain to me",
+      "type": "pronoun"
+    },
+    {
+      "start": 479,
+      "end": 488,
+      "text": "assist to",
+      "fix": "attend",
+      "type": "false_friend"
+    },
+    {
+      "start": 553,
+      "end": 560,
+      "text": "concern",
+      "fix": "concerns",
+      "type": "agreement"
+    },
+    {
+      "start": 599,
+      "end": 611,
+      "text": "informations",
+      "fix": "pieces of information",
+      "type": "countability"
+    },
+    {
+      "start": 692,
+      "end": 699,
+      "text": "advices",
+      "fix": "pieces of advice",
+      "type": "countability"
+    },
+    {
+      "start": 800,
+      "end": 810,
+      "text": "depends of",
+      "fix": "depends on",
+      "type": "preposition"
+    },
+    {
+      "start": 851,
+      "end": 861,
+      "text": "Eventually",
+      "fix": "Possibly",
+      "type": "false_friend"
+    },
+    {
+      "start": 913,
+      "end": 927,
+      "text": "responsible of",
+      "fix": "responsible for",
+      "type": "preposition"
+    },
+    {
+      "start": 1031,
+      "end": 1033,
+      "text": "in",
+      "fix": "at",
+      "type": "preposition"
+    },
+    {
+      "start": 1139,
+      "end": 1150,
+      "text": "are waiting",
+      "fix": "are looking forward to",
+      "type": "false_friend"
+    },
+    {
+      "start": 1178,
+      "end": 1194,
+      "text": "In the same time",
+      "fix": "At the same time",
+      "type": "idiom"
+    },
+    {
+      "start": 1259,
+      "end": 1280,
+      "text": "have thirty two years",
+      "fix": "am thirty two years old",
+      "type": "age"
+    },
+    {
+      "start": 1399,
+      "end": 1406,
+      "text": "besides",
+      "fix": "beside",
+      "type": "preposition"
+    },
+    {
+      "start": 1422,
+      "end": 1426,
+      "text": "stay",
+      "fix": "remain",
+      "type": "false_friend"
+    },
+    {
+      "start": 1502,
+      "end": 1506,
+      "text": "give",
+      "fix": "gives",
+      "type": "agreement"
+    },
+    {
+      "start": 1580,
+      "end": 1584,
+      "text": "cost",
+      "fix": "costs",
+      "type": "agreement"
+    },
+    {
+      "start": 1687,
+      "end": 1699,
+      "text": "will can not",
+      "fix": "will not be able to",
+      "type": "modal"
+    },
+    {
+      "start": 1810,
+      "end": 1816,
+      "text": "permit",
+      "fix": "allows",
+      "type": "false_friend"
+    },
+    {
+      "start": 1926,
+      "end": 1931,
+      "text": "until",
+      "fix": "by",
+      "type": "false_friend"
+    }
+  ],
+  "expected_text": "Dear Sarah,\n\nThank you for your kind email of last Friday about the summer workshop. I agree with the programme, and I have only two small remarks. For two years I have taught the same module in Lyon, so I know how the students react. Currently, the morning block lasts three hours without any pause. I think we should cut it, because after ninety minutes most of them stop taking notes. Could you explain to me why the room was booked until one o'clock? About forty teachers will attend the workshop, so a small room is not enough.\n\nThe second remark concerns the material. You sent me many useful pieces of information about the case study, but the slides are still missing. I would like to add two pieces of advice for the group work, because last year the teams lost time at the start. The success of the workshop depends on a clear brief in the first ten minutes. Possibly, we can also print a summary for every table. I am responsible for the printing budget, so that costs us nothing. Please tell me before Thursday, because the shop closes at the weekend.\n\nOne last point concerns the evening dinner. Marc said he will come with his wife, and they are looking forward to the visit of the old town. At the same time, the museum closes at six, so we should book the guide early. I am thirty two years old and I still get lost there, so a guide is a good idea. Tell me if you prefer the restaurant near the river or the one beside the theatre. I remain available all week for a call.\n\nTwo words about the budget. The university gives us the same amount as last year, so we must be careful. The coffee break costs nine euros per person, and the room takes half of the total. If we invite more than thirty people, we will not be able to pay for the printed folders. I propose to send the slides as one file and print nothing at all. That solution allows us to keep a reserve for the guest speaker. Tell me what you think, because the university asks for the plan by Friday.\n\nBest wishes,\nCamille"
+}
