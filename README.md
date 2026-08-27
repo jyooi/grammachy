@@ -33,7 +33,7 @@ The benchmark files under `docs/benchmarks/` decide these two lines, and every t
   It is the Settings default.
   Download it in Settings, Models, or run `grammachy model download qwen3.8-4b`.
 - **Cloud LLM model**: `google/gemini-3.7-flash`.
-  It is the `openrouterModel` default.
+  It is the placeholder the empty `openrouterModel` field shows, and never a fallback: an unset cloud model is refused.
   The cloud engine is never the default engine.
 
 ### How a model earns those lines

@@ -180,7 +180,8 @@ Two lines, re-decided from the eval-set tables on every tag ([HUF-205](https://l
 No cost ceiling: the captain chose quality over cost for the cloud line on 2026-08-26.
 On the pilot numbers Gemini 3.7 Flash (0.34 USD per 1,000 Checks, 90% exact fix) is the recommended line.
 DeepSeek V4 Flash (0.02 USD, 70 to 83%) is the value candidate, and whether it takes the value line depends on the run: `docs/benchmarks/pilot-2026-08.md` puts it 13.3 points behind, which is outside the window, and `docs/benchmarks/pilot-2026-08-compact.md` puts it 3.3 points behind, which is inside it.
-The `openrouterModel` default in Settings is `google/gemini-3.7-flash` until the first full run replaces it.
+The `openrouterModel` placeholder in Settings is `google/gemini-3.7-flash` until the first full run replaces it.
+It stays a placeholder: `openrouterModel` has no built-in default, the rule v1 section 7 states.
 
 ## 6. Local engine changes
 

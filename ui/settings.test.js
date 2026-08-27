@@ -278,12 +278,12 @@ test("a text field of blanks reads as the default on every string key", () => {
     assert.equal(isKnown("openaiBaseUrl", blank), false, blank)
 
     assert.equal(valueOf({ openrouterModel: blank }, "openrouterModel"), "")
-    assert.equal(valueOf({ openaiModel: blank }, "openaiModel"), "gemma-4-e4b-it")
+    assert.equal(valueOf({ openaiModel: blank }, "openaiModel"), "qwen3.8-4b")
     assert.equal(valueOf({ openaiBaseUrl: blank }, "openaiBaseUrl"), "http://127.0.0.1:8080")
 
     // A field the user blanked out stores the default, not the blanks.
     assert.equal(normalised("openrouterModel", blank), "")
-    assert.equal(normalised("openaiModel", blank), "gemma-4-e4b-it")
+    assert.equal(normalised("openaiModel", blank), "qwen3.8-4b")
   }
 
   // A value with something in it is still kept exactly as it was typed.

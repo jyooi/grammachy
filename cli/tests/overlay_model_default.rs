@@ -82,13 +82,17 @@ fn the_local_model_default_clears_the_recommendation_bars() {
     );
 }
 
-/// The cloud default is the `openrouterModel` line, and cloud is never the
+/// The cloud model line names a provider-qualified id, and cloud is never the
 /// default engine (evals spec sections 5 and 5.1).
+///
+/// `openrouterModel` itself has no built-in default (spec section 7), so the
+/// recommended id lives in the placeholder the empty field shows.
+/// `cli/tests/settings.rs` owns the empty-default rule.
 #[test]
-fn the_cloud_default_is_a_model_id_and_never_the_default_engine() {
+fn the_cloud_model_id_is_qualified_and_cloud_is_never_the_default_engine() {
     assert!(
-        grammachy::settings::DEFAULT_OPENROUTER_MODEL.contains('/'),
-        "a cloud default is a provider-qualified id"
+        grammachy::settings::OPENROUTER_MODEL_PLACEHOLDER.contains('/'),
+        "a cloud model id is provider-qualified"
     );
     assert_ne!(
         grammachy::args::CheckOptions::default().engine,
