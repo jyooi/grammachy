@@ -8,14 +8,11 @@ use grammachy::engines::install::{self as engine_install, EngineEnvelope};
 use grammachy::envelope::{Envelope, ErrorCode};
 use grammachy::settings::StoredSettings;
 use grammachy::setup::{Setup, SetupEnvelope};
-use grammachy::{bench, check, chunk, doctor};
+use grammachy::{check, chunk, doctor};
 
 /// What a run prints on stdout, already rendered.
 ///
 /// `check` and `chunk` render one JSON envelope (spec section 5.1).
-/// `bench` renders its Markdown report, and still renders the error envelope
-/// when its arguments do not describe a run. A `--record` write that fails
-/// after the rows ran keeps the report on stdout and exits 1.
 /// `doctor` renders its report (spec section 10).
 /// `setup` renders its JSON envelope (spec section 10), and so does `engine`
 /// (spec section 5.4).
@@ -118,25 +115,6 @@ fn run() -> Option<Output> {
             };
             Some(chunk::run(&text, engine_of(args.engine).check_limit_utf16()).into())
         }
-        Command::Bench(args) => Some(match bench::run(&args, &StoredSettings::load()) {
-            Ok(run) => {
-                let exit_code = match &run.record_failure {
-                    Some(message) => {
-                        eprintln!("grammachy: {message}");
-                        1
-                    }
-                    None => 0,
-                };
-                Output {
-                    text: run.report,
-                    exit_code,
-                }
-            }
-            Err(message) => {
-                eprintln!("grammachy: {message}");
-                Envelope::error(ErrorCode::BadArguments, message).into()
-            }
-        }),
         Command::Doctor(args) => {
             // `doctor` reads no stdin: it reports the machine, not a Selection.
             let options = CheckOptions::resolve(

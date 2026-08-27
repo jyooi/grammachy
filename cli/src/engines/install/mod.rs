@@ -6,9 +6,8 @@
 //! download machinery (HUF-240 retired the `grammachy model` command that used
 //! to share it), because an install is a download with one more step.
 //!
-//! Only `languagetool` is a component. `harper` is compiled into the binary,
-//! `openai` talks to a server the user runs, and `openrouter` is a URL, so
-//! none of the three has anything to install (HUF-237).
+//! Only `languagetool` is a component; `harper` is compiled into the binary
+//! and has nothing to install (HUF-237).
 //!
 //! LanguageTool lands in `~/.local/share/grammachy/engines/languagetool/`, the
 //! upstream release tree unpacked as it comes. That is user space, so the
@@ -43,7 +42,7 @@ use crate::engines::languagetool;
 pub use archive::{extractor, Extractor};
 pub use digest::sha256_hex;
 pub use envelope::{EngineEnvelope, EngineReport, EngineRow, State};
-pub use transfer::{Downloader, Failure, Stopper, Transfer};
+pub use transfer::{Downloader, Failure, Stopper, Transfer, NOT_LOADED};
 
 /// Points the CLI at another engines directory. The test suite sets it, so no
 /// test writes the real one. Not a user-facing setting.
@@ -578,13 +577,11 @@ mod tests {
         assert!(is_component("languagetool"));
         assert!(is_component("LanguageTool"), "the slug is matched by case");
         assert!(!is_component("harper"));
-        assert!(!is_component("openai"));
-        assert!(!is_component("openrouter"));
+        assert!(!is_component("gector"));
     }
 
     #[test]
     fn an_engine_with_nothing_to_install_has_no_release() {
         assert!(release("harper").is_none());
-        assert!(release("openai").is_none());
     }
 }

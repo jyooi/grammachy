@@ -16,11 +16,7 @@ fn only_a_harper_check_initialises_harper() {
     assert_eq!(initialisations(), 0);
 
     // Building any adapter, the default one included, costs nothing.
-    for slug in [
-        EngineSlug::Languagetool,
-        EngineSlug::Openai,
-        EngineSlug::Harper,
-    ] {
+    for slug in [EngineSlug::Languagetool, EngineSlug::Harper] {
         drop(engine::resolve(slug));
     }
     assert_eq!(

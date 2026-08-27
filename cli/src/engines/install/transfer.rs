@@ -40,7 +40,7 @@ pub type Stopper = Box<dyn Fn(&str) -> Result<(), String> + Send + Sync>;
 
 /// Keeps a stop from reaching the real unit. Tests and CI set it to `never`.
 /// Not a user-facing setting.
-pub const STOP_ENV: &str = "GRAMMACHY_LLAMA_STOP";
+pub const STOP_ENV: &str = "GRAMMACHY_ENGINE_STOP";
 
 /// The downloader this run uses.
 pub fn downloader() -> Downloader {

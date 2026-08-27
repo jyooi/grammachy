@@ -80,39 +80,19 @@ fn the_last_astral_character_can_cross_the_limit() {
     );
 }
 
-/// The limit belongs to the Engine (spec section 4): the local LLM refuses at
-/// 2,000 units, and every other engine still takes 5,000.
+/// The limit belongs to the Engine (spec section 4), and the two remaining
+/// engines share one: 5,000 units.
 #[test]
 fn each_engine_names_its_own_check_size_limit() {
-    assert_eq!(EngineSlug::Openai.check_limit_utf16(), 2_000);
     assert_eq!(EngineSlug::Languagetool.check_limit_utf16(), 5_000);
     assert_eq!(EngineSlug::Harper.check_limit_utf16(), 5_000);
-}
-
-#[test]
-fn the_local_engine_refuses_at_two_thousand_units() {
-    let limit = EngineSlug::Openai.check_limit_utf16();
-    let options = CheckOptions {
-        engine: EngineSlug::Openai,
-        ..CheckOptions::default()
-    };
-
-    assert!(check::validate(&text_of_units(limit), limit).is_none());
-
-    let envelope = check::run(&text_of_units(limit + 1), &options);
-    assert_eq!(envelope.exit_code(), 1);
-    assert_eq!(code_of(&envelope), "text_too_long");
 }
 
 /// The message has to name the limit that refused the text, or the card shows
 /// a size bar the reader cannot place.
 #[test]
 fn the_too_long_message_names_the_selected_engine_limit() {
-    for engine in [
-        EngineSlug::Openai,
-        EngineSlug::Languagetool,
-        EngineSlug::Harper,
-    ] {
+    for engine in [EngineSlug::Languagetool, EngineSlug::Harper] {
         let limit = engine.check_limit_utf16();
         let envelope = check::validate(&"a".repeat(limit + 1), limit)
             .expect("the text is over this engine's limit");
@@ -125,23 +105,6 @@ fn the_too_long_message_names_the_selected_engine_limit() {
             )
         );
     }
-}
-
-/// A text between the two limits passes on the wider engines and is refused on
-/// the local one, which is the whole point of the per-engine limit.
-#[test]
-fn a_text_between_the_two_limits_splits_the_engines() {
-    let text = "a".repeat(3_000);
-
-    assert!(check::validate(&text, EngineSlug::Languagetool.check_limit_utf16()).is_none());
-    assert!(check::validate(&text, EngineSlug::Harper.check_limit_utf16()).is_none());
-    assert_eq!(
-        code_of(
-            &check::validate(&text, EngineSlug::Openai.check_limit_utf16())
-                .expect("the text is over the local engine limit")
-        ),
-        "text_too_long"
-    );
 }
 
 #[test]

@@ -260,9 +260,7 @@ fn the_catalogue_slug_is_an_engine_slug_the_shell_knows() {
     assert!(install::is_component("languagetool"));
     // Every other engine has nothing to install, so the dropdown always offers
     // it and no row is ever drawn for it.
-    for slug in ["harper", "openai", "openrouter"] {
-        assert!(!install::is_component(slug), "{slug}");
-    }
+    assert!(!install::is_component("harper"));
 
     let engines_js = read("ui/engines.js");
     assert!(
@@ -284,7 +282,7 @@ fn the_built_in_engine_is_the_default_on_both_sides() {
     );
     assert!(
         settings_js.contains(
-            r#"engine: { type: "enum", values: ["languagetool", "openai", "harper", "openrouter"], fallback: "harper" }"#
+            r#"engine: { type: "enum", values: ["languagetool", "harper"], fallback: "harper" }"#
         ),
         "the stored default is the same engine the CLI resolves to"
     );

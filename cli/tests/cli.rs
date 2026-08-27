@@ -23,14 +23,9 @@ fn silent_address() -> String {
     address
 }
 
-/// Point every run at a dead address and forbid every unit start, so the binary
-/// tests exercise argument handling only and never touch systemd.
-///
-/// The settings file names a silent `openaiBaseUrl`, because the default is
-/// `127.0.0.1:8080` and a developer machine may run a real llama.cpp there.
-/// Without this the served-model guard of the `openai` adapter would answer
-/// about weights that machine happens to hold. No run reads the developer's
-/// real `~/.config/omarchy/shell.json` either (spec section 7).
+/// Point every run at a dead address, so the binary tests exercise argument
+/// handling only and never touch systemd. No run reads the developer's real
+/// `~/.config/omarchy/shell.json` either (spec section 7).
 ///
 /// The engines directory is a path that does not exist, so no run reads the
 /// components this machine has installed (spec section 5.4).
@@ -38,19 +33,14 @@ fn no_engine(command: &mut Command) -> &mut Command {
     command
         .env("GRAMMACHY_LANGUAGETOOL_ADDRESS", silent_address())
         .env("GRAMMACHY_LANGUAGETOOL_START", "never")
-        .env("GRAMMACHY_LLAMA_START", "never")
         .env("GRAMMACHY_ENGINES_DIR", scratch_dir().join("no-engines"))
         .env("GRAMMACHY_SHELL_JSON", silent_settings())
 }
 
-/// The settings file every run that names no other one reads: one silent
-/// `openaiBaseUrl` and nothing else, so every other key is the built-in
-/// default of spec section 7.
+/// The settings file every run that names no other one reads: nothing at all,
+/// so every key is the built-in default of spec section 7.
 fn silent_settings() -> PathBuf {
-    settings_file(
-        "silent-shell.json",
-        &format!(r#""openaiBaseUrl": "http://{}""#, silent_address()),
-    )
+    settings_file("silent-shell.json", "")
 }
 
 /// A directory of this test binary, removed with the target directory.
@@ -65,8 +55,9 @@ fn settings_file(name: &str, entry_body: &str) -> PathBuf {
     let path = scratch_dir().join(name);
     let document = format!(
         r#"{{ "bar": {{ "layout": {{ "left": [], "center": [
-            {{ "id": "io.github.jyooi.grammachy", {entry_body} }}
-        ], "right": [] }} }}, "plugins": [] }}"#
+            {{ "id": "io.github.jyooi.grammachy"{}{entry_body} }}
+        ], "right": [] }} }}, "plugins": [] }}"#,
+        if entry_body.is_empty() { "" } else { ", " }
     );
     std::fs::write(&path, document).expect("the settings file is written");
     path
@@ -185,7 +176,7 @@ fn every_valid_flag_value_is_accepted() {
         );
     }
 
-    for engine in ["languagetool", "openai", "harper"] {
+    for engine in ["languagetool", "harper"] {
         // `harper` runs in process and answers a result, so there is no code.
         let result = run(&["check", "--engine", engine], "Some text.");
         let value = envelope(&result);
@@ -195,27 +186,8 @@ fn every_valid_flag_value_is_accepted() {
         );
     }
 
-    for thinking in ["on", "off"] {
-        let result = run(&["check", "--thinking", thinking], "Some text.");
-        assert_ne!(
-            envelope(&result)["error"]["code"],
-            "bad_arguments",
-            "--thinking {thinking} is valid"
-        );
-    }
-
     let result = run(&["check", "--target", "en-US"], "Some text.");
     assert_ne!(envelope(&result)["error"]["code"], "bad_arguments");
-}
-
-/// Spec section 4 gives `--thinking` two values, so anything else is refused
-/// before a Check runs.
-#[test]
-fn an_unknown_thinking_value_prints_bad_arguments() {
-    let result = run(&["check", "--thinking", "maybe"], "Some text.");
-
-    assert_eq!(result.status, 1);
-    assert_eq!(envelope(&result)["error"]["code"], "bad_arguments");
 }
 
 #[test]
@@ -233,45 +205,6 @@ fn invalid_utf8_on_stdin_prints_bad_arguments() {
     let value: Value = serde_json::from_slice(&output.stdout).expect("stdout is JSON");
     assert_eq!(output.status.code(), Some(1));
     assert_eq!(value["error"]["code"], "bad_arguments");
-}
-
-#[test]
-fn a_silent_model_server_is_a_clean_engine_unavailable() {
-    let settings = settings_file(
-        "openai-silent.json",
-        &format!(r#""openaiBaseUrl": "http://{}""#, silent_address()),
-    );
-
-    let result = run_with_settings(&["check", "--engine", "openai"], "He go home.", &settings);
-    let value = envelope(&result);
-
-    assert_eq!(result.status, 1);
-    assert_eq!(value["contractVersion"], 1);
-    assert_eq!(value["error"]["code"], "engine_unavailable");
-}
-
-#[test]
-fn a_remote_openai_base_url_is_bad_arguments() {
-    for base_url in ["https://api.openai.com/v1", "http://example.com:8080"] {
-        let settings = settings_file(
-            "openai-remote.json",
-            &format!(r#""openaiBaseUrl": "{base_url}""#),
-        );
-
-        let result = run_with_settings(&["check", "--engine", "openai"], "He go home.", &settings);
-        let value = envelope(&result);
-
-        assert_eq!(result.status, 1);
-        assert_eq!(value["contractVersion"], 1);
-        assert_eq!(value["error"]["code"], "bad_arguments", "{base_url}");
-        assert!(
-            value["error"]["message"]
-                .as_str()
-                .expect("the message is a string")
-                .contains("only localhost"),
-            "the message names the rule: {value}"
-        );
-    }
 }
 
 /// The in-process engine of spec section 4 needs no unit and no port, so it
@@ -323,6 +256,24 @@ fn the_engine_flag_wins_over_the_stored_engine() {
     );
 }
 
+/// The acceptance criterion of HUF-240: a stored engine of a removed slug
+/// falls back to the default engine rather than erroring.
+#[test]
+fn a_stored_engine_of_a_removed_slug_falls_back_to_the_default() {
+    for removed in ["openai", "openrouter"] {
+        let settings = settings_file(
+            &format!("removed-engine-{removed}.json"),
+            &format!(r#""engine": "{removed}""#),
+        );
+
+        let result = run_with_settings(&["check"], "He go home.", &settings);
+
+        let value = envelope(&result);
+        assert_eq!(result.status, 0, "{removed}: {value}");
+        assert_eq!(value["engine"], "harper", "{removed}: {value}");
+    }
+}
+
 #[test]
 fn an_unknown_stored_engine_falls_back_to_the_default() {
     let settings = settings_file("unknown-engine.json", r#""engine": "gpt""#);
@@ -342,6 +293,22 @@ fn an_unknown_stored_engine_falls_back_to_the_default() {
     );
 }
 
+/// Unknown stored keys are ignored without error, so a settings file left over
+/// from a removed feature (or a newer version of Grammachy) never breaks a run.
+#[test]
+fn unknown_stored_keys_are_ignored_without_error() {
+    let settings = settings_file(
+        "unknown-keys.json",
+        r#""engine": "harper", "openaiModel": "qwen3.8-4b", "somethingElse": true"#,
+    );
+
+    let result = run_with_settings(&["check"], "He go home.", &settings);
+
+    let value = envelope(&result);
+    assert_eq!(result.status, 0, "{value}");
+    assert_eq!(value["engine"], "harper", "{value}");
+}
+
 /// The acceptance criterion of HUF-237: a fresh install runs no download and
 /// no pacman command, and the first Check answers.
 #[test]
@@ -358,9 +325,8 @@ fn a_missing_settings_file_is_fine() {
     assert!(!missing.exists(), "the CLI never creates the settings file");
 }
 
-/// One temporary home for a `setup` run: copies of both configuration files,
-/// no compositor, and a models directory nothing writes to. The real files and
-/// the real `~/.local/share/grammachy/` are never in reach.
+/// One temporary home for a `setup` run: copies of both configuration files
+/// and no compositor. The real files are never in reach.
 fn setup_home(name: &str) -> PathBuf {
     let directory = scratch_dir().join(format!("home-{name}"));
     let _ = std::fs::remove_dir_all(&directory);
@@ -382,7 +348,6 @@ fn run_setup(args: &[&str], home: &Path) -> Run {
     let output = no_engine(&mut Command::new(env!("CARGO_BIN_EXE_grammachy")))
         .env("GRAMMACHY_BINDINGS_LUA", home.join("bindings.lua"))
         .env("GRAMMACHY_MENU_JSONC", home.join("omarchy-menu.jsonc"))
-        .env("GRAMMACHY_MODELS_DIR", home.join("models"))
         .env("GRAMMACHY_HYPRCTL_RELOAD", "never")
         .args(args)
         .stdin(Stdio::null())
@@ -419,9 +384,6 @@ fn setup_writes_the_block_and_the_entry_and_remove_takes_them_out() {
     assert!(std::fs::read_to_string(&menu)
         .unwrap()
         .contains("grammachy.compose"));
-    // The default engine is `harper`, which is in the binary, so nothing is
-    // downloaded and no pacman command is printed (HUF-237).
-    assert!(!home.join("models").exists());
 
     let removed = run_setup(&["setup", "--remove"], &home);
 
@@ -433,116 +395,5 @@ fn setup_writes_the_block_and_the_entry_and_remove_takes_them_out() {
             std::fs::read_to_string(&menu).unwrap()
         ),
         before
-    );
-}
-
-/// One `grammachy model` run against a scratch models directory. The unit stop
-/// is forbidden, so no run here reaches the llama.cpp unit the live shell uses.
-fn run_model(args: &[&str], models_directory: &Path) -> Run {
-    let output = no_engine(&mut Command::new(env!("CARGO_BIN_EXE_grammachy")))
-        .env("GRAMMACHY_MODELS_DIR", models_directory)
-        .env("GRAMMACHY_LLAMA_STOP", "never")
-        .args(args)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .output()
-        .expect("the binary runs");
-
-    Run {
-        status: output.status.code().expect("the binary was not signalled"),
-        stdout: String::from_utf8(output.stdout).expect("stdout is UTF-8"),
-    }
-}
-
-fn models_home(name: &str) -> PathBuf {
-    let directory = scratch_dir().join(format!("models-{name}"));
-    let _ = std::fs::remove_dir_all(&directory);
-    std::fs::create_dir_all(&directory).expect("the models directory is created");
-    directory
-}
-
-/// Spec section 5.3: one JSON envelope on stdout, exit 0, one row per
-/// catalogue model.
-#[test]
-fn model_list_prints_one_envelope_with_every_catalogue_row() {
-    let directory = models_home("list");
-    std::fs::write(directory.join("gemma-4-E4B-it-Q4_K_M.gguf"), b"whole")
-        .expect("the ready file is written");
-
-    let result = run_model(&["model", "list"], &directory);
-    let value = envelope(&result);
-
-    assert_eq!(result.status, 0);
-    assert_eq!(value["contractVersion"], 1);
-    assert_eq!(value["verb"], "list");
-    assert_eq!(value["directory"], directory.display().to_string());
-    assert!(value["freeBytes"].as_u64().is_some());
-    assert_eq!(value["models"].as_array().unwrap().len(), 5);
-    assert_eq!(value["models"][0]["state"], "ready");
-    assert_eq!(value["models"][1]["state"], "absent");
-    assert_eq!(value["models"][3]["name"], "qwen3.8-4b");
-    assert_eq!(value["models"][3]["licence"], "Apache-2.0");
-    assert_eq!(value["models"][4]["name"], "granite-4.2-3b");
-    assert_eq!(value["models"][4]["licence"], "Apache-2.0");
-}
-
-#[test]
-fn model_remove_deletes_the_file_and_answers_absent() {
-    let directory = models_home("remove");
-    let weights = directory.join("Phi-4-mini-instruct-Q4_K_M.gguf");
-    std::fs::write(&weights, b"whole").expect("the ready file is written");
-
-    let result = run_model(&["model", "remove", "phi-4-mini-instruct"], &directory);
-    let value = envelope(&result);
-
-    assert_eq!(result.status, 0);
-    assert_eq!(value["verb"], "remove");
-    assert_eq!(value["models"].as_array().unwrap().len(), 1);
-    assert_eq!(value["models"][0]["name"], "phi-4-mini-instruct");
-    assert_eq!(value["models"][0]["state"], "absent");
-    assert!(!weights.exists());
-}
-
-/// A name the catalogue does not carry never reaches the network: it is one
-/// error envelope and exit 1.
-#[test]
-fn model_download_of_an_unknown_name_is_bad_arguments() {
-    let directory = models_home("unknown");
-
-    let result = run_model(&["model", "download", "no-such-model"], &directory);
-    let value = envelope(&result);
-
-    assert_eq!(result.status, 1);
-    assert_eq!(value["contractVersion"], 1);
-    assert_eq!(value["error"]["code"], "bad_arguments");
-    assert_eq!(std::fs::read_dir(&directory).unwrap().count(), 0);
-}
-
-#[test]
-fn model_needs_a_verb() {
-    let result = run_model(&["model"], &models_home("no-verb"));
-
-    assert_eq!(result.status, 1);
-    assert_eq!(envelope(&result)["error"]["code"], "bad_arguments");
-}
-
-// Spec section 7: `openrouterModel` has no built-in default, so the cloud
-// engine with nothing stored refuses before it opens a socket. No test here
-// may reach openrouter.ai, and this one never does: the refusal comes first.
-#[test]
-fn the_cloud_engine_with_no_model_prints_bad_arguments() {
-    let settings = settings_file(
-        "openrouter-blank-model.json",
-        r#""engine": "openrouter", "openrouterModel": """#,
-    );
-    let result = run_with_settings(&["check"], "He go home.", &settings);
-    let value = envelope(&result);
-
-    assert_eq!(result.status, 1);
-    assert_eq!(value["error"]["code"], "bad_arguments");
-    assert_eq!(
-        value["error"]["message"],
-        "The cloud model is not set. Type one in Settings. (reason: no_model)"
     );
 }

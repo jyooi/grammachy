@@ -106,13 +106,3 @@ fn is_ours(entry: &Value) -> bool {
 fn string<'a>(entry: &'a Value, key: &str) -> Option<&'a str> {
     entry.get(key).and_then(Value::as_str)
 }
-
-/// The one fallback rule every text setting shares: a value that carries
-/// something, or `None`.
-///
-/// `doctor::report` reads the stored `openrouterModel` through this before it
-/// names a field in a card.
-pub fn non_empty(value: &str) -> Option<&str> {
-    let value = value.trim();
-    (!value.is_empty()).then_some(value)
-}
