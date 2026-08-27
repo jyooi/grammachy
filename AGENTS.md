@@ -87,7 +87,7 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   The unset-model `bad_arguments` carries `(reason: no_model)` in that same shape, and it is the one `bad_arguments` whose card names the Settings field rather than the companion tool.
   The arm is picked from the message and never from the engine slug, so a cloud failure for any other reason keeps the general card.
   The `engine_unavailable` card sets `needsDiagnosis` false for this slug alone, because `doctor` reads no piece of this machine that a cloud failure is about.
-  `openrouterModel` has no built-in default: `settings::DEFAULT_OPENROUTER_MODEL` is the empty string, so a blank field, a blank flag, and a missing key all answer `bad_arguments` in the adapter.
+  `openrouterModel` has no built-in default: `settings::DEFAULT_OPENROUTER_MODEL` is the empty string, so a blank field, a blank flag, and an absent entry all answer `bad_arguments` in the adapter.
   `settings::non_empty` is the one fallback rule the file reader and the flags share, and `settings::OPENROUTER_MODEL_PLACEHOLDER` is what the empty field shows and never a value.
   The cloud surface of `docs/spec/evals.md` section 7 lives in `ui/settings.js`: the `Cloud LLM (OpenRouter)` row, the `openrouterModel` and `cloudConsent` descriptors, `needsCloudConsent`, `cloudConsentCard`, and the `keyState`/`keyHint` pair the Settings hint draws.
   The consent gate sits on `Overlay.launchCheck`, the one route out to the CLI, so the quick popup, every Chunk of a Draft, and every retry pass through it and the card can never be gone round.

@@ -746,6 +746,7 @@ omarchy restart shell
 19. Press Continue.
     The progress line walks every Chunk and the card never comes back between two Chunks of the same run.
     The time on that line starts at the Continue, so the wait of step 18 is not in it.
+
 ### An unset cloud model names the field
 
 This part goes back to the quick popup, because the two surfaces answer a failed Check with different buttons.

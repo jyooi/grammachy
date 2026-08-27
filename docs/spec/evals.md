@@ -224,8 +224,12 @@ Contract: [HUF-206](https://linear.app/huffman/issue/HUF-206); key placement: [H
   The placeholder is never a fallback: `openrouterModel` has no built-in default, which v1 section 7 states as the one resolved rule.
 - Key: `~/.config/grammachy/openrouter-key`, directory 0700, file 0600, written by `printf '%s' "$KEY" | grammachy setup --openrouter-key`, removed by `setup --remove`, never in `shell.json`, never through QML.
 - Consent card "Send text to OpenRouter?" gates the first Check in `Overlay`; Continue stores `cloudConsent`, Cancel sends nothing.
+  Cancel keeps the engine setting, so the next Check asks again.
+  The quick popup then shows a notice that nothing was sent, and Compose returns to the Draft, or to what the finished Chunks already found.
   The bar widget draws the cloud glyph with the tooltip "Grammachy: cloud engine, text is sent to OpenRouter".
 - Failures map onto the six codes with a `reason` word (`no_key`, `unreachable`, `rejected_key`, `no_credit`, `rate_limited`) and the card shows the envelope message.
+  An unset model adds a sixth reason word, `no_model`, which comes with `bad_arguments`.
+  Section 8 of v1 holds the card it picks.
 - `doctor` gains offline `binary` and `key` checks and a `docs/doctor.md` row.
 - TLS is in the binary (`ureq` with `rustls`).
 - ADR 0002, one opt-in cloud engine through OpenRouter only, as drafted on HUF-206.
