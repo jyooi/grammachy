@@ -1791,7 +1791,7 @@ fn a_run_under_the_labelled_sample_prints_the_column_but_never_ranks() {
     );
     assert!(
         run.stdout.contains(
-            "This run matched 1 hand label, under the 5 the 80% gate needs, so the judge is unproven here.\nThe Useful fix column does not count in the ranking, because this run matched under the 5 hand labels the gate needs.\n"
+            "This set matched 1 hand label, under the 5 the 80% gate needs, so the judge is unproven here.\nThe Useful fix column does not count in the ranking, because this set matched under the 5 hand labels the gate needs.\n"
         ),
         "{}",
         run.stdout
@@ -1846,7 +1846,7 @@ fn a_run_no_hand_label_covers_prints_the_column_but_excludes_it_from_the_ranking
     assert!(quality.contains("| 1 of 1 (100.0%) |"), "{quality}");
     assert!(
         run.stdout.contains(
-            "so the 80% gate could not be measured.\nThe Useful fix column does not count in the ranking, because no hand label covers a hit of this run.\n"
+            "so the 80% gate could not be measured.\nThe Useful fix column does not count in the ranking, because no hand label covers a hit of this set.\n"
         ),
         "{}",
         run.stdout

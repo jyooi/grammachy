@@ -151,30 +151,42 @@ fn build(block: &Block, edit: Option<&Edit>) -> Item {
 /// A missing word is a zero-width edit in M2. It is widened to the next word,
 /// or to the last word when it belongs after the end, so the span always
 /// quotes text the way spec section 5.1 requires.
+///
+/// M2 text is tokenised, the correction included, so every replacement is
+/// joined by [`join`], the rule that wrote the sentence. A widened insertion
+/// is joined onto the token in front of the span as well, or a next token that
+/// attaches to the word before it, such as `.` or `n't`, would take the
+/// correction inside that word.
 fn place(text: &str, spans: &[(usize, usize)], tokens: &[String], edit: &Edit) -> ItemEdit {
+    let correction: Vec<String> = edit
+        .correction
+        .split_whitespace()
+        .map(str::to_string)
+        .collect();
+
     let (start, end, fix) = if !edit.is_insertion() {
         (
             spans[edit.start].0,
             spans[edit.end - 1].1,
-            edit.correction.clone(),
+            join(None, &correction).0,
         )
     } else if edit.start < tokens.len() {
         let span = spans[edit.start];
+        let mut widened = correction;
+        widened.push(tokens[edit.start].clone());
         (
             span.0,
             span.1,
-            format!("{} {}", edit.correction, tokens[edit.start]),
+            join(attached_to(spans, tokens, edit.start), &widened).0,
         )
     } else {
-        let span = spans[tokens.len() - 1];
-        (
-            span.0,
-            span.1,
-            format!("{} {}", tokens[tokens.len() - 1], edit.correction),
-        )
+        let last = tokens.len() - 1;
+        let span = spans[last];
+        let mut widened = vec![tokens[last].clone()];
+        widened.extend(correction);
+        (span.0, span.1, join(None, &widened).0)
     };
 
-    let fix = fix.trim().to_string();
     // A deletion takes the space in front of the word with it, the way a
     // Fix that removes a word has to, or the Corrected text keeps a gap.
     let start = match fix.is_empty() && start > 0 {
@@ -213,6 +225,16 @@ fn apply(text: &str, edits: &[ItemEdit]) -> String {
 /// The separator is decided per token, so the spans are exact by construction
 /// rather than by a second pass that could disagree with the join.
 pub fn detokenise(tokens: &[String]) -> (String, Vec<(usize, usize)>) {
+    join(None, tokens)
+}
+
+/// Join tokens onto what comes before them, recording each token's span.
+///
+/// `previous` is the token the first of these follows, or `None` at the start
+/// of a sentence. It is the one separator rule of this module: [`detokenise`]
+/// writes a whole sentence with it and [`place`] writes one replacement with
+/// it, so a fix reads exactly as the same words read inside the sentence.
+fn join(previous: Option<&str>, tokens: &[String]) -> (String, Vec<(usize, usize)>) {
     let mut text = String::new();
     let mut spans = Vec::with_capacity(tokens.len());
     let mut units = 0;
@@ -223,8 +245,11 @@ pub fn detokenise(tokens: &[String]) -> (String, Vec<(usize, usize)>) {
         if token == "\"" {
             quotes += 1;
         }
-        let previous = index.checked_sub(1).map(|before| tokens[before].as_str());
-        if index > 0 && separated(previous, token, opening_quote, tokens, index) {
+        let before = match index.checked_sub(1) {
+            Some(place) => Some(tokens[place].as_str()),
+            None => previous,
+        };
+        if separated(before, token, opening_quote, tokens, index) {
             text.push(' ');
             units += 1;
         }
@@ -237,7 +262,23 @@ pub fn detokenise(tokens: &[String]) -> (String, Vec<(usize, usize)>) {
     (text, spans)
 }
 
+/// The token a widened insertion is joined onto, when there is one.
+///
+/// A sentence that already wrote a space in front of the span keeps it outside
+/// the span, so the join must not write a second one. `None` says the
+/// replacement starts where a separator would be wrong.
+fn attached_to<'a>(
+    spans: &[(usize, usize)],
+    tokens: &'a [String],
+    index: usize,
+) -> Option<&'a str> {
+    let previous = index.checked_sub(1)?;
+    (spans[index].0 == spans[previous].1).then(|| tokens[previous].as_str())
+}
+
 /// Whether a space is written before this token.
+///
+/// `previous` is `None` when nothing comes before it, which writes no space.
 fn separated(
     previous: Option<&str>,
     token: &str,
@@ -257,9 +298,9 @@ fn separated(
                 return false;
             }
             // The quote that opened stays against the word it opened.
-            !(previous == "\"" && opened_before(tokens, index - 1))
+            !(previous == "\"" && index > 0 && opened_before(tokens, index - 1))
         }
-        None => true,
+        None => false,
     }
 }
 
@@ -353,6 +394,98 @@ mod tests {
         assert!(
             item.edits[0].start < item.edits[0].end,
             "no zero-width span"
+        );
+    }
+
+    /// A widened insertion joins by the rule that wrote the sentence.
+    ///
+    /// The next token may attach to the word in front of it, such as `.` or
+    /// `n't`, and a separator written without that rule lands inside that word.
+    #[test]
+    fn a_missing_word_before_an_attached_token_joins_the_way_the_sentence_does() {
+        let cases = [
+            (
+                "I go to the cinema every single day .",
+                8,
+                "M:ADV",
+                "quickly",
+                "I go to the cinema every single day quickly.",
+            ),
+            (
+                "In my opinion , the film was very good .",
+                3,
+                "M:ADV",
+                "however",
+                "In my opinion however, the film was very good.",
+            ),
+            (
+                "I like the show 's ending very much .",
+                4,
+                "M:NOUN",
+                "friend",
+                "I like the show friend's ending very much.",
+            ),
+            (
+                "I do n't like the show at all .",
+                2,
+                "M:ADV",
+                "really",
+                "I do reallyn't like the show at all.",
+            ),
+        ];
+
+        for (sentence, index, code, correction, expected) in cases {
+            let item = item(&block(
+                "zh",
+                sentence,
+                vec![edit(index, index, code, correction)],
+            ))
+            .expect("the block is kept");
+
+            assert_eq!(item.expected_text, expected);
+            assert!(
+                item.edits[0].start < item.edits[0].end,
+                "no zero-width span"
+            );
+
+            let mut corrected: Vec<String> = sentence.split(' ').map(str::to_string).collect();
+            corrected.insert(index, correction.to_string());
+            assert_eq!(
+                item.expected_text,
+                detokenise(&corrected).0,
+                "the fix reads as the same words read inside a sentence"
+            );
+        }
+    }
+
+    /// A correction is tokenised too, so it is joined rather than pasted in.
+    #[test]
+    fn a_tokenised_correction_is_joined_back_into_words() {
+        let item = item(&block(
+            "de",
+            "I did not liked the film at all .",
+            vec![edit(1, 3, "R:VERB:TENSE", "did n't")],
+        ))
+        .expect("the block is kept");
+
+        assert_eq!(item.edits[0].fix, "didn't");
+        assert_eq!(item.expected_text, "I didn't liked the film at all.");
+    }
+
+    #[test]
+    fn a_missing_word_at_the_end_widens_onto_the_word_before_it() {
+        let item = item(&block(
+            "pt",
+            "I am looking forward to hearing from you .",
+            vec![edit(9, 9, "M:ADV", "soon")],
+        ))
+        .expect("the block is kept");
+
+        assert_eq!(item.edits[0].text, ".");
+        assert_eq!(item.edits[0].fix, ". soon");
+        assert_eq!(
+            item.expected_text,
+            "I am looking forward to hearing from you. soon"
         );
     }
 

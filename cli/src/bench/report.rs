@@ -154,6 +154,12 @@ pub struct SetTables {
     pub languages: Vec<String>,
     pub engines: Vec<EngineRow>,
     pub models: Vec<ModelRow>,
+    /// What `--judgements` said about this set, absent without the flag.
+    ///
+    /// It is per set rather than per run, because the Useful fix column sits
+    /// beside cells measured over one set's items. A run-wide count beside a
+    /// 40-item row would report a population the rest of the row never saw.
+    pub judge: Option<Assessment>,
 }
 
 impl SetTables {
@@ -193,8 +199,6 @@ pub struct Report {
     /// A machine with no corpus cache is a skipped table with a reason, never
     /// an error (ADR 0003).
     pub eval_set_skipped: Option<String>,
-    /// What `--judgements` said about this run, absent without the flag.
-    pub judge: Option<Assessment>,
 }
 
 impl Report {
@@ -269,7 +273,7 @@ impl Report {
         let verdicts = self.verdicts(set, ranking);
 
         out.push_str("### Quality\n\n");
-        let useful_column = self.judge.is_some();
+        let useful_column = set.judge.is_some();
         out.push_str("| Model | Catch rate | Precision | Recall | F0.5 | Exact fix |");
         if useful_column {
             out.push_str(" Useful fix |");
@@ -283,14 +287,14 @@ impl Report {
             out.push_str(&format!(
                 "| `{}` | {} |\n",
                 row.model,
-                self.quality_cells(row).join(" | ")
+                self.quality_cells(set, row).join(" | ")
             ));
         }
         out.push('\n');
         if self.holds_both_modes(set) {
             out.push_str("Every Models table prints the rows in one order. A model that appears twice is its two Thinking modes, named in the Cost table below.\n\n");
         }
-        if let Some(judge) = &self.judge {
+        if let Some(judge) = &set.judge {
             if ranking {
                 out.push_str(&judge.lines());
                 out.push_str(&self.ranking_sentence(set));
@@ -395,11 +399,13 @@ impl Report {
     ///
     /// The Useful fix cell is present only with `--judgements`, and it prints
     /// whether or not the gate passed: below the gate the column is still the
-    /// measurement, it just does not rank. A thinking-off row says so instead
-    /// of a count, because the judge grades the product default alone and a
-    /// bare `no non-exact hit` would read as a row that produced none.
-    fn quality_cells(&self, row: &ModelRow) -> Vec<String> {
-        let width = if self.judge.is_some() { 9 } else { 8 };
+    /// measurement, it just does not rank. It counts the hits of this set
+    /// alone, so every cell of the row measures the same items. A thinking-off
+    /// row says so instead of a count, because the judge grades the product
+    /// default alone and a bare `no non-exact hit` would read as a row that
+    /// produced none.
+    fn quality_cells(&self, set: &SetTables, row: &ModelRow) -> Vec<String> {
+        let width = if set.judge.is_some() { 9 } else { 8 };
         let Outcome::Measured(measurement) = &row.outcome else {
             return vec![SKIPPED.to_string(); width];
         };
@@ -411,7 +417,7 @@ impl Report {
             tally.f05_cell(),
             tally.exact_cell(),
         ];
-        if let Some(judge) = &self.judge {
+        if let Some(judge) = &set.judge {
             cells.push(match row.out_of_the_judged_sample() {
                 true => "not the product default".to_string(),
                 false => judge.row(&row.key()).unwrap_or_default().cell(),
@@ -440,7 +446,7 @@ impl Report {
     /// never be recommended. Letting it drop the swap would decide the
     /// recommendation on a row the report did not measure.
     fn unjudged_rows(&self, set: &SetTables) -> Vec<String> {
-        let Some(judge) = self.judge.as_ref() else {
+        let Some(judge) = set.judge.as_ref() else {
             return Vec::new();
         };
         set.models
@@ -457,7 +463,7 @@ impl Report {
 
     /// How many measured Models rows the judgements file graded a hit of.
     fn judged_rows(&self, set: &SetTables) -> usize {
-        let Some(judge) = self.judge.as_ref() else {
+        let Some(judge) = set.judge.as_ref() else {
             return 0;
         };
         set.models
@@ -494,7 +500,7 @@ impl Report {
             return 0.0;
         };
         let exact = tally.exact_rate_percent();
-        let Some(judge) = self
+        let Some(judge) = set
             .judge
             .as_ref()
             .filter(|judge| judge.ranks() && self.judge_covers_measured_rows(set))
@@ -515,7 +521,7 @@ impl Report {
     /// same two conditions `rank_score` and `ranking_measure` do, which is what
     /// keeps the three paragraphs from disagreeing.
     fn ranking_sentence(&self, set: &SetTables) -> String {
-        let Some(judge) = self.judge.as_ref() else {
+        let Some(judge) = set.judge.as_ref() else {
             return String::new();
         };
         let mut out = if judge.ranks() && self.judge_covers_measured_rows(set) {
@@ -534,9 +540,9 @@ impl Report {
     /// Why the Useful fix column stays out of the ranking of this run.
     fn no_ranking_sentence(&self, judge: &Assessment, set: &SetTables) -> String {
         let reason = if judge.labelled == 0 {
-            "no hand label covers a hit of this run".to_string()
+            "no hand label covers a hit of this set".to_string()
         } else if judge.labelled < MINIMUM_LABELLED {
-            format!("this run matched under the {MINIMUM_LABELLED} hand labels the gate needs")
+            format!("this set matched under the {MINIMUM_LABELLED} hand labels the gate needs")
         } else if !judge.ranks() {
             format!("the judge is under the {AGREEMENT_GATE:.0}% gate")
         } else if !self.unjudged_rows(set).is_empty() {
@@ -700,7 +706,7 @@ impl Report {
 
     /// What the ranking is measured on, named in the file.
     fn ranking_measure(&self, set: &SetTables) -> &'static str {
-        match self.judge.as_ref().is_some_and(Assessment::ranks)
+        match set.judge.as_ref().is_some_and(Assessment::ranks)
             && self.judge_covers_measured_rows(set)
         {
             true => "exact fix rate plus the non-exact hits the judge called useful, over the interference sentences",
@@ -983,6 +989,7 @@ mod tests {
                 weights::of("qwen2.5-3b-instruct"),
                 Outcome::Skipped("llama.cpp is not installed.".to_string()),
             )],
+            judge: None,
         }
     }
 
@@ -994,7 +1001,6 @@ mod tests {
                 ram_gb: 27,
             },
             command: "grammachy bench".to_string(),
-            judge: None,
             default_engine: "languagetool".to_string(),
             max_cost: None,
             cloud_spend_usd: 0.0,
@@ -1555,6 +1561,61 @@ mod tests {
         );
     }
 
+    /// The Useful fix cell measures the set its row sits in.
+    ///
+    /// Every other cell of a Quality row is counted over one set's items, so a
+    /// column counted over both sets would report a population the rest of the
+    /// row never saw.
+    #[test]
+    fn the_useful_fix_column_counts_the_hits_of_its_own_set() {
+        use crate::bench::judge::{Assessment, Hit, Judgement, Judgements};
+
+        let judged = |entries: &[(&str, bool)]| {
+            let mut judgements = Judgements::new();
+            let mut hits: Vec<Hit> = Vec::new();
+            for (id, useful) in entries {
+                judgements.entry(id.to_string()).or_default().insert(
+                    format!("an answer for {id}"),
+                    Judgement {
+                        useful: *useful,
+                        reason: "a recorded reason".to_string(),
+                    },
+                );
+                hits.push(Hit {
+                    row: key("openai", "gemma-4-e4b-it"),
+                    id: id.to_string(),
+                    result: format!("an answer for {id}"),
+                });
+            }
+            Some(Assessment::of(&hits, &judgements, &Judgements::new()))
+        };
+
+        let mut report = with_eval_set();
+        only(&mut report).judge = judged(&[("zh-01", true)]);
+        report.sets[1].judge = judged(&[
+            ("fce-zh-01", true),
+            ("fce-es-02", false),
+            ("fce-fr-03", false),
+        ]);
+
+        let rendered = report.render();
+        let (fixture_half, eval_half) =
+            rendered.split_at(rendered.find("## Models (eval set)").expect("both sets"));
+
+        assert!(
+            fixture_half.contains("| 1 of 1 (100.0%) |"),
+            "the fixture row counts its own hit: {fixture_half}"
+        );
+        assert!(
+            !fixture_half.contains("| 1 of 3 (33.3%) |"),
+            "the fixture row counts no hit of the other set: {fixture_half}"
+        );
+        assert!(
+            eval_half.contains("| 1 of 3 (33.3%) |"),
+            "the eval-set row counts its own hits: {eval_half}"
+        );
+    }
+
     #[test]
     fn an_eval_set_this_machine_cannot_load_is_a_skipped_table_with_a_reason() {
         let mut report = report();
@@ -1659,7 +1720,7 @@ mod tests {
             result: "one gemma answer".to_string(),
         });
 
-        report.judge = Some(Assessment::of(&hits, &judgements, &labels));
+        only(&mut report).judge = Some(Assessment::of(&hits, &judgements, &labels));
         report
     }
 
@@ -1783,7 +1844,7 @@ mod tests {
             }
         }
 
-        report.judge = Some(Assessment::of(&hits, &judgements, &labels));
+        only(&mut report).judge = Some(Assessment::of(&hits, &judgements, &labels));
         report
     }
 
@@ -1925,7 +1986,7 @@ mod tests {
             });
         }
 
-        report.judge = Some(Assessment::of(&hits, &judgements, &labels));
+        only(&mut report).judge = Some(Assessment::of(&hits, &judgements, &labels));
         let rendered = report.render();
 
         assert!(

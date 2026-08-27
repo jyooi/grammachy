@@ -38,9 +38,9 @@ pub fn load() -> Result<Vec<Sentence>, String> {
 
 /// Rebuild the selected sentences from this corpus.
 ///
-/// A sentence the cache does not hold, or one that converts to other offsets,
-/// ends the whole set: half an eval set would rank models on a different
-/// question than the file claims.
+/// A sentence the cache does not hold, one that converts to other offsets, or
+/// one whose writer has another first language ends the whole set: half an
+/// eval set would rank models on a different question than the file claims.
 pub fn resolve(blocks: &[Block], selection: &Sidecar) -> Result<Vec<Sentence>, String> {
     let mut index: HashMap<(usize, usize), &Block> = HashMap::with_capacity(blocks.len());
     for block in blocks {
@@ -74,6 +74,15 @@ fn rebuild(
             entry.id
         )
     })?;
+
+    if let Some(native) = entry.native() {
+        if item.native != native {
+            return Err(format!(
+                "the cached corpus gives {} another native language than the sidecar records",
+                entry.id
+            ));
+        }
+    }
 
     if item.edits.len() != entry.edits.len()
         || item
@@ -118,12 +127,25 @@ mod tests {
     use sidecar::{Entry, EntryEdit};
 
     fn block(document: usize, text: &str, edits: Vec<M2Edit>) -> Block {
+        block_in("zh", document, text, edits)
+    }
+
+    fn block_in(native: &str, document: usize, text: &str, edits: Vec<M2Edit>) -> Block {
         Block {
             document,
             sentence: 0,
-            native: "zh".to_string(),
+            native: native.to_string(),
             tokens: text.split(' ').map(str::to_string).collect(),
             edits,
+        }
+    }
+
+    fn tense_edit() -> M2Edit {
+        M2Edit {
+            start: 1,
+            end: 2,
+            code: "R:VERB:TENSE".to_string(),
+            correction: "saw".to_string(),
         }
     }
 
@@ -197,6 +219,53 @@ mod tests {
             error.contains("elsewhere than the sidecar records"),
             "{error}"
         );
+    }
+
+    /// The id names the language, so a pairing that shifted is caught here.
+    ///
+    /// Nothing else would catch it: the offsets of the same sentence under
+    /// another essay still line up, and the "Recall by native language" table
+    /// would then report a `zh` row measured on another writer.
+    #[test]
+    fn a_corpus_that_gives_the_sentence_another_language_ends_the_set() {
+        let blocks = vec![block_in(
+            "es",
+            3,
+            "I saws the show on the wall .",
+            vec![tense_edit()],
+        )];
+
+        let error = resolve(
+            &blocks,
+            &selection(vec![EntryEdit {
+                start: 2,
+                end: 6,
+                code: "R:VERB:TENSE".to_string(),
+            }]),
+        )
+        .unwrap_err();
+
+        assert!(
+            error.contains("another native language than the sidecar records"),
+            "{error}"
+        );
+    }
+
+    /// A control is drawn from every language, so its id names none.
+    #[test]
+    fn a_control_is_rebuilt_whatever_language_its_writer_had() {
+        let blocks = vec![block_in(
+            "fr",
+            3,
+            "I look forward to hearing from you soon .",
+            Vec::new(),
+        )];
+        let mut selection = selection(Vec::new());
+        selection.items[0].id = "fce-ok-01".to_string();
+
+        let items = resolve(&blocks, &selection).expect("a control names no language");
+
+        assert_eq!(items[0].native, "fr");
     }
 
     #[test]

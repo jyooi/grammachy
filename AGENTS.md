@@ -166,6 +166,7 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   The gate is 80% agreement on the labels a run matched, over at least `judge::MINIMUM_LABELLED` of them.
   Below the gate, under that sample, or with no label matched, the column still prints and the file says it does not rank.
   `Report::rank_score` is the one place the ranking swaps to exact fix plus useful non-exact fixes.
+  One `Assessment` is built per set, in `bench::assessment`, because the Useful fix cell sits beside cells measured over that set alone.
   `Report::judge_covers_measured_rows` is the second condition of that swap, and the score, the ranking sentence, and the regression rule all read it.
   It needs one measured row with a judged hit, so a table of skipped rows never claims a measure that ranked nothing.
   One measured row the file covers no hit of drops the swap for the whole table, and the report names that row.

@@ -11,9 +11,10 @@
 //! cargo test --test evalset_sidecar -- --ignored --nocapture
 //! ```
 //!
-//! The draw is seeded, so the same release redraws the same 365 items. A
+//! The draw is seeded, so the same release redraws the same 325 items. A
 //! different answer means the conversion rules changed, and the sidecar is
-//! then a new selection rather than a correction of the old one.
+//! then a new selection rather than a correction of the old one. The run adds
+//! the 40 fixture items to them, which the sidecar never holds.
 
 use std::path::Path;
 

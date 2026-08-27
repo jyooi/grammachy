@@ -689,7 +689,8 @@ Redraw it from a filled cache with:
 cargo test --test evalset_sidecar -- --ignored --nocapture
 ```
 
-The draw is seeded, so the same release redraws the same 365 items.
+The draw is seeded, so the same release redraws the same 325 items.
+The run adds the 40 fixture items to them, which the sidecar never holds.
 A different answer means the conversion rules changed.
 
 ## 17. Removing it

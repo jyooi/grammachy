@@ -44,6 +44,21 @@ pub struct Entry {
     pub edits: Vec<EntryEdit>,
 }
 
+impl Entry {
+    /// The writer's first language, read from the id.
+    ///
+    /// The entry carries no language of its own, because ADR 0003 holds this
+    /// file to ids, indices, offsets, and codes. The id already names one, as
+    /// in `fce-zh-01`, so it is what a rebuilt sentence is checked against. A
+    /// control is drawn from every language and names none.
+    pub fn native(&self) -> Option<&str> {
+        let segment = self.id.split('-').nth(1)?;
+        super::convert::LANGUAGES
+            .into_iter()
+            .find(|language| *language == segment)
+    }
+}
+
 /// One expected mistake, in UTF-16 offsets and an ERRANT code.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EntryEdit {

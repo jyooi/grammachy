@@ -87,6 +87,23 @@ impl Cache {
     pub fn licence(&self) -> PathBuf {
         self.root.join(LICENCE_FILE)
     }
+
+    /// Whether this machine already holds the release.
+    ///
+    /// Both files of the split the run reads first have to be here. One
+    /// without the other is half a release, which reads later as a corpus
+    /// that cannot be parsed and which the next run would fetch all over
+    /// again, so it is answered here instead.
+    fn is_filled(&self) -> bool {
+        self.missing().is_none()
+    }
+
+    /// The first file of the release this cache does not hold.
+    fn missing(&self) -> Option<PathBuf> {
+        [self.m2("train"), self.json("train")]
+            .into_iter()
+            .find(|path| !path.is_file())
+    }
 }
 
 /// Where the cache lives on this machine.
@@ -109,17 +126,33 @@ pub fn may_fetch() -> bool {
     std::env::var(FETCH_ENV).ok().as_deref() != Some("never")
 }
 
-/// The URL and digest this run expects of the tarball.
-fn source() -> (String, String) {
-    let base = std::env::var(BASE_URL_ENV)
-        .ok()
-        .filter(|value| !value.trim().is_empty())
-        .unwrap_or_else(|| DEFAULT_BASE_URL.to_string());
-    let sha256 = std::env::var(SHA256_ENV)
-        .ok()
-        .filter(|value| !value.trim().is_empty())
-        .unwrap_or_else(|| TARBALL_SHA256.to_string());
-    (format!("{}/{TARBALL}", base.trim_end_matches('/')), sha256)
+/// Where the tarball comes from and what it must hash to.
+///
+/// It is a value rather than a read of the environment, so a case drives the
+/// fetch against its own small tarball without writing the environment of the
+/// whole test binary.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Source {
+    pub url: String,
+    pub sha256: String,
+}
+
+impl Source {
+    /// What this run expects, the pinned release unless a seam names another.
+    pub fn configured() -> Source {
+        let base = std::env::var(BASE_URL_ENV)
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| DEFAULT_BASE_URL.to_string());
+        let sha256 = std::env::var(SHA256_ENV)
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| TARBALL_SHA256.to_string());
+        Source {
+            url: format!("{}/{TARBALL}", base.trim_end_matches('/')),
+            sha256,
+        }
+    }
 }
 
 /// Put the release in place, or say why this machine has none.
@@ -127,22 +160,29 @@ fn source() -> (String, String) {
 /// The message is the one sentence the skipped table carries, so it names what
 /// the reader of the benchmark file would have to do.
 pub fn ensure() -> Result<Cache, String> {
-    ensure_in(&directory(), &model::downloader(), may_fetch())
+    ensure_in(
+        &directory(),
+        &Source::configured(),
+        &model::downloader(),
+        may_fetch(),
+    )
 }
 
-/// The same step against one cache directory and one downloader.
+/// The same step against one cache directory, one source, and one downloader.
 ///
-/// `may_fetch` is the seam rather than the variable, so a case proves the
-/// forbidden path without writing the environment of the whole test binary.
+/// Every one of those is the seam rather than the variable, so a case proves
+/// the fetch, the digest, and the forbidden path without writing the
+/// environment of the whole test binary.
 pub fn ensure_in(
     directory: &Path,
+    source: &Source,
     download: &Downloader,
     may_fetch: bool,
 ) -> Result<Cache, String> {
     let cache = Cache {
         root: directory.join(ROOT),
     };
-    if cache.m2("train").is_file() && cache.json("train").is_file() {
+    if cache.is_filled() {
         return Ok(cache);
     }
     if !may_fetch {
@@ -152,11 +192,11 @@ pub fn ensure_in(
         ));
     }
 
-    fill(directory, download)?;
-    if !cache.m2("train").is_file() {
+    fill(directory, source, download)?;
+    if let Some(missing) = cache.missing() {
         return Err(format!(
             "the {RELEASE} tarball unpacked without {}",
-            cache.m2("train").display()
+            missing.display()
         ));
     }
     notice(&cache);
@@ -164,14 +204,14 @@ pub fn ensure_in(
 }
 
 /// Fetch the tarball, check its digest, and unpack it into the cache.
-fn fill(directory: &Path, download: &Downloader) -> Result<(), String> {
+fn fill(directory: &Path, source: &Source, download: &Downloader) -> Result<(), String> {
     std::fs::create_dir_all(directory)
         .map_err(|error| format!("{} could not be created: {error}", directory.display()))?;
 
-    let (url, sha256) = source();
+    let (url, sha256) = (&source.url, &source.sha256);
     let partial = directory.join(format!("{TARBALL}.part"));
     let tarball = directory.join(TARBALL);
-    match download(&url, &partial)
+    match download(url, &partial)
         .map_err(|error| format!("the {RELEASE} tarball is not here: {error}"))?
     {
         Transfer::Finished => {}
@@ -183,7 +223,7 @@ fn fill(directory: &Path, download: &Downloader) -> Result<(), String> {
     }
 
     let actual = sha256_path(&partial)?;
-    if !actual.eq_ignore_ascii_case(&sha256) {
+    if !actual.eq_ignore_ascii_case(sha256) {
         let _ = std::fs::remove_file(&partial);
         return Err(format!(
             "the {RELEASE} tarball does not match the pinned digest. Expected {sha256}, got {actual}."
@@ -227,7 +267,7 @@ fn unpack(directory: &Path, tarball: &Path) -> Result<(), String> {
 /// reads the cache and prints nothing.
 fn notice(cache: &Cache) {
     eprintln!(
-        "grammachy bench: fetched {RELEASE} into {}.",
+        "grammachy bench: fetched {RELEASE}. Its licence is at {}.",
         cache.licence().display()
     );
     eprintln!("grammachy bench: {NON_COMMERCIAL_LINE}");
@@ -254,13 +294,20 @@ mod tests {
         );
     }
 
+    /// A directory of this process alone, so no case races another run.
+    fn scratch(name: &str) -> PathBuf {
+        let directory =
+            std::env::temp_dir().join(format!("grammachy-eval-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&directory);
+        directory
+    }
+
     #[test]
     fn an_empty_cache_with_the_fetch_forbidden_is_a_reason_rather_than_a_panic() {
-        let directory = std::env::temp_dir().join("grammachy-eval-empty");
-        let _ = std::fs::remove_dir_all(&directory);
+        let directory = scratch("empty");
         let downloader: Downloader = Box::new(|_, _| panic!("a forbidden fetch never downloads"));
 
-        let error = ensure_in(&directory, &downloader, false).unwrap_err();
+        let error = ensure_in(&directory, &Source::configured(), &downloader, false).unwrap_err();
 
         assert!(error.contains("forbids the fetch"), "{error}");
     }

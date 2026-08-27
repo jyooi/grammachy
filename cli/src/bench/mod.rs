@@ -139,16 +139,6 @@ pub fn run(args: &BenchArgs, stored: &StoredSettings) -> Result<Run, String> {
         .as_ref()
         .and_then(|path| record(path, &checks).err());
 
-    // The judgement is read from the record of this run rather than from the
-    // rows, so one folded answer is graded once however many rows wrote it.
-    let judge = plan.judgements.as_ref().map(|judgements| {
-        let hits: Vec<judge::Hit> = one_per_item(&checks)
-            .iter()
-            .filter_map(|check| check.hit())
-            .collect();
-        judge::Assessment::of(&hits, judgements, &judge::labels())
-    });
-
     let report = Report {
         version: env!("CARGO_PKG_VERSION").to_string(),
         machine: Machine::here(),
@@ -158,7 +148,6 @@ pub fn run(args: &BenchArgs, stored: &StoredSettings) -> Result<Run, String> {
         cloud_spend_usd: spend.spent_usd(),
         sets,
         eval_set_skipped,
-        judge,
     }
     .render();
 
@@ -250,8 +239,24 @@ fn tables(
         languages: languages(&sentences),
         engines: engines.into_iter().map(|(row, _)| row).collect(),
         models: models.into_iter().map(|(row, _)| row).collect(),
+        judge: assessment(plan, &checks),
     };
     (set, checks)
+}
+
+/// What the judgements file says about one set, when the run was given one.
+///
+/// The hits are read from the Checks of this set alone, because the Useful fix
+/// column sits in that set's Quality table beside cells measured on its items.
+/// They are folded first, so one answer is graded once however many rows of
+/// the set wrote it.
+fn assessment(plan: &Plan, checks: &[RecordedCheck]) -> Option<judge::Assessment> {
+    let judgements = plan.judgements.as_ref()?;
+    let hits: Vec<judge::Hit> = one_per_item(checks)
+        .iter()
+        .filter_map(|check| check.hit())
+        .collect();
+    Some(judge::Assessment::of(&hits, judgements, &judge::labels()))
 }
 
 /// The line under the title that says where one set's items came from.
