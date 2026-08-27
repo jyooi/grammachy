@@ -35,7 +35,7 @@ pub struct Measurement {
     pub tally: Tally,
     /// Resident memory, and where the run read it.
     pub memory: Reading,
-    /// How long the whole row took, server start included.
+    /// How long the whole row took, including any server start it paid for.
     pub wall_ms: u64,
 }
 
@@ -71,6 +71,11 @@ pub struct ModelRow {
     pub engine: String,
     /// The local thinking mode the row ran in, `None` for a cloud row.
     pub thinking: Option<bool>,
+    /// Whether this row is the one that paid for the llama.cpp server start.
+    ///
+    /// Two rows of one model share one start, so only the first of them
+    /// carries the weight load in its wall time.
+    pub started_server: bool,
     pub weights: Weights,
     pub outcome: Outcome,
 }
@@ -237,10 +242,12 @@ impl Report {
                     "Wall time of {}: {} s for the whole fixture{}.\n",
                     self.row_label(row),
                     measurement.wall_ms / 1_000,
-                    if row.is_cloud() {
+                    if row.started_server {
+                        ", server start included"
+                    } else if row.is_cloud() {
                         ""
                     } else {
-                        ", server start included"
+                        ", on the server an earlier row of this model started"
                     }
                 ));
             }
@@ -796,6 +803,7 @@ mod tests {
             model: name.to_string(),
             engine: engine.to_string(),
             thinking,
+            started_server: engine == "openai",
             weights,
             outcome,
         }
@@ -901,6 +909,8 @@ mod tests {
             ),
         ];
 
+        report.models[1].started_server = false;
+
         let rendered = report.render();
 
         assert!(
@@ -920,12 +930,21 @@ mod tests {
             "the Quality table says why one name is on two rows: {rendered}"
         );
         assert!(
-            rendered.contains("Wall time of `gemma-4-e4b-it` with thinking on:"),
-            "{rendered}"
+            rendered.contains(
+                "Wall time of `gemma-4-e4b-it` with thinking on: 12 s for the whole fixture, server start included.\n"
+            ),
+            "the row that started the server says so: {rendered}"
         );
         assert!(
-            rendered.contains("Wall time of `google/gemini-3.7-flash`:"),
-            "one row of a name needs no mode: {rendered}"
+            rendered.contains(
+                "Wall time of `gemma-4-e4b-it` with thinking off: 12 s for the whole fixture, on the server an earlier row of this model started.\n"
+            ),
+            "the row that reused the server never claims the start: {rendered}"
+        );
+        assert!(
+            rendered
+                .contains("Wall time of `google/gemini-3.7-flash`: 12 s for the whole fixture.\n"),
+            "one row of a name needs no mode and a cloud row starts no server: {rendered}"
         );
         assert!(
             rendered.contains(

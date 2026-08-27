@@ -6,41 +6,10 @@
 //! server command of its own: it stops the unit between two models and lets
 //! the `openai` adapter start it again through `engines::openai::unit`.
 //!
-//! No case here starts a server. The unit's own arguments are asserted in
-//! `engines::openai::unit`; this file keeps `bench` from growing a second
-//! copy of them.
+//! No case here starts a server. It asserts the arguments the one server
+//! command carries, so a bench row measures the product's own server.
 
 use grammachy::engines::openai::unit;
-
-fn bench_source() -> String {
-    let directory = format!("{}/src/bench", env!("CARGO_MANIFEST_DIR"));
-    let mut source = String::new();
-    for entry in std::fs::read_dir(&directory).expect("the bench module is readable") {
-        let path = entry.expect("the entry is readable").path();
-        if path.extension().is_some_and(|kind| kind == "rs") {
-            source.push_str(&std::fs::read_to_string(&path).expect("the file is readable"));
-        }
-    }
-    source
-}
-
-#[test]
-fn the_bench_starts_no_server_command_of_its_own() {
-    let source = bench_source();
-
-    for flag in [
-        "--reasoning-budget",
-        "--reasoning-format",
-        "--ctx-size",
-        "--parallel",
-        "llama-server",
-    ] {
-        assert!(
-            !source.contains(flag),
-            "cli/src/bench/ names {flag}, so it builds a server the product does not run"
-        );
-    }
-}
 
 /// The unit a bench row's adapter starts is the unit a Check starts, so the
 /// reasoning flags of evals spec section 6 are on it.

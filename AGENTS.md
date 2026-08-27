@@ -112,6 +112,7 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   `--thinking off|on|both` owns the mode of every local row, and the default is the product default `on`.
   The flag, not the stored `localThinking`, is what a row's request carries, so a benchmark file is the output of the Command line it prints.
   `both` expands each local model into two rows, kept next to each other so the two share one llama.cpp server start.
+  The run loop owns that restart and records `ModelRow::started_server`, so only the row that paid for the load claims it in the report.
   Only the Cost table names a mode, so the prose under the tables names the mode too when a run holds both.
   The Engines table keeps its four columns, so its `openai` row runs once, in the product default.
   `--record <dir>` writes `checks.json`, one entry per engine, model, thinking mode, and item.
@@ -141,7 +142,8 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   `cli/bench/judge.py` grades a recorded run, and `cli/src/bench/judge.rs` reads the answer into the Useful fix column.
   Both select nearly the same sample: a valid Check on an item with edits, where an Issue touches an expected span.
   The applied Fixes of that Check must also not reproduce `expected_text`.
-  Both drop a thinking-off local row: `RecordedCheck::hit` answers `None` for one, so the Useful fix cell of that row says it is not the product default rather than printing a count.
+  Both drop a thinking-off local row, because `RecordedCheck::hit` answers `None` for one.
+  The Useful fix cell of that row then says it is not the product default rather than printing a count.
   `judge::RowKey` carries the mode, so the two rows of one model never share a Useful fix count.
   An item nothing touched is a plain miss and is never judged, because the writer is offered nothing to accept.
   Both files nest the key, item id then result text, which needs no delimiter and folds two models that answered alike onto one judgement.

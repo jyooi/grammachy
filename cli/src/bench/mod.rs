@@ -121,7 +121,7 @@ pub fn run(args: &BenchArgs, stored: &StoredSettings) -> Result<Run, String> {
             .filter(|(_, row)| row.slug.is_cloud())
             .map(|(index, row)| {
                 let (base, sentences, spend) = (&base, &sentences, &spend);
-                let handle = scope.spawn(move || model_row(row, base, sentences, spend));
+                let handle = scope.spawn(move || model_row(row, false, base, sentences, spend));
                 (index, handle)
             })
             .collect();
@@ -140,11 +140,12 @@ pub fn run(args: &BenchArgs, stored: &StoredSettings) -> Result<Run, String> {
             if row.slug.is_cloud() {
                 continue;
             }
-            if serving != Some(row.model.as_str()) {
+            let started_server = serving != Some(row.model.as_str());
+            if started_server {
                 restart_model_server();
                 serving = Some(row.model.as_str());
             }
-            models[index] = Some(model_row(row, &base, &sentences, &spend));
+            models[index] = Some(model_row(row, started_server, &base, &sentences, &spend));
         }
         for (index, handle) in cloud {
             models[index] = Some(handle.join().expect("a benchmark row does not panic"));
@@ -624,8 +625,12 @@ fn engine_row(
 ///
 /// The caller owns the llama.cpp server, because two rows of one model differ
 /// only by a request field and must not pay for two server starts.
+/// `started_server` is the caller's answer for whether this row is the one
+/// that paid for that start, which is what the report's wall time sentence
+/// reads rather than inferring the restart rule again.
 fn model_row(
     row: &Row,
+    started_server: bool,
     base: &CheckOptions,
     sentences: &[Sentence],
     spend: &Mutex<Spend>,
@@ -642,6 +647,7 @@ fn model_row(
             model: row.model.clone(),
             engine: row.slug.as_str().to_string(),
             thinking: row.thinking,
+            started_server,
             weights,
             outcome,
         },
