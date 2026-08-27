@@ -163,7 +163,7 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   Both files nest the key, item id then result text, which needs no delimiter and folds two models that answered alike onto one judgement.
   `cli/tests/fixtures/judge-labels.json` holds the 17 committed hand labels of HUF-210 and is compiled in.
   Every label must name a fixture item, because a label on a fetched eval-set item would commit FCE text against section 2.1.
-  The gate is 80% agreement on the labels a run matched, over at least `judge::MINIMUM_LABELLED` of them.
+  The gate is 80% agreement on the labels one set matched, over at least `judge::MINIMUM_LABELLED` of them.
   Below the gate, under that sample, or with no label matched, the column still prints and the file says it does not rank.
   `Report::rank_score` is the one place the ranking swaps to exact fix plus useful non-exact fixes.
   One `Assessment` is built per set, in `bench::assessment`, because the Useful fix cell sits beside cells measured over that set alone.

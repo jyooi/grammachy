@@ -30,10 +30,15 @@ Licence stance: [HUF-212](https://linear.app/huffman/issue/HUF-212).
   Citation: Yannakoudakis, Briscoe, Medlock, "A New Dataset and Method for Automatically Grading ESOL Texts", ACL 2011.
 - Languages: zh, es, fr, de, pt, ja from FCE.
   `ms` has no public source and stays on the real-user route of the fixture.
-- Composition, 365 items: 300 FCE error sentences (50 per language, single-sentence, single-edit after dropping spelling and punctuation edits), 25 error-free FCE sentences as false-positive controls, plus the 40-item fixture.
-  Drawn by `cli/src/bench/evalset.rs` with a fixed seed.
+- Composition, 365 items: 300 FCE error sentences (50 per language, single-sentence, exactly one edit), 25 error-free FCE sentences as false-positive controls, plus the 40-item fixture.
+  Drawn by `cli/src/bench/evalset/` with a fixed seed, at most one item per essay.
+  A spelling, orthography, punctuation, or unclassified edit names no mistake this set measures, so a sentence that carries one is dropped whole.
+  Keeping the sentence and dropping the edit would leave a mistake that scores a false positive against every engine that finds it.
 - Conversion: FCE offsets are character offsets with no astral characters, so they equal UTF-16 units.
-  Sentences are split through the M2 alignment; a sentence is kept when all its edits lie inside it; a zero-width missing-word edit is widened to the next word; CLC two-letter codes map to `type`.
+  Sentences are split through the M2 alignment, and a sentence is kept when all its edits lie inside it.
+  A zero-width missing-word edit is widened onto a word, because the envelope of `docs/spec/v1.md` section 5.1 has no zero-width span.
+  Punctuation is not a word, so an edit in front of a stop or a comma widens onto the word before it.
+  The ERRANT code of the M2 file becomes the item's `type`.
 
 ### 2.1 Licence: fetch, never commit
 
@@ -133,9 +138,10 @@ Decision and gate: [HUF-210](https://linear.app/huffman/issue/HUF-210).
   The call is lean: no tools, no MCP, a minimal system prompt, through `claude -p --model claude-fable-5 --output-format json` or the API directly; the full Claude Code session costs about 0.25 USD notional per item.
 - Output `judgements.json`, keyed by (item id, result text), value `{ useful, reason }`.
 - Hand labels live in `cli/tests/fixtures/judge-labels.json` in the same key shape, labelled by one criterion: is the sentence after Accept grammatically correct wording.
-- Gate: the judge column counts in the ranking only when it agrees with the hand labels on at least 80% of the labelled items of that run.
+- Gate: the judge column counts in the ranking only when it agrees with the hand labels on at least 80% of the labelled items of that set.
+  The gate is measured per set, because the column sits beside cells measured over that set alone.
   The gate also needs a sample of at least 5 matched labels, because a result text must match a label verbatim.
-  A run under that sample leaves the judge unproven, so the file names the count and keeps the raw ranking.
+  A set under that sample leaves the judge unproven, so the file names the count and keeps the raw ranking.
   Below the gate the column still prints and the file says it is excluded.
   The pilot measured 15 of 17 (88%, kappa 0.76).
 - Caveat on record: a Claude judge grading Claude rows is untested because the shortlist has no Claude rows.
@@ -260,7 +266,7 @@ Out: Muse Glimmer (16.8 GB, over the tier and the device), LFM2.5 (restricted li
 One PR each, in order.
 
 1. **Runner and metrics.** Land branch `huf-209-pilot`: `openrouter` bench rows, `--cloud-model`, `--max-cost`, `--record`, the metrics module, the item shape migration, the tables, `weights.rs`, the 503 and 429 rules, progress lines, parallel cloud rows, `--thinking`, the Thinking column, device-aware memory.
-2. **Eval set and licence.** `evalset.rs`, the fetch step with sha256 and the stderr notice, the sidecar, `--eval-set`, ADR 0003, the MIT `LICENSE` file, the benchmark header line.
+2. **Eval set and licence.** `cli/src/bench/evalset/`, the fetch step with sha256 and the stderr notice, the sidecar, `--eval-set`, ADR 0003, the MIT `LICENSE` file, the benchmark header line.
 3. **Local engine.** `localThinking` Setting and view, unit flags, `max_tokens` 2048, per-engine Check size limit in `check.rs`, `chunk.rs`, and the too-long card, compact grammar and six-word reason, `doctor` backend check, the Chunk fixture and table, v1 amendments of section 10.
 4. **Cloud engine in the product.** `openrouter` slug for `check`, Settings entries, key file and `setup`, consent card, bar glyph, error cards, `doctor` checks, ADR 0002.
 5. **Judge and first full run.** `judge.py`, hand labels, `--judgements`, the full run on the tier machine, `docs/benchmarks/<version>.md`, the README recommendation lines, the `openrouterModel` placeholder replaced.

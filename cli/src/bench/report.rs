@@ -766,7 +766,7 @@ impl Report {
 /// the record file of `--record`, which git ignores.
 ///
 /// The section prints for every set by decision, the fixture one included.
-/// `docs/spec/evals.md` section 5 asks the benchmark file for the missed ids
+/// `docs/spec/evals.md` section 2.1 asks the benchmark file for the missed ids
 /// per model and narrows that to no set, and a fixture id is this project's
 /// own word, so no licence boundary moves.
 fn missed_items(set: &SetTables) -> String {

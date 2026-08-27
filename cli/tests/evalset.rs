@@ -15,7 +15,7 @@ use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use grammachy::bench::evalset::{convert, corpus, draw, sidecar};
+use grammachy::bench::evalset::{self, cache, convert, corpus, draw, sidecar};
 
 /// The synthetic M2 sample and the JSON beside it.
 fn sample() -> (String, String) {
@@ -35,6 +35,20 @@ fn sample_blocks() -> Vec<corpus::Block> {
 fn cache_root() -> Option<PathBuf> {
     let root = grammachy::bench::evalset::cache::directory().join("fce");
     root.join("m2").is_dir().then_some(root)
+}
+
+/// The filled corpus cache, or `None` when this machine holds none.
+///
+/// The fetch is forbidden, so this reaches `cl.cam.ac.uk` on no machine: an
+/// empty cache is an `Err` the caller turns into a skip.
+fn filled_cache() -> Option<cache::Cache> {
+    cache::ensure_in(
+        &cache::directory(),
+        &cache::Source::configured(),
+        &grammachy::model::downloader(),
+        false,
+    )
+    .ok()
 }
 
 #[test]
@@ -251,6 +265,43 @@ fn silent_address() -> String {
         .to_string();
     drop(listener);
     address
+}
+
+/// Every span the committed selection pins quotes a word, spec section 2.
+///
+/// `convert` widens a zero-width missing-word edit onto a word, because spec
+/// section 5.1 has no zero-width span. A span on punctuation alone is a span
+/// no engine can hit: `metrics::is_caught` needs a strict overlap, so the
+/// natural Issue over the neighbouring word scores a miss and a style creep at
+/// once, and every catch rate, precision, recall, and creep number on that item
+/// is then wrong with no error to say so. The unit case covers the rule on one
+/// synthetic block; this one covers the 300 items the committed file ships.
+///
+/// It needs the fetched corpus, so it skips on a machine with an empty cache,
+/// and it names ids alone on a failure, because ADR 0003 lets no corpus text
+/// into a message.
+#[test]
+fn every_span_of_the_committed_selection_quotes_a_word() {
+    let Some(cache) = filled_cache() else {
+        eprintln!("skipped: the corpus cache is empty");
+        return;
+    };
+    let blocks = corpus::blocks(&cache).expect("the corpus reads");
+    let items = evalset::resolve(&blocks, &sidecar::committed()).expect("the selection rebuilds");
+
+    let bare: Vec<&str> = items
+        .iter()
+        .filter(|item| {
+            item.edits
+                .iter()
+                .any(|edit| !edit.text.chars().any(char::is_alphanumeric))
+        })
+        .map(|item| item.id.as_str())
+        .collect();
+    assert!(
+        bare.is_empty(),
+        "these items pin a span that quotes no word: {bare:?}"
+    );
 }
 
 /// Spec `evals.md` section 2.1: no cache means a skipped table with a reason.
