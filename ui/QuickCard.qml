@@ -22,7 +22,7 @@ import "capture.js" as Capture
 BorderSurface {
   id: root
 
-  // "empty", "checking", "result", "error", "notice", or "toolong".
+  // "empty", "checking", "result", "error", "notice", "setup", or "toolong".
   property string phase: "checking"
   // The exact text the Check ran on. Every Issue span indexes into it.
   property string sourceText: ""
@@ -62,6 +62,10 @@ BorderSurface {
   // that the `engine_unavailable` card shows under its body.
   property var errorCard: null
   property string diagnosis: ""
+
+  // The setup card of spec section 10, shown from the `setup` phase that
+  // `Setup` on the `bad_arguments` card above leads to.
+  property var setupCard: null
 
   // The Settings view, spec section 7. The values arrive already resolved
   // through the defaults, so an unknown stored value shows the default here.
@@ -108,6 +112,9 @@ BorderSurface {
   // One button of an error card, spec section 8. The action is a button id
   // from `ui/errors.js`; Overlay.qml owns where each one goes.
   signal errorActionRequested(string action)
+  // One button of the setup card, spec section 10. The action is a button id
+  // from `ui/setupCard.js`; Overlay.qml owns where each one goes.
+  signal setupActionRequested(string action)
 
   // MarkedText owns the accepted green, so the inspector and the empty state
   // read it from there rather than repeating the literal.
@@ -158,6 +165,7 @@ BorderSurface {
   function metaLine() {
     if (root.phase === "checking") return "checking the selection"
     if (root.hasError) return String(root.errorCard.meta)
+    if (root.phase === "setup") return "companion tool missing"
     if (root.phase === "notice") return root.noticeMeta
     if (root.phase === "toolong") return "selection over the limit"
     if (root.isNothingNew) return "nothing new to check"
@@ -328,6 +336,17 @@ BorderSurface {
         card: root.errorCard
         diagnosis: root.diagnosis
         onActionRequested: function(action) { root.errorActionRequested(action) }
+      }
+
+      // The setup card of spec section 10. It carries its own buttons too, the
+      // same way the error cards above do.
+      SetupCard {
+        Layout.fillWidth: true
+        Layout.topMargin: Style.spacing.md
+        visible: root.showsCheck && root.phase === "setup"
+
+        card: root.setupCard
+        onActionRequested: function(action) { root.setupActionRequested(action) }
       }
 
       // --------------------------------------------- nothing new to check
