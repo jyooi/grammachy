@@ -287,40 +287,60 @@ impl Report {
         cells
     }
 
+    /// Whether the judgements file covers every row that produced a hit.
+    ///
+    /// The swapped measure adds useful non-exact hits to exact fixes, so a row
+    /// the file grades no hit of competes on a strictly smaller measure than a
+    /// graded row. A judgements file comes from an earlier run, whose answers
+    /// this run need not have repeated, so that gap is coverage rather than
+    /// quality and the whole table has to fall back rather than one row.
+    ///
+    /// A row that produced no non-exact hit at all was offered nothing to
+    /// grade, so it is not unjudged and it never blocks the swap.
+    fn every_row_is_judged(&self) -> bool {
+        let Some(judge) = self.judge.as_ref() else {
+            return true;
+        };
+        !self.models.iter().any(|row| {
+            judge
+                .row(&row.engine, &row.model)
+                .is_some_and(|graded| graded.hits > 0 && graded.judged == 0)
+        })
+    }
+
     /// What one row is ranked on, in percent of its interference sentences.
     ///
-    /// Exact fix rate, unless the judge cleared the gate of spec section 4.4.
-    /// Then it is exact fix plus the non-exact hits the judge called useful,
-    /// because both are answers the writer can accept and keep.
-    ///
-    /// A row the judgements file graded not one hit of keeps the raw exact fix
-    /// rate. Reading its unjudged hits as useless would rank it below a graded
-    /// row on judgement coverage rather than on quality, and a judgements file
-    /// comes from an earlier run whose answers this row need not have repeated.
+    /// Exact fix rate, unless the judge cleared the gate of spec section 4.4
+    /// and the file covers every row. Then it is exact fix plus the non-exact
+    /// hits the judge called useful, because both are answers the writer can
+    /// accept and keep.
     fn rank_score(&self, row: &ModelRow) -> f64 {
         let Some(tally) = row.outcome.tally() else {
             return 0.0;
         };
         let exact = tally.exact_rate_percent();
-        let Some(judge) = self.judge.as_ref().filter(|judge| judge.ranks()) else {
+        let Some(judge) = self
+            .judge
+            .as_ref()
+            .filter(|judge| judge.ranks() && self.every_row_is_judged())
+        else {
             return exact;
         };
         if tally.interference == 0 {
             return exact;
         }
-        match judge.row(&row.engine, &row.model) {
-            Some(graded) if graded.judged > 0 => {
-                100.0 * (tally.exact + graded.useful) as f64 / tally.interference as f64
-            }
-            _ => exact,
-        }
+        let useful = judge
+            .row(&row.engine, &row.model)
+            .unwrap_or_default()
+            .useful;
+        100.0 * (tally.exact + useful) as f64 / tally.interference as f64
     }
 
     /// The models the judgements file graded not one hit of, named under the
-    /// Quality table so the ranking never treats a coverage gap as quality.
+    /// Quality table so a reader can see why the ranking fell back.
     ///
-    /// The sentence is worth printing only when the judge ranks, because every
-    /// row is on exact fix rate otherwise.
+    /// The sentence is worth printing only when the gate itself passed, because
+    /// the whole table is on exact fix rate otherwise.
     fn unjudged_rows_line(&self) -> String {
         let Some(judge) = self.judge.as_ref().filter(|judge| judge.ranks()) else {
             return String::new();
@@ -331,7 +351,7 @@ impl Report {
             .filter(|row| {
                 judge
                     .row(&row.engine, &row.model)
-                    .is_some_and(|graded| graded.judged == 0)
+                    .is_some_and(|graded| graded.hits > 0 && graded.judged == 0)
             })
             .map(|row| format!("`{}`", row.model))
             .collect();
@@ -339,12 +359,8 @@ impl Report {
             return String::new();
         }
         format!(
-            "The judgements file grades no hit of {}, so {} ranked on exact fix rate alone.\n",
-            unjudged.join(", "),
-            match unjudged.len() {
-                1 => "that model is",
-                _ => "those models are",
-            }
+            "The judgements file covers no non-exact hit of {}.\nThat gap is coverage rather than quality, so the whole table keeps the raw exact fix ranking.\n",
+            unjudged.join(", ")
         )
     }
 
@@ -457,7 +473,7 @@ impl Report {
 
     /// What the ranking is measured on, named in the file.
     fn ranking_measure(&self) -> &'static str {
-        match self.judge.as_ref().is_some_and(Assessment::ranks) {
+        match self.judge.as_ref().is_some_and(Assessment::ranks) && self.every_row_is_judged() {
             true => "exact fix rate plus the non-exact hits the judge called useful, over the interference sentences",
             false => "exact fix rate",
         }
@@ -1157,82 +1173,117 @@ mod tests {
         );
     }
 
-    /// A judgements file comes from an earlier run, so a row of this run may
-    /// have answered in words that file never graded. Those hits are unknown
-    /// rather than useless, so the row keeps its own exact fix rate and the
-    /// file says which rows that happened to.
-    #[test]
-    fn a_row_the_file_grades_no_hit_of_keeps_its_exact_fix_rate() {
+    /// A judged run, one entry per model: the name, its exact fixes, its
+    /// non-exact hits, and how many of those hits the file graded useful.
+    ///
+    /// A row whose grade is `None` produced hits the judgements file covers
+    /// none of, the row a later run earns when its answers drift from the
+    /// recorded ones. Every graded hit carries an agreeing hand label, so a
+    /// run of five or more graded hits clears the gate.
+    fn coverage_report(rows: &[(&str, usize, usize, Option<usize>)]) -> Report {
         use crate::bench::judge::{Assessment, Hit, Judgement, Judgements};
-
-        let mut report = report();
-        report.models = vec![
-            model(
-                "gemma-4-e4b-it",
-                "openai",
-                weights::of("gemma-4-e4b-it"),
-                measured(tally(30, 16, 0, 40), None),
-            ),
-            model(
-                "phi-4-mini-instruct",
-                "openai",
-                weights::of("phi-4-mini-instruct"),
-                measured(tally(30, 10, 0, 40), None),
-            ),
-        ];
 
         let entry = |useful: bool| Judgement {
             useful,
             reason: "a recorded reason".to_string(),
         };
+        let mut report = report();
         let mut judgements = Judgements::new();
         let mut labels = Judgements::new();
         let mut hits: Vec<Hit> = Vec::new();
-        // Five hits of `phi`, all graded useful and all agreed with, so the
-        // gate is measured on the sample it needs and the column ranks.
-        for index in 0..5 {
-            let id = format!("zh-0{index}");
-            let result = format!("answer {index}");
-            judgements
-                .entry(id.clone())
-                .or_default()
-                .insert(result.clone(), entry(true));
-            labels
-                .entry(id.clone())
-                .or_default()
-                .insert(result.clone(), entry(true));
-            hits.push(Hit {
-                row: ("openai".to_string(), "phi-4-mini-instruct".to_string()),
-                id,
-                result,
-            });
-        }
-        // Four hits of `gemma` the file carries no judgement of at all.
-        for index in 0..4 {
-            hits.push(Hit {
-                row: ("openai".to_string(), "gemma-4-e4b-it".to_string()),
-                id: format!("es-0{index}"),
-                result: format!("an ungraded answer {index}"),
-            });
+
+        report.models.clear();
+        for (name, exact, row_hits, useful) in rows {
+            report.models.push(model(
+                name,
+                "openai",
+                weights::of(name),
+                measured(tally(30, *exact, 0, 40), None),
+            ));
+            for index in 0..*row_hits {
+                let id = format!("{name}-{index}");
+                let result = format!("{name} answer {index}");
+                if let Some(useful) = useful {
+                    let helped = index < *useful;
+                    judgements
+                        .entry(id.clone())
+                        .or_default()
+                        .insert(result.clone(), entry(helped));
+                    labels
+                        .entry(id.clone())
+                        .or_default()
+                        .insert(result.clone(), entry(helped));
+                }
+                hits.push(Hit {
+                    row: ("openai".to_string(), name.to_string()),
+                    id,
+                    result,
+                });
+            }
         }
 
         report.judge = Some(Assessment::of(&hits, &judgements, &labels));
-        let rendered = report.render();
+        report
+    }
+
+    /// A judgements file comes from an earlier run, so a row of this run may
+    /// have answered in words that file never graded. Those hits are unknown
+    /// rather than useless, and adding a graded row's useful hits while the
+    /// unjudged row gets none would decide the recommendation on coverage. So
+    /// one uncovered row drops the swapped measure for the whole table.
+    #[test]
+    fn one_row_the_file_covers_no_hit_of_drops_the_swapped_measure_for_every_row() {
+        let rendered = coverage_report(&[
+            ("gemma-4-e4b-it", 15, 10, None),
+            ("phi-4-mini-instruct", 12, 10, Some(8)),
+        ])
+        .render();
 
         assert!(
             rendered.contains("counts in the ranking."),
-            "the gate must pass for the swap to matter: {rendered}"
+            "the gate itself passed: {rendered}"
         );
-        assert!(rendered.contains("| not judged (4 hits) |"), "{rendered}");
+        assert!(rendered.contains("| not judged (10 hits) |"), "{rendered}");
         assert!(
             rendered.contains(
-                "The judgements file grades no hit of `gemma-4-e4b-it`, so that model is ranked on exact fix rate alone.\n"
+                "The judgements file covers no non-exact hit of `gemma-4-e4b-it`.\nThat gap is coverage rather than quality, so the whole table keeps the raw exact fix ranking.\n"
             ),
             "{rendered}"
         );
-        // 16 exact of 30 beats 10 exact plus 5 useful of 30.
+        assert!(
+            rendered.contains("Ranking: exact fix rate, then F0.5"),
+            "{rendered}"
+        );
+        // 15 exact beats 12 exact. The swapped measure would have made it 12
+        // plus 8 useful against 15 plus nothing, and handed it to `phi`.
         assert!(
             rendered.contains("Recommended local model, the Settings default and the README line: `gemma-4-e4b-it`."),
+            "{rendered}"
+        );
+    }
+
+    /// A row that produced no non-exact hit was offered nothing to grade, so
+    /// it is covered rather than uncovered and the swap still applies.
+    #[test]
+    fn a_row_with_no_non_exact_hit_does_not_drop_the_swapped_measure() {
+        let rendered = coverage_report(&[
+            ("gemma-4-e4b-it", 12, 0, None),
+            ("phi-4-mini-instruct", 10, 5, Some(5)),
+        ])
+        .render();
+
+        assert!(rendered.contains("| no non-exact hit |"), "{rendered}");
+        assert!(
+            !rendered.contains("The judgements file covers no non-exact hit of"),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains("Ranking: exact fix rate plus the non-exact hits the judge called useful, over the interference sentences, then F0.5"),
+            "{rendered}"
+        );
+        // 10 exact plus 5 useful beats 12 exact and nothing to add to it.
+        assert!(
+            rendered.contains("Recommended local model, the Settings default and the README line: `phi-4-mini-instruct`."),
             "{rendered}"
         );
     }

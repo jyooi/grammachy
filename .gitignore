@@ -5,3 +5,5 @@ bin/grammachy
 checks.json
 checks.json.pending
 judgements.json
+judgements.json.pending
+__pycache__/

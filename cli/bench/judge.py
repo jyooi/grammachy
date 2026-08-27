@@ -19,10 +19,20 @@ not scale to the 365-item eval set. So every call disables the tools, the MCP
 servers, the skills, and the project settings, and replaces the default system
 prompt with one sentence.
 
+A judgements file costs real spend, so a later run adds to the file rather than
+replacing it.
+This run folds its own answers over the ones already there, by item id and
+result text.
+The write lands on a `.pending` sibling and is renamed, the rule `checks.json`
+follows.
+So a run that dies part way leaves the earlier file whole.
+A run that graded nothing refuses to touch a file that exists.
+Pass `--replace` to overwrite the file wholesale instead.
+
 Usage:
 
     cli/bench/judge.py <dir-or-checks.json> [--out FILE] [--jobs N]
-                       [--model NAME] [--limit N] [--dry-run]
+                       [--model NAME] [--limit N] [--dry-run] [--replace]
 
 `--dry-run` prints the folded items and the first prompt and calls nothing, so
 the selection can be read without spending anything.
@@ -33,6 +43,7 @@ from __future__ import annotations
 import argparse
 import concurrent.futures
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -242,6 +253,29 @@ def judge(item: dict, model: str) -> dict:
         return {"item": item, "error": error}
 
 
+def write_judgements(out: Path, judgements: dict, replace: bool) -> int:
+    """Fold this run's judgements over the file already there, and say how many.
+
+    A judgement was paid for, so a run that graded a different slice of the
+    record adds to the file rather than emptying it. `--replace` is the one way
+    to drop what is there, for the run that means to.
+
+    The write lands on a `.pending` sibling and is renamed, so a run that dies
+    part way leaves the earlier file whole.
+    """
+    merged: dict[str, dict[str, dict]] = {}
+    if out.exists() and not replace:
+        merged = json.loads(out.read_text())
+    kept = sum(len(answers) for answers in merged.values())
+    for item_id, answers in judgements.items():
+        merged.setdefault(item_id, {}).update(answers)
+
+    pending = out.with_name(out.name + ".pending")
+    pending.write_text(json.dumps(merged, indent=2, ensure_ascii=False) + "\n")
+    os.replace(pending, out)
+    return kept
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -261,6 +295,11 @@ def main() -> int:
         "--dry-run",
         action="store_true",
         help="print the selection and the first prompt, and call nothing",
+    )
+    parser.add_argument(
+        "--replace",
+        action="store_true",
+        help="overwrite the output file rather than adding this run to it",
     )
     arguments = parser.parse_args()
 
@@ -303,15 +342,24 @@ def main() -> int:
         spend += answer["cost_usd"] or 0.0
 
     out = arguments.out or checks_path.with_name("judgements.json")
-    out.write_text(json.dumps(judgements, indent=2, ensure_ascii=False) + "\n")
+    refused = not judgements and out.exists() and not arguments.replace
+    if refused:
+        print(
+            f"Nothing was graded, so {out} keeps every judgement it already holds.\n"
+            "Pass --replace to empty it on purpose.",
+            file=sys.stderr,
+        )
+    else:
+        kept = write_judgements(out, judgements, arguments.replace)
+        print(f"{out} now holds this run's judgements over {kept} earlier ones.", file=sys.stderr)
     print(
         f"{len(items) - len(failures)} judged, {len(failures)} failed, "
-        f"{spend:.2f} USD notional, written to {out}.",
+        f"{spend:.2f} USD notional.",
         file=sys.stderr,
     )
     for failure in failures:
         print(f"  {failure}", file=sys.stderr)
-    return 1 if failures else 0
+    return 1 if failures or refused else 0
 
 
 if __name__ == "__main__":

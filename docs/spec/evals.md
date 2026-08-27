@@ -145,6 +145,8 @@ Two lines, re-decided from the eval-set tables on every tag ([HUF-205](https://l
 
 - Ranking: exact fix rate on the eval set; ties by F0.5, then lower p50.
   When the judge gate passes, exact fix rate is replaced by exact fix plus useful non-exact fixes over interference sentences.
+  The swap also needs the judgements file to cover every row that produced a non-exact hit.
+  One uncovered row would compete on a smaller measure than a graded one, so the whole table keeps the raw ranking.
 - Floors: a row with more false positives than the default engine, or validity under 95%, is never recommended.
 - Recommended local model, the Settings default and the README line: the best local row that is Apache-2.0 or MIT and fits the 8 GB tier by measured resident memory.
   Any thinking mode may win; the README names the mode the row ran under.

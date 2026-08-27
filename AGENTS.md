@@ -133,7 +133,9 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   The gate is 80% agreement on the labels a run matched, over at least `judge::MINIMUM_LABELLED` of them.
   Below the gate, under that sample, or with no label matched, the column still prints and the file says it does not rank.
   `Report::rank_score` is the one place the ranking swaps to exact fix plus useful non-exact fixes.
-  A row the judgements file graded no hit of keeps its exact fix rate there, and the report names it under the Quality table.
+  `Report::every_row_is_judged` is the second condition of that swap, and both the score and the ranking sentence read it.
+  One row the file covers no hit of drops the swap for the whole table, and the report names that row under the Quality table.
+  `judge.py` adds its answers to the judgements file rather than replacing it, and `--replace` is the one way to empty it.
   No test may call Claude: `judge.py` is smoke-tested by hand, and the Rust side is tested from a recorded judgements file.
 - `doctor` reports the install state and the one-line engine diagnosis the `engine_unavailable` card shows.
   `docs/doctor.md` documents its envelope, exit code, and hardware tiers.
