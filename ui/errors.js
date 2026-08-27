@@ -250,7 +250,9 @@ function card(code, options) {
       model.meta = "no cloud model"
       model.body = "The Cloud model field in Settings is empty."
         + " Type a model id there, then run the check again."
-      model.buttons = [CLOSE, SETTINGS]
+      // Settings is what fixes it, and Retry is what runs the Check the reader
+      // just fixed. Retry re-runs the Selection in hand and captures nothing.
+      model.buttons = [CLOSE, RETRY, SETTINGS]
       model.primary = SETTINGS
       return model
     }

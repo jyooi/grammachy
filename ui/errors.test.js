@@ -170,9 +170,52 @@ test("an unset cloud model names the field and offers Settings", () => {
   assert.equal(model.meta, "no cloud model")
   assert.equal(model.body,
     "The Cloud model field in Settings is empty. Type a model id there, then run the check again.")
-  assert.deepEqual(model.buttons, [CLOSE, SETTINGS])
+  // Settings is what fixes it, so it stays the primary button. Retry is what
+  // runs the Check the reader just fixed, without leaving the card first.
+  assert.deepEqual(model.buttons, [CLOSE, RETRY, SETTINGS])
   assert.equal(model.primary, SETTINGS)
   assert.ok(!model.buttons.includes(SETUP), "Setup fixes no empty field")
+})
+
+// Every cloud card a reader can fix in Settings offers the same way back to
+// the Check, so no card leaves them with Close as their only offer.
+test("every cloud card Settings can fix offers Retry beside it", () => {
+  const cards = [
+    card(BAD_ARGUMENTS, {
+      engineLabel: "Cloud LLM",
+      engineSlug: "openrouter",
+      message: "The cloud model is not set. Type one in Settings. (reason: no_model)"
+    }),
+    card(ENGINE_UNAVAILABLE, {
+      engineLabel: "Cloud LLM",
+      engineSlug: "openrouter",
+      message: "Cloud LLM has no key. (reason: no_key)"
+    })
+  ]
+
+  for (const model of cards) {
+    assert.ok(model.buttons.includes(SETTINGS), model.title)
+    assert.ok(model.buttons.includes(RETRY), model.title)
+  }
+})
+
+// Compose wraps every failure in the Chunk card of spec section 9, which sets
+// its own buttons. The quick popup's Retry must not reach that surface.
+test("the Chunk card keeps its own buttons for an unset cloud model", () => {
+  const context = {
+    engineLabel: "Cloud LLM",
+    engineSlug: "openrouter",
+    message: "The cloud model is not set. Type one in Settings. (reason: no_model)"
+  }
+
+  const fresh = chunkCard(BAD_ARGUMENTS, context)
+  assert.equal(fresh.title, "No cloud model is set")
+  assert.deepEqual(fresh.buttons, [CLOSE, RETRY_REMAINING, SETTINGS])
+  assert.equal(fresh.primary, RETRY_REMAINING)
+  assert.ok(!fresh.buttons.includes(RETRY), "Compose resumes the run rather than re-running one Chunk")
+
+  const partial = chunkCard(BAD_ARGUMENTS, Object.assign({ hasPartial: true }, context))
+  assert.deepEqual(partial.buttons, [RETRY_REMAINING, REVIEW_PARTIAL])
 })
 
 // The arm is picked from what the CLI said, never from the engine slug, so a
@@ -205,7 +248,7 @@ test("the cloud model arm follows the message and not the engine", () => {
     "The cloud model is not set. Type one in Settings. (reason: no_model)")
 
   assert.equal(model.title, "No cloud model is set")
-  assert.deepEqual(model.buttons, [CLOSE, SETTINGS])
+  assert.deepEqual(model.buttons, [CLOSE, RETRY, SETTINGS])
 })
 
 // The too-long card of spec section 6 has a size bar and a `Check the first N

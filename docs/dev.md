@@ -746,11 +746,24 @@ omarchy restart shell
 19. Press Continue.
     The progress line walks every Chunk and the card never comes back between two Chunks of the same run.
     The time on that line starts at the Continue, so the wait of step 18 is not in it.
-20. Empty the Cloud model field and run a Check.
+### An unset cloud model names the field
+
+This part goes back to the quick popup, because the two surfaces answer a failed Check with different buttons.
+Compose wraps every failure in the Chunk card of spec section 9, which offers `Retry remaining` in place of `Retry`.
+
+20. Press Esc to leave Compose.
+    Open Settings, empty the Cloud model field, and leave Settings.
+21. Highlight a sentence with a mistake and press SUPER + G.
     The card reads `No cloud model is set` over `The Cloud model field in Settings is empty. Type a model id there, then run the check again.`
-    Its buttons are `Close` and `Settings`, and `Settings` is the primary one.
+    Its buttons are `Close`, `Retry`, and `Settings`, and `Settings` is the primary one.
     No `Setup` button is on this card, because that field has no built-in default and no install step fills it.
-    Press `Settings`, type a model id, and run the Check again to finish the walkthrough.
+22. Press `Settings`, type a model id, and leave Settings.
+    The same card is still behind it.
+    Press `Retry`.
+    The Check runs on the sentence already in hand, so no second capture happens and the marked text arrives.
+23. Run the same failure from Compose to see the other button set.
+    Empty the Cloud model field again, press SUPER + SHIFT + G, paste a Draft, and press Ctrl + Enter.
+    The title and the body are the same, and the buttons are `Close`, `Retry remaining`, and `Settings`, with `Retry remaining` the primary one.
 
 ## 17. Running the automated checks
 
