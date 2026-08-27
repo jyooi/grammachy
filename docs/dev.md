@@ -24,7 +24,7 @@ The shell loads third-party plugins from `~/.config/omarchy/plugins/<plugin-id>/
 A plain clone is the recommended way, because the shell watches that directory and reloads plugin code when a file changes.
 
 ```bash
-git clone --branch fm/grammachy-huf-198 <repo-url> ~/.config/omarchy/plugins/io.github.jyooi.grammachy
+git clone <repo-url> ~/.config/omarchy/plugins/io.github.jyooi.grammachy
 ```
 
 To work from an existing checkout instead, link it:
@@ -360,9 +360,10 @@ Two more cards belong to the same session:
 - **Settings from a card.** Bring the `engine_unavailable` card back, click the gear or `Settings`, then click `Back`.
   The same card is still behind the Settings view, because Settings opens the Settings view of the same card.
   Switch `Engine` to `Harper` and click `Retry`: the Check now runs in process and succeeds.
-- **No companion binary.** Move `bin/grammachy` aside, reload the plugin, and click `G` on a selection.
-  The card reads `Grammachy could not run the check` with `Close` and `Setup`.
-  `Setup` shows the setup notice until the setup card lands.
+- **No companion binary.** Move `bin/grammachy` aside, reload the plugin, and click the bar widget.
+  The setup card of spec section 10 opens, with an Install button that runs `bin/bootstrap.sh` and streams its output.
+  A Check that fails later still offers Setup on the `bad_arguments` card.
+  See [Cutting a release](#18-cutting-a-release) for the state before cli.lock pins a hash.
   Put the binary back and reload.
 
 ## 11. Smoke item 7: switch to LanguageTool, Check, switch back
@@ -674,7 +675,7 @@ The same three plugin checks CI runs, against the shell installed on this machin
 ```bash
 for file in $(find . -name '*.qml' | sort); do qmllint -I /usr/share/omarchy/shell "$file" || echo "FAILED $file"; done
 omarchy-plugin-validate .
-node --test ui/splice.test.js ui/tokens.test.js ui/settings.test.js ui/keymap.test.js ui/errors.test.js ui/format.test.js ui/anchor.test.js ui/limits.test.js ui/capture.test.js ui/engines.test.js
+node --test ui/splice.test.js ui/tokens.test.js ui/settings.test.js ui/keymap.test.js ui/errors.test.js ui/format.test.js ui/anchor.test.js ui/limits.test.js ui/capture.test.js ui/engines.test.js ui/setupCard.test.js
 ```
 
 The `qmllint` on `PATH` reports a syntax error through its exit status alone and prints nothing.
@@ -707,3 +708,27 @@ omarchy plugin disable io.github.jyooi.grammachy
 rm -rf ~/.config/omarchy/plugins/io.github.jyooi.grammachy
 omarchy-shell shell rescanPlugins
 ```
+
+## 18. Cutting a release
+
+Spec section 10 makes a release two commits.
+`.github/workflows/release.yml` builds the first commit's tag.
+`cli.lock` pins the second commit's hash.
+
+1. Push a tag of the form `v0.1.0`.
+   The tag triggers `.github/workflows/release.yml`.
+2. Wait for the workflow to finish.
+   It builds `grammachy-x86_64-linux` for the `x86_64-unknown-linux-musl` target, opt-level z, LTO, stripped.
+   It attaches the binary and a `.sha256` file to the GitHub release for that tag.
+3. Run the bump script with the tag:
+
+   ```bash
+   bin/release-lock.sh v0.1.0
+   ```
+
+   The script downloads the released asset, hashes it, and rewrites `cli.lock` with the version and the sha256.
+4. Commit the changed `cli.lock`.
+   This is the release's second commit.
+
+`cli.lock` ships with version `0.1.0` and an empty `sha256` until the first tag exists.
+The setup card reads that empty hash as no pinned release and shows the developer path instead of an Install button.

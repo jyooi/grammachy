@@ -13,6 +13,7 @@ import "ui/anchor.js" as Anchor
 import "ui/capture.js" as Capture
 import "ui/limits.js" as Limits
 import "ui/engines.js" as EnginesJs
+import "ui/setupCard.js" as Setup
 
 // The overlay entry point. `open(payload)` routes a summon to a surface, spec
 // section 2. Quick mode captures the Selection (section 3), runs one Check
@@ -59,9 +60,10 @@ Item {
   // Which surface of spec section 2 is on screen: "quick" or "compose".
   property string surface: "quick"
 
-  // Quick: "capturing", "empty", "checking", "result", "error", "notice", or
-  // "toolong".
-  // Compose: "editing", "confirm", "checking", "result", "error", or "notice".
+  // Quick: "capturing", "empty", "checking", "result", "error", "notice",
+  // "setup", or "toolong".
+  // Compose: "editing", "confirm", "checking", "result", "error", "setup",
+  // or "notice".
   property string phase: "capturing"
   // The whole capture, spec section 3. Every Check runs on this or on its head.
   property string capturedText: ""
@@ -95,6 +97,21 @@ Item {
   property var errorCard: null
   property string errorDiagnosis: ""
   property int cardSerial: 0
+
+  // The setup card of spec section 10: `bootstrapRunning` and
+  // `bootstrapExitCode` (null until a run has finished) are bin/bootstrap.sh's
+  // own state, and `bootstrapLog` is its stdout and stderr in the order they
+  // streamed in. `setupCardModel` turns those plus cli.lock's text into the
+  // model `ui/SetupCard.qml` draws.
+  property bool bootstrapRunning: false
+  property var bootstrapExitCode: null
+  property string bootstrapLog: ""
+  readonly property var setupCardModel: Setup.card({
+    lockText: cliLockFile.text(),
+    running: root.bootstrapRunning,
+    exitCode: root.bootstrapExitCode,
+    log: root.bootstrapLog
+  })
 
   // One Check takes this many UTF-16 code units. The limit belongs to the
   // Engine (spec section 4), so it moves with the engine setting.
@@ -203,6 +220,18 @@ Item {
   readonly property string binaryPath: Util.isPlainObject(root.manifest) && root.manifest.__sourceDir
     ? String(root.manifest.__sourceDir).replace(/\/$/, "") + "/bin/grammachy"
     : String(Qt.resolvedUrl("bin/grammachy")).replace(/^file:\/\//, "")
+  // True when `test -x` finds bin/grammachy. `startQuick` and
+  // `startComposeCheck` read this before capture or chunking.
+  property bool companionFound: false
+
+  // The plugin folder's own root, the same one `binaryPath` sits under.
+  readonly property string pluginRoot: Util.isPlainObject(root.manifest) && root.manifest.__sourceDir
+    ? String(root.manifest.__sourceDir).replace(/\/$/, "")
+    : String(Qt.resolvedUrl(".")).replace(/^file:\/\//, "").replace(/\/$/, "")
+
+  // The setup card of spec section 10: what it installs, and what it pins.
+  readonly property string bootstrapPath: root.pluginRoot + "/bin/bootstrap.sh"
+  readonly property string cliLockPath: root.pluginRoot + "/cli.lock"
 
   readonly property var barConfig: root.shell && root.shell.bar ? root.shell.bar : null
   readonly property string barPosition: root.barConfig ? String(root.barConfig.position) : "top"
@@ -447,13 +476,54 @@ Item {
     Qt.callLater(root.restoreFocus)
   }
 
-  // `Setup` on the `bad_arguments` card. The setup card of spec section 10
-  // names the pinned binary and runs `bin/bootstrap.sh`; the release ticket
-  // builds it, so until then the button says where the binary comes from.
+  // The setup card of spec section 10.
+  // `startQuick` and `startComposeCheck` open it when bin/grammachy is absent.
+  // The `Setup` button of the `bad_arguments` card also opens it.
+  // `showSetup` and `resetRun` do not change the bootstrap state.
   function showSetup() {
-    root.showNotice("Setup is not ready yet",
-      "The setup card arrives with the release milestone. See docs/dev.md for how to build the companion binary into bin/grammachy.",
-      "not ready yet")
+    root.phase = "setup"
+  }
+
+  function installBootstrap() {
+    if (root.bootstrapRunning) return
+    root.bootstrapRunning = true
+    root.bootstrapExitCode = null
+    root.bootstrapLog = ""
+    bootstrapProcess.launchPending = true
+    bootstrapProcess.running = true
+  }
+
+  // `bin/bootstrap.sh` never started at all, the same fact `finishCheckLaunch`
+  // reads for the companion binary itself. The setup card is what the reader
+  // used to get here, so the failure lands as its own log line rather than as
+  // another `bad_arguments` card.
+  function finishBootstrapLaunch() {
+    if (bootstrapProcess.running) return
+    if (!bootstrapProcess.launchPending) return
+    bootstrapProcess.launchPending = false
+    root.bootstrapRunning = false
+    root.bootstrapExitCode = 1
+    root.bootstrapLog += "bin/bootstrap.sh could not be started.\n"
+  }
+
+  // Where each button of the setup card goes, spec section 10.
+  function runSetupAction(action) {
+    if (action === Setup.INSTALL) root.installBootstrap()
+    else if (action === Setup.RETRY) root.retrySetupCheck()
+    else if (action === Setup.CLOSE) root.close()
+  }
+
+  function retrySetupCheck() {
+    if (root.surface === "compose") {
+      root.phase = "editing"
+      root.startComposeCheck()
+      return
+    }
+    if (Setup.retryAfterSetup(root.surface, root.selectionText) === "startQuick") {
+      root.startQuick()
+      return
+    }
+    root.retryCheck()
   }
 
   // ---------------------------------------------------------------- capture
@@ -465,6 +535,10 @@ Item {
   function startQuick() {
     root.resetRun()
     root.surface = "quick"
+    if (Setup.companionMissing(root.companionFound)) {
+      root.showSetup()
+      return
+    }
     root.phase = "capturing"
     root.capturedText = ""
     root.probeSourceWindow()
@@ -887,7 +961,11 @@ Item {
   function startComposeCheck() {
     if (root.surface !== "compose" || root.phase !== "editing") return
     if (root.draftRefusal().length > 0) return
-    // A second Check must not be answered by the first one's output.
+    if (Setup.companionMissing(root.companionFound)) {
+      root.showSetup()
+      return
+    }
+    // The first Check must not answer a second Check.
     root.runGeneration += 1
     root.selectionText = root.draftText
     root.issues = []
@@ -1430,9 +1508,9 @@ Item {
     if (root.phase === "result" && root.issues.length > 0) return Keymap.MODE_REVIEW
     // Spec section 6: the quick cards that carry the Clear button and no Issues
     // to decide answer Esc and Ctrl + L, and nothing else. `ui/QuickCard.qml`
-    // draws that button on these four phases and on no other, so the button and
+    // draws that button on these five phases and on no other, so the button and
     // the key reach exactly the same cards.
-    if (root.phase === "checking" || root.phase === "error"
+    if (root.phase === "checking" || root.phase === "error" || root.phase === "setup"
       || root.phase === "notice" || root.phase === "result")
       return Keymap.MODE_QUICK_CLEAR
     return Keymap.MODE_IDLE
@@ -1761,6 +1839,61 @@ Item {
     }
   }
 
+  // The two fields cli.lock pins, spec section 10, read as a plain local file
+  // the same way every other path on this machine is: never as a URL.
+  FileView {
+    id: cliLockFile
+    path: root.cliLockPath
+    preload: true
+    onLoadFailed: console.warn("grammachy: cli.lock could not be read:", root.cliLockPath)
+  }
+
+  // FileView does not watch a missing file. Watch the bin directory instead.
+  // The probe runs again when Install writes bin/grammachy.
+  FileView {
+    id: companionDir
+    path: root.pluginRoot + "/bin"
+    watchChanges: true
+    printErrors: false
+    onFileChanged: companionProbe.running = true
+  }
+
+  Process {
+    id: companionProbe
+    running: true
+    command: ["test", "-x", root.binaryPath]
+    onExited: function(exitCode) { root.companionFound = exitCode === 0 }
+  }
+
+  // The setup card's Install button, spec section 10: `bin/bootstrap.sh`,
+  // streamed into one log in the order its lines arrived, stdout and stderr
+  // folded together because the reader wants the story, not which stream
+  // each line came out of.
+  Process {
+    id: bootstrapProcess
+    property bool launchPending: false
+    command: [root.bootstrapPath]
+    onStarted: bootstrapProcess.launchPending = false
+    onRunningChanged: {
+      if (bootstrapProcess.running) return
+      if (!bootstrapProcess.launchPending) return
+      Qt.callLater(root.finishBootstrapLaunch)
+    }
+    onExited: function(exitCode, exitStatus) {
+      root.bootstrapRunning = false
+      root.bootstrapExitCode = exitCode
+      if (exitCode === 0) root.companionFound = true
+    }
+    stdout: SplitParser {
+      splitMarker: "\n"
+      onRead: function(line) { root.bootstrapLog += line + "\n" }
+    }
+    stderr: SplitParser {
+      splitMarker: "\n"
+      onRead: function(line) { root.bootstrapLog += line + "\n" }
+    }
+  }
+
   Process {
     id: copyProcess
     property string text: ""
@@ -1960,6 +2093,7 @@ Item {
         engineMessage: root.engineMessage
         errorCard: root.errorCard
         diagnosis: root.errorDiagnosis
+        setupCard: root.setupCardModel
 
         settingsOpen: root.settingsOpen
         nativeLanguage: root.setting("nativeLanguage")
@@ -1995,6 +2129,7 @@ Item {
         // Compose button in the hero carry the Selection over as the Draft.
         onComposeRequested: root.composeWith(root.capturedText)
         onErrorActionRequested: function(action) { root.runErrorAction(action) }
+        onSetupActionRequested: function(action) { root.runSetupAction(action) }
         onCloseRequested: root.close()
       }
 
@@ -2028,6 +2163,7 @@ Item {
         engineMessage: root.engineMessage
         errorCard: root.errorCard
         diagnosis: root.errorDiagnosis
+        setupCard: root.setupCardModel
         draftCapUnits: root.draftCapUnits
 
         // The chunked run of spec section 9, counted from one for the reader.
@@ -2066,6 +2202,7 @@ Item {
         onReplaceDraftRequested: root.replaceDraft()
         onKeepDraftRequested: root.keepDraft()
         onErrorActionRequested: function(action) { root.runErrorAction(action) }
+        onSetupActionRequested: function(action) { root.runSetupAction(action) }
         onAccepted: function(index) { root.decide(index, true) }
         onSkipped: function(index) { root.decide(index, false) }
         onAcceptAllRequested: root.acceptAllOpen()

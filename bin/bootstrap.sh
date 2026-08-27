@@ -1,0 +1,91 @@
+#!/usr/bin/env bash
+# Fetches the pinned companion binary, spec section 10.
+#
+# The setup card runs this through a Quickshell Process and streams stdout
+# and stderr, so every line here is a status the reader can see. The script
+# reads version and sha256 from cli.lock. It downloads the release asset,
+# checks the hash, and moves the binary into bin/grammachy only once the
+# hash matches. A mismatch, a missing pin, or a failed download all exit
+# non-zero and leave bin/grammachy as it was.
+#
+# The repository is private today, so the public release URL can answer 404
+# for a real tag. When that happens and gh is authenticated, the script
+# falls back to gh release download.
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+lock_path="${GRAMMACHY_BOOTSTRAP_LOCK:-$repo_root/cli.lock}"
+out_path="${GRAMMACHY_BOOTSTRAP_OUT:-$repo_root/bin/grammachy}"
+repo="${GRAMMACHY_BOOTSTRAP_REPO:-jyooi/grammachy}"
+base_url="${GRAMMACHY_BOOTSTRAP_BASE_URL:-https://github.com/$repo/releases/download}"
+curl_bin="${GRAMMACHY_BOOTSTRAP_CURL:-curl}"
+gh_bin="${GRAMMACHY_BOOTSTRAP_GH:-gh}"
+asset="grammachy-x86_64-linux"
+
+if [[ ! -f "$lock_path" ]]; then
+  echo "cli.lock is missing at $lock_path" >&2
+  exit 1
+fi
+
+lock_text="$(cat "$lock_path")"
+version="$(printf '%s' "$lock_text" | sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
+pinned_sha256="$(printf '%s' "$lock_text" | sed -n 's/.*"sha256"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
+
+if [[ -z "$version" ]]; then
+  echo "cli.lock names no version" >&2
+  exit 1
+fi
+
+if [[ -z "$pinned_sha256" ]]; then
+  echo "No release is pinned in cli.lock yet." >&2
+  echo "Build from source instead: cargo build --release, then copy the binary into bin/grammachy." >&2
+  exit 1
+fi
+
+tag="v$version"
+url="$base_url/$tag/$asset"
+out_dir="$(dirname "$out_path")"
+mkdir -p "$out_dir"
+
+tmp_file="$(mktemp "$out_dir/.grammachy.XXXXXX")"
+trap 'rm -f "$tmp_file"' EXIT
+
+echo "Downloading $asset $tag from $url"
+http_code="$("$curl_bin" -sS -L -o "$tmp_file" -w '%{http_code}' "$url" || echo "000")"
+
+if [[ "$http_code" == "404" ]]; then
+  echo "The public release URL answered 404."
+  if [[ "$gh_bin" == "never" ]]; then
+    echo "gh is disabled for this run, so there is nowhere else to ask." >&2
+    exit 1
+  fi
+  if ! command -v "$gh_bin" >/dev/null 2>&1; then
+    echo "gh is not installed, so there is nowhere else to ask." >&2
+    exit 1
+  fi
+  if ! "$gh_bin" auth status >/dev/null 2>&1; then
+    echo "gh is installed but not authenticated, so there is nowhere else to ask." >&2
+    exit 1
+  fi
+  echo "Falling back to gh release download."
+  if ! "$gh_bin" release download "$tag" --repo "$repo" --pattern "$asset" --output "$tmp_file" --clobber; then
+    echo "gh release download failed for $tag" >&2
+    exit 1
+  fi
+elif [[ "$http_code" != "200" ]]; then
+  echo "Download failed: $url answered HTTP $http_code" >&2
+  exit 1
+fi
+
+actual_sha256="$(sha256sum "$tmp_file" | cut -d ' ' -f 1)"
+if [[ "$actual_sha256" != "$pinned_sha256" ]]; then
+  echo "sha256 mismatch for $asset $tag" >&2
+  echo "expected $pinned_sha256" >&2
+  echo "got      $actual_sha256" >&2
+  exit 1
+fi
+
+chmod +x "$tmp_file"
+mv "$tmp_file" "$out_path"
+trap - EXIT
+echo "Installed $asset $tag to $out_path"
