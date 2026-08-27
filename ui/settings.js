@@ -99,16 +99,17 @@ function defaultOf(name) {
   return descriptor ? descriptor.fallback : undefined
 }
 
-// Whether a candidate value is one this key accepts. An empty string is not:
-// `cli/src/settings.rs` reads an empty `openaiBaseUrl` as absent, so the two
-// text fields have to agree that empty means the default.
+// Whether a candidate value is one this key accepts. A text field that carries
+// nothing is not: `settings::non_empty` in `cli/src/settings.rs` trims before
+// it decides, so a field of blanks reads as the default on both sides and no
+// Check runs on a model id or an address that is only whitespace.
 function isKnown(name, value) {
   var descriptor = DESCRIPTORS[name]
   if (!descriptor) return false
   if (descriptor.type === "boolean") return typeof value === "boolean"
   if (typeof value !== "string") return false
   if (descriptor.type === "enum") return descriptor.values.indexOf(value) !== -1
-  return value.length > 0
+  return value.trim().length > 0
 }
 
 // What the Settings view shows and what a Check runs with. An unknown stored
@@ -166,7 +167,7 @@ function needsCloudConsent(engineSlug, entry) {
 // The consent card itself. The overlay draws the title, the body, and the meta
 // line; `Continue` writes `cloudConsent` and `Cancel` sends nothing.
 function cloudConsentCard(modelId) {
-  var model = typeof modelId === "string" ? modelId : ""
+  var model = typeof modelId === "string" ? modelId.trim() : ""
   return {
     title: "Send text to OpenRouter?",
     body: "The cloud engine sends the text of this check to openrouter.ai, which passes it to the model provider."

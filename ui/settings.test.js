@@ -16,6 +16,7 @@ const {
   OPENROUTER_MODEL_PLACEHOLDER,
   entryOf,
   defaultOf,
+  isKnown,
   valueOf,
   labelOf,
   normalised,
@@ -263,6 +264,41 @@ test("continuing writes cloudConsent and keeps every other stored key", () => {
     cloudConsent: true
   })
   assert.equal(needsCloudConsent("openrouter", next), false)
+})
+
+// A text field of blanks carries nothing. `settings::non_empty` in
+// `cli/src/settings.rs` trims before it decides, so the shell has to agree or
+// it labels a model as chosen for a Check the CLI refuses.
+test("a text field of blanks reads as the default on every string key", () => {
+  const blanks = [" ", "   ", "\t", "\n  "]
+
+  for (const blank of blanks) {
+    assert.equal(isKnown("openrouterModel", blank), false, blank)
+    assert.equal(isKnown("openaiModel", blank), false, blank)
+    assert.equal(isKnown("openaiBaseUrl", blank), false, blank)
+
+    assert.equal(valueOf({ openrouterModel: blank }, "openrouterModel"), "")
+    assert.equal(valueOf({ openaiModel: blank }, "openaiModel"), "gemma-4-e4b-it")
+    assert.equal(valueOf({ openaiBaseUrl: blank }, "openaiBaseUrl"), "http://127.0.0.1:8080")
+
+    // A field the user blanked out stores the default, not the blanks.
+    assert.equal(normalised("openrouterModel", blank), "")
+    assert.equal(normalised("openaiModel", blank), "gemma-4-e4b-it")
+  }
+
+  // A value with something in it is still kept exactly as it was typed.
+  assert.equal(isKnown("openrouterModel", "google/gemini-3.7-flash"), true)
+  assert.equal(normalised("openrouterModel", "google/gemini-3.7-flash"), "google/gemini-3.7-flash")
+})
+
+// The consent card names the model the pending Check would ask for, so a field
+// of blanks has to read as no model rather than print the spaces.
+test("a blank cloud model reads as no model set on the consent card", () => {
+  for (const blank of ["", " ", "   "]) {
+    assert.equal(cloudConsentCard(blank).meta, "cloud engine, no model set", blank)
+  }
+  assert.equal(cloudConsentCard(" google/gemini-3.7-flash ").meta,
+    "cloud engine, google/gemini-3.7-flash")
 })
 
 // The key hint. The key is a 0600 file the CLI owns, so `doctor` reports its

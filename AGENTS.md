@@ -84,6 +84,8 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   It never reaches `shell.json`, a process list, a log, or a `doctor` report: `cli/src/setup/key.rs` and `doctor::facts::KeyState` both record the state of the file and never its contents.
   Every cloud failure carries its reason word in the message, and `cli/tests/openrouter_stub.rs` maps each one from a recorded response.
   `ui/errors.js` parses that trailing `(reason: <word>)` to pick the card body, so a change to the message wording moves the card too.
+  The unset-model `bad_arguments` carries `(reason: no_model)` in that same shape, and it is the one `bad_arguments` whose card names the Settings field rather than the companion tool.
+  The arm is picked from the message and never from the engine slug, so a cloud failure for any other reason keeps the general card.
   The `engine_unavailable` card sets `needsDiagnosis` false for this slug alone, because `doctor` reads no piece of this machine that a cloud failure is about.
   `openrouterModel` has no built-in default: `settings::DEFAULT_OPENROUTER_MODEL` is the empty string, so a blank field, a blank flag, and a missing key all answer `bad_arguments` in the adapter.
   `settings::non_empty` is the one fallback rule the file reader and the flags share, and `settings::OPENROUTER_MODEL_PLACEHOLDER` is what the empty field shows and never a value.

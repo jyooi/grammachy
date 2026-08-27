@@ -747,7 +747,10 @@ omarchy restart shell
     The progress line walks every Chunk and the card never comes back between two Chunks of the same run.
     The time on that line starts at the Continue, so the wait of step 18 is not in it.
 20. Empty the Cloud model field and run a Check.
-    The `bad_arguments` card says the cloud model is not set, because that field has no built-in default.
+    The card reads `No cloud model is set` over `The Cloud model field in Settings is empty. Type a model id there, then run the check again.`
+    Its buttons are `Close` and `Settings`, and `Settings` is the primary one.
+    No `Setup` button is on this card, because that field has no built-in default and no install step fills it.
+    Press `Settings`, type a model id, and run the Check again to finish the walkthrough.
 
 ## 17. Running the automated checks
 

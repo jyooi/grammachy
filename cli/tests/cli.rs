@@ -522,5 +522,8 @@ fn the_cloud_engine_with_no_model_prints_bad_arguments() {
 
     assert_eq!(result.status, 1);
     assert_eq!(value["error"]["code"], "bad_arguments");
-    assert_eq!(value["error"]["message"], "The cloud model is not set.");
+    assert_eq!(
+        value["error"]["message"],
+        "The cloud model is not set. Type one in Settings. (reason: no_model)"
+    );
 }
