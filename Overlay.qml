@@ -262,6 +262,15 @@ Item {
 
   onShowsCloudSettingsChanged: if (root.showsCloudSettings) root.refreshCloudKey()
 
+  // A question that is off the screen must never still be answerable, the same
+  // rule `onShowsModelsChanged` keeps for the Remove confirm. The consent card
+  // is not drawn over the Settings view, and the hero gear is reachable from
+  // every phase, so opening Settings cancels the Check that waited on the card.
+  // Nothing was sent, and the next Check asks again.
+  onSettingsOpenChanged: {
+    if (root.settingsOpen && root.phase === "cloudConsent") root.cancelCloudCheck()
+  }
+
   function refreshCloudKey() {
     keyProcess.command = [root.binaryPath, "doctor", "--engine", Settings.CLOUD_ENGINE, "--json"]
     if (keyProcess.running) {
@@ -781,7 +790,24 @@ Item {
   function askCloudConsent(text, engineSlug) {
     root.cloudPendingText = text
     root.cloudPendingEngine = String(engineSlug)
+    root.pauseChunkClock()
     root.phase = "cloudConsent"
+  }
+
+  // The reader's decision time is not engine time. A chunked Check reaches the
+  // card with the progress clock already running, so the card stops it and
+  // Continue starts it again from what the run had spent, the way
+  // `retryRemaining` starts the clock again after a failure.
+  function pauseChunkClock() {
+    if (!root.chunkRun) return
+    root.chunkTickMs = Date.now() - root.chunkStartedAt
+    chunkTicker.stop()
+  }
+
+  function resumeChunkClock() {
+    if (!root.chunkRun) return
+    root.chunkStartedAt = Date.now() - root.chunkTickMs
+    chunkTicker.start()
   }
 
   // Continue: the answer is kept and the Check that waited on it runs.
@@ -796,6 +822,7 @@ Item {
     root.persistSetting("cloudConsent", true)
     root.clearCloudConsent()
     root.phase = "checking"
+    root.resumeChunkClock()
     root.launchCheck(text, engineSlug)
   }
 
@@ -1411,10 +1438,13 @@ Item {
     // The Remove confirm sits over the Settings view and is one question, so it
     // takes the keyboard from every other card while it is up.
     if (root.phase === "confirmModel") return Keymap.MODE_MODEL_CONFIRM
+    // Settings hides the consent card, so Settings answers the keyboard first.
+    // `onSettingsOpenChanged` already cancels the pending Check, and this order
+    // is what makes a hidden card unanswerable whatever the phase says.
+    if (root.settingsOpen) return Keymap.MODE_IDLE
     // The consent card stands in front of a Check on either surface, so it
     // answers the keyboard before the surface does.
     if (root.phase === "cloudConsent") return Keymap.MODE_CLOUD_CONSENT
-    if (root.settingsOpen) return Keymap.MODE_IDLE
     if (root.surface === "compose") {
       if (root.phase === "editing") return Keymap.MODE_COMPOSE_EDIT
       if (root.phase === "result" || root.phase === "notice") return Keymap.MODE_COMPOSE_REVIEW

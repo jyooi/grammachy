@@ -107,11 +107,26 @@ Check fields:
 - `ok`: whether the piece is in place.
 - `detail`: one sentence saying what was found, or what is missing.
 - `remedy`: the exact command that fixes it. The key is absent when there is nothing to run. An `ok` check carries one only as advice, as the backend check does for `ggml-vulkan`.
+- `state`: the stable word for which state that piece is in. Only the `key` check carries one, and the field is absent everywhere else.
 - `engines`: the slugs that need this piece. `harper` needs only `binary`, because it runs in process.
 
 The `key` check reads the state of the OpenRouter key file and never its contents.
 A file another user can read fails the check, and the remedy is a `chmod 600`.
 No report line can carry the key itself.
+
+The `key` state word is one of these five.
+It is what the shell reads, because `detail` is prose and no contract.
+
+| `state` | `ok` | What it says |
+|---|---|---|
+| `ready` | true | A key is stored, and no other user can read it. |
+| `missing` | false | The key file does not exist. |
+| `empty` | false | The key file exists and holds no key. |
+| `loose` | false | The key file exists, and a group or another user can read it. |
+| `noHome` | false | HOME is not set, so the key file has no path at all. |
+
+A reader that gets no `state` word falls back to the pair `ok` names.
+An older binary then degrades rather than breaks.
 
 ## The engine diagnosis
 

@@ -29,6 +29,11 @@ pub struct Check {
     /// pacman steps stay manual: `doctor` never runs this itself.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub remedy: Option<String>,
+    /// The stable word for which state this piece is in, for a check whose
+    /// states the shell must tell apart. Only the `key` check carries one.
+    /// `detail` is prose and no contract, so nothing may read that instead.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub state: Option<&'static str>,
     /// The engine slugs that need this piece.
     pub engines: Vec<&'static str>,
 }
@@ -157,6 +162,7 @@ fn binary_check(facts: &Facts) -> Check {
             ok: true,
             detail: format!("grammachy {version} at {}", path.display()),
             remedy: None,
+            state: None,
             engines: vec!["languagetool", "openai", "harper", "openrouter"],
         },
         None => Check {
@@ -165,6 +171,7 @@ fn binary_check(facts: &Facts) -> Check {
             ok: false,
             detail: format!("grammachy {version} runs, but its own path is not readable."),
             remedy: None,
+            state: None,
             engines: vec!["languagetool", "openai", "harper", "openrouter"],
         },
     }
@@ -178,6 +185,7 @@ fn languagetool_check(facts: &Facts) -> Check {
             ok: true,
             detail: path.display().to_string(),
             remedy: None,
+            state: None,
             engines: vec!["languagetool"],
         },
         None => Check {
@@ -189,6 +197,7 @@ fn languagetool_check(facts: &Facts) -> Check {
                 crate::engines::languagetool::unit::PACKAGE_LAUNCHER
             ),
             remedy: Some("sudo pacman -S languagetool".to_string()),
+            state: None,
             engines: vec!["languagetool"],
         },
     }
@@ -202,6 +211,7 @@ fn java_check(facts: &Facts) -> Check {
             ok: true,
             detail: path.display().to_string(),
             remedy: None,
+            state: None,
             engines: vec!["languagetool"],
         },
         // The launcher runs "$JAVA_HOME/bin/java" and Arch never exports
@@ -213,6 +223,7 @@ fn java_check(facts: &Facts) -> Check {
             detail: "No Java runtime: JAVA_HOME is not set and no default JVM is installed."
                 .to_string(),
             remedy: Some("sudo pacman -S jre-openjdk".to_string()),
+            state: None,
             engines: vec!["languagetool"],
         },
     }
@@ -226,6 +237,7 @@ fn llama_check(facts: &Facts, tier: HardwareTier) -> Check {
             ok: true,
             detail: path.display().to_string(),
             remedy: None,
+            state: None,
             engines: vec!["openai"],
         },
         // The llama-cpp package carries no compute backend of its own, so the
@@ -242,6 +254,7 @@ fn llama_check(facts: &Facts, tier: HardwareTier) -> Check {
                 "sudo pacman -S llama-cpp {}",
                 tier.backend_packages().join(" ")
             )),
+            state: None,
             engines: vec!["openai"],
         },
     }
@@ -298,6 +311,7 @@ fn backend_check(facts: &Facts) -> Check {
             ok: false,
             detail,
             remedy: Some(format!("sudo pacman -S {}", packages.join(" "))),
+            state: None,
             engines: vec!["openai"],
         };
     }
@@ -309,6 +323,7 @@ fn backend_check(facts: &Facts) -> Check {
             ok: true,
             detail: installed.join(", "),
             remedy: None,
+            state: None,
             engines: vec!["openai"],
         };
     }
@@ -324,6 +339,7 @@ fn backend_check(facts: &Facts) -> Check {
             accelerators.join(" and ")
         ),
         remedy: Some(format!("sudo pacman -S {}", accelerators.join(" "))),
+        state: None,
         engines: vec!["openai"],
     }
 }
@@ -337,6 +353,7 @@ fn model_check(facts: &Facts) -> Check {
             ok: true,
             detail: path.display().to_string(),
             remedy: None,
+            state: None,
             engines: vec!["openai"],
         },
         // Only a catalogue name has a download. The `openaiModel` field takes
@@ -352,6 +369,7 @@ fn model_check(facts: &Facts) -> Check {
                 directory.display()
             ),
             remedy: None,
+            state: None,
             engines: vec!["openai"],
         },
         (None, Some(directory)) => Check {
@@ -363,6 +381,7 @@ fn model_check(facts: &Facts) -> Check {
             // fixes without a terminal, so the remedy names the verb the
             // Settings Models list runs rather than the whole install step.
             remedy: Some(format!("grammachy model download {model}")),
+            state: None,
             engines: vec!["openai"],
         },
         (None, None) => Check {
@@ -371,6 +390,7 @@ fn model_check(facts: &Facts) -> Check {
             ok: false,
             detail: "No model directory: HOME is not set.".to_string(),
             remedy: None,
+            state: None,
             engines: vec!["openai"],
         },
     }
@@ -384,6 +404,7 @@ fn endpoint_check(facts: &Facts) -> Check {
             ok: true,
             detail: address.clone(),
             remedy: None,
+            state: None,
             engines: vec!["openai"],
         },
         // Spec section 4: a base URL off this machine is bad_arguments and no
@@ -394,8 +415,24 @@ fn endpoint_check(facts: &Facts) -> Check {
             ok: false,
             detail: message.clone(),
             remedy: None,
+            state: None,
             engines: vec!["openai"],
         },
+    }
+}
+
+/// The stable state word the `key` check carries, one per [`KeyState`].
+///
+/// `detail` is prose and no contract, so the shell tells a missing key from a
+/// key it found but cannot use by this word alone. A word never names the path
+/// or the mode, so no key state line can carry the key itself.
+fn key_state_word(state: &KeyState) -> &'static str {
+    match state {
+        KeyState::Ready { .. } => "ready",
+        KeyState::Missing(_) => "missing",
+        KeyState::Empty(_) => "empty",
+        KeyState::Loose { .. } => "loose",
+        KeyState::NoHome => "noHome",
     }
 }
 
@@ -405,50 +442,46 @@ fn endpoint_check(facts: &Facts) -> Check {
 /// stdin, so no key ever reaches a process list or this report.
 fn key_check(facts: &Facts) -> Check {
     let write = crate::setup::key::WRITE_COMMAND.to_string();
-    match &facts.openrouter_key {
-        KeyState::Ready { path, mode } => Check {
-            id: "key",
-            name: "OpenRouter key",
-            ok: true,
-            detail: format!("{} is stored, mode 0{mode:o}.", path.display()),
-            remedy: None,
-            engines: vec!["openrouter"],
-        },
-        KeyState::Missing(path) => Check {
-            id: "key",
-            name: "OpenRouter key",
-            ok: false,
-            detail: format!("No OpenRouter key: {} does not exist.", path.display()),
-            remedy: Some(write),
-            engines: vec!["openrouter"],
-        },
-        KeyState::Empty(path) => Check {
-            id: "key",
-            name: "OpenRouter key",
-            ok: false,
-            detail: format!("The OpenRouter key file {} is empty.", path.display()),
-            remedy: Some(write),
-            engines: vec!["openrouter"],
-        },
-        KeyState::Loose { path, mode } => Check {
-            id: "key",
-            name: "OpenRouter key",
-            ok: false,
-            detail: format!(
+    let state = &facts.openrouter_key;
+    let (ok, detail, remedy) = match state {
+        KeyState::Ready { path, mode } => (
+            true,
+            format!("{} is stored, mode 0{mode:o}.", path.display()),
+            None,
+        ),
+        KeyState::Missing(path) => (
+            false,
+            format!("No OpenRouter key: {} does not exist.", path.display()),
+            Some(write),
+        ),
+        KeyState::Empty(path) => (
+            false,
+            format!("The OpenRouter key file {} is empty.", path.display()),
+            Some(write),
+        ),
+        KeyState::Loose { path, mode } => (
+            false,
+            format!(
                 "The OpenRouter key {} is mode 0{mode:o}, which another user can read.",
                 path.display()
             ),
-            remedy: Some(format!("chmod 600 {}", path.display())),
-            engines: vec!["openrouter"],
-        },
-        KeyState::NoHome => Check {
-            id: "key",
-            name: "OpenRouter key",
-            ok: false,
-            detail: "No OpenRouter key file: HOME is not set.".to_string(),
-            remedy: None,
-            engines: vec!["openrouter"],
-        },
+            Some(format!("chmod 600 {}", path.display())),
+        ),
+        KeyState::NoHome => (
+            false,
+            "No OpenRouter key file: HOME is not set.".to_string(),
+            None,
+        ),
+    };
+
+    Check {
+        id: "key",
+        name: "OpenRouter key",
+        ok,
+        detail,
+        remedy,
+        state: Some(key_state_word(state)),
+        engines: vec!["openrouter"],
     }
 }
 
@@ -467,6 +500,7 @@ fn unit_check(
             ok: true,
             detail: format!("{unit} is running."),
             remedy: None,
+            state: None,
             engines,
         },
         UnitState::Stopped => Check {
@@ -475,6 +509,7 @@ fn unit_check(
             ok: true,
             detail: format!("{unit} is not running. The next Check starts it."),
             remedy: None,
+            state: None,
             engines,
         },
         UnitState::Unknown => Check {
@@ -483,6 +518,7 @@ fn unit_check(
             ok: false,
             detail: format!("systemctl --user did not answer, so nothing can start {unit}."),
             remedy: None,
+            state: None,
             engines,
         },
     }

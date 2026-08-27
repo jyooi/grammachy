@@ -277,6 +277,7 @@ test("the key hint reads the doctor report and carries the setup command", () =>
         id: "key",
         name: "OpenRouter key",
         ok: false,
+        state: "missing",
         detail: "No OpenRouter key.",
         remedy: "printf '%s' \"$KEY\" | grammachy setup --openrouter-key"
       }
@@ -284,6 +285,7 @@ test("the key hint reads the doctor report and carries the setup command", () =>
   }
   assert.deepEqual(keyState(report), {
     present: false,
+    state: "missing",
     remedy: "printf '%s' \"$KEY\" | grammachy setup --openrouter-key"
   })
   assert.equal(keyHint(keyState(report)),
@@ -291,9 +293,66 @@ test("the key hint reads the doctor report and carries the setup command", () =>
 })
 
 test("a key that is in place says so and needs no command", () => {
-  const report = { contractVersion: 1, checks: [{ id: "key", ok: true }] }
-  assert.deepEqual(keyState(report), { present: true, remedy: "" })
+  const report = { contractVersion: 1, checks: [{ id: "key", ok: true, state: "ready" }] }
+  assert.deepEqual(keyState(report), { present: true, state: "ready", remedy: "" })
   assert.equal(keyHint(keyState(report)), "key: present")
+})
+
+// A key file that exists but cannot be used is neither present nor missing.
+// The remedy beside it acts on a file that is there, so a hint that called it
+// missing would offer a command the words make no sense of.
+test("a loose key file is found and not usable, with the chmod beside it", () => {
+  const report = {
+    contractVersion: 1,
+    checks: [{
+      id: "key",
+      ok: false,
+      state: "loose",
+      detail: "The OpenRouter key /home/u/.config/grammachy/openrouter-key is mode 0644.",
+      remedy: "chmod 600 /home/u/.config/grammachy/openrouter-key"
+    }]
+  }
+  assert.equal(keyState(report).state, "loose")
+  assert.equal(keyHint(keyState(report)),
+    "key: found, not usable. Run: chmod 600 /home/u/.config/grammachy/openrouter-key")
+})
+
+test("an empty key file is found and not usable", () => {
+  const report = {
+    contractVersion: 1,
+    checks: [{
+      id: "key",
+      ok: false,
+      state: "empty",
+      remedy: "printf '%s' \"$KEY\" | grammachy setup --openrouter-key"
+    }]
+  }
+  assert.equal(keyHint(keyState(report)),
+    "key: found, not usable. Run: printf '%s' \"$KEY\" | grammachy setup --openrouter-key")
+})
+
+// No HOME means no key file at all, so it reads as missing. It carries no
+// command, because nothing the user can run from here sets HOME.
+test("no HOME reads as a missing key and offers no command", () => {
+  const report = { contractVersion: 1, checks: [{ id: "key", ok: false, state: "noHome" }] }
+  assert.deepEqual(keyState(report), { present: false, state: "noHome", remedy: "" })
+  assert.equal(keyHint(keyState(report)), "key: missing")
+})
+
+// An older binary sends no state word. The pair `ok` names is still truthful,
+// so the hint degrades to it rather than losing the label.
+test("a report with no state word falls back to present and missing", () => {
+  assert.equal(keyHint(keyState({ contractVersion: 1, checks: [{ id: "key", ok: true }] })),
+    "key: present")
+  assert.equal(
+    keyHint(keyState({ contractVersion: 1, checks: [{ id: "key", ok: false, remedy: "run me" }] })),
+    "key: missing. Run: run me")
+})
+
+// A word nothing here knows is not a licence to guess: `ok` answers instead.
+test("an unknown state word falls back to ok", () => {
+  const report = { contractVersion: 1, checks: [{ id: "key", ok: false, state: "sideways" }] }
+  assert.equal(keyHint(keyState(report)), "key: missing")
 })
 
 // A report that never arrived is not a state: the view draws no hint rather

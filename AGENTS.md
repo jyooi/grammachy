@@ -90,7 +90,12 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   The cloud surface of `docs/spec/evals.md` section 7 lives in `ui/settings.js`: the `Cloud LLM (OpenRouter)` row, the `openrouterModel` and `cloudConsent` descriptors, `needsCloudConsent`, `cloudConsentCard`, and the `keyState`/`keyHint` pair the Settings hint draws.
   The consent gate sits on `Overlay.launchCheck`, the one route out to the CLI, so the quick popup, every Chunk of a Draft, and every retry pass through it and the card can never be gone round.
   `Overlay.cloudConsentGiven` answers for the session beside the stored key, because `updateEntryInline` comes back a moment later and a chunked run must not ask twice.
+  Neither card draws the consent over the Settings view, so `onSettingsOpenChanged` cancels the pending Check and `keyMode` answers for `settingsOpen` before the `cloudConsent` phase.
+  That is the same rule `onShowsModelsChanged` keeps for the Models Remove confirm: a question that is off the screen must never still be answerable.
+  `Overlay.pauseChunkClock` and `Overlay.resumeChunkClock` keep the reader's decision time out of the compose progress line, because a chunked Check reaches the card with that clock already running.
   `Overlay.refreshCloudKey` is the only reader of the key state, through `doctor --engine openrouter --json`; no QML may open the key file.
+  The `key` check of the `doctor` envelope carries a `state` word, documented in `docs/doctor.md`, and `ui/settings.js` reads that rather than the prose of `detail`.
+  A key file that exists but cannot be used reads as `loose` or `empty`, which the hint labels apart from a missing key.
   `BarWidget.qml` draws the cloud glyph from `settings`, the inline entry the bar host re-assigns on every write, so the glyph moves with no reload.
   `cli/tests/overlay_cloud.rs` keeps `Overlay.qml`, both cards, `ui/SettingsView.qml`, and the bar widget on those calls, and `ui/settings.test.js` runs the rules and the gate against a counting stub.
 - `grammachy setup` lives in `cli/src/setup/`, spec section 10.

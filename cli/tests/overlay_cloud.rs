@@ -274,6 +274,94 @@ fn the_consent_phase_has_a_key_mode_of_its_own() {
     );
 }
 
+/// A question that is off the screen must never still be answerable. The hero
+/// gear is reachable from every phase and neither card draws the consent over
+/// the Settings view, so opening Settings has to end the question.
+#[test]
+fn opening_settings_cancels_the_pending_consent() {
+    let source = read("Overlay.qml");
+
+    assert!(
+        source.contains(
+            r#"if (root.settingsOpen && root.phase === "cloudConsent") root.cancelCloudCheck()"#
+        ),
+        "opening Settings cancels the Check the consent card was holding"
+    );
+
+    let mode = function_body(&source, "keyMode");
+    let settings = mode
+        .find("root.settingsOpen) return Keymap.MODE_IDLE")
+        .expect("keyMode answers for the Settings view");
+    let consent = mode
+        .find(r#"root.phase === "cloudConsent""#)
+        .expect("keyMode answers for the consent card");
+    assert!(
+        settings < consent,
+        "Settings hides the consent card, so Settings takes the keyboard first: {mode}"
+    );
+
+    // Neither card draws the consent over Settings, which is what makes the
+    // two rules above the whole of the answer.
+    for card in ["ui/QuickCard.qml", "ui/ComposeCard.qml"] {
+        let card_source = read(card);
+        assert!(
+            card_source.contains("readonly property bool consenting: root.showsCard")
+                || card_source.contains("readonly property bool consenting: root.phase"),
+            "{card} declares the consent state"
+        );
+        assert!(
+            !card_source.contains("visible: root.settingsOpen && root.consenting"),
+            "{card} never draws the consent over the Settings view"
+        );
+    }
+}
+
+/// The reader's decision time is not engine time. A chunked Check reaches the
+/// card with the compose progress clock already running, so the card stops it
+/// and Continue starts it again.
+#[test]
+fn the_consent_card_stops_the_compose_progress_clock() {
+    let source = read("Overlay.qml");
+
+    assert!(
+        function_body(&source, "askCloudConsent").contains("root.pauseChunkClock()"),
+        "the card stops the clock before it goes up"
+    );
+    assert!(
+        function_body(&source, "pauseChunkClock").contains("chunkTicker.stop()"),
+        "the pause stops the ticker"
+    );
+
+    let resume = function_body(&source, "resumeChunkClock");
+    assert!(
+        resume.contains("root.chunkStartedAt = Date.now() - root.chunkTickMs")
+            && resume.contains("chunkTicker.start()"),
+        "the resume starts again from what the run had spent: {resume}"
+    );
+
+    let cont = function_body(&source, "continueCloudCheck");
+    let started = cont
+        .find("root.resumeChunkClock()")
+        .expect("Continue starts the clock again");
+    let launch = cont
+        .find("root.launchCheck")
+        .expect("Continue runs the Check");
+    assert!(
+        started < launch,
+        "the clock is running again before the Chunk goes out: {cont}"
+    );
+
+    // Cancel ends the run, so it leaves no ticker behind.
+    assert!(
+        function_body(&source, "cancelCloudCheck").contains("root.clearChunkRun()"),
+        "Cancel ends the chunked run, which stops the ticker"
+    );
+    assert!(
+        function_body(&source, "clearChunkRun").contains("chunkTicker.stop()"),
+        "clearChunkRun stops the ticker"
+    );
+}
+
 /// Both surfaces share one Check, so both have to draw the card and both have
 /// to report its two answers.
 #[test]

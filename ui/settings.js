@@ -176,6 +176,14 @@ function cloudConsentCard(modelId) {
   }
 }
 
+// The state words the `key` check of `grammachy doctor` carries, one per key
+// file state. `cli/src/doctor/report.rs` is the authority on this list.
+var KEY_READY = "ready"
+var KEY_MISSING = "missing"
+var KEY_EMPTY = "empty"
+var KEY_LOOSE = "loose"
+var KEY_NO_HOME = "noHome"
+
 // The OpenRouter key state, read out of one `grammachy doctor --json` report.
 //
 // The key is a 0600 file the CLI owns, so `doctor` is the only reader the
@@ -189,17 +197,35 @@ function keyState(report) {
     if (!isPlainObject(check) || String(check.id) !== "key") continue
     return {
       present: check.ok === true,
+      state: typeof check.state === "string" ? check.state : "",
       remedy: typeof check.remedy === "string" ? check.remedy : ""
     }
   }
   return null
 }
 
+// The label of the hint line, from the state word the `key` check carries.
+//
+// A key file that exists but holds nothing, or that another user can read, is
+// neither present nor missing: the remedy beside it acts on a file that is
+// there. So those two states get a label of their own, and a hint never offers
+// a chmod for a key it calls missing.
+//
+// An older binary sends no state word. Then the pair `ok` names is still the
+// truthful answer, so the label degrades rather than breaks.
+function keyLabel(state) {
+  var word = typeof state.state === "string" ? state.state : ""
+  if (word === KEY_LOOSE || word === KEY_EMPTY) return "key: found, not usable"
+  if (word === KEY_READY) return "key: present"
+  if (word === KEY_MISSING || word === KEY_NO_HOME) return "key: missing"
+  return state.present === true ? "key: present" : "key: missing"
+}
+
 // The hint line under the cloud model field. The setup command is whatever
 // `doctor` named as the remedy, so the two never drift apart.
 function keyHint(state) {
   if (!isPlainObject(state)) return ""
-  var head = state.present === true ? "key: present" : "key: missing"
+  var head = keyLabel(state)
   var remedy = typeof state.remedy === "string" ? state.remedy : ""
   return remedy.length > 0 ? head + ". Run: " + remedy : head
 }
@@ -222,6 +248,7 @@ if (typeof module !== "undefined" && module.exports) {
     needsCloudConsent: needsCloudConsent,
     cloudConsentCard: cloudConsentCard,
     keyState: keyState,
+    keyLabel: keyLabel,
     keyHint: keyHint
   }
 }
