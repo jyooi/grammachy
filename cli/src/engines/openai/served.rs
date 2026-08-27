@@ -31,13 +31,28 @@ pub enum Served {
     Unknown,
 }
 
-/// The model id one `GET /v1/models` answer names.
+/// The model id one `GET /v1/models` answer names, for one requested name.
 ///
 /// llama-server answers with one entry whose `id` is the alias, which defaults
-/// to the weights file it loaded.
-pub fn from_models(raw: &serde_json::Value) -> Option<String> {
-    let id = raw.get("data")?.get(0)?.get("id")?.as_str()?.trim();
-    (!id.is_empty()).then(|| id.to_string())
+/// to the weights file it loaded. Ollama and LM Studio instead list every model
+/// they can serve, in an order this adapter does not decide. So the whole list
+/// is read and an entry that matches the requested name wins. A list that holds
+/// no such entry answers with its first named entry, which is what the refusal
+/// then names.
+pub fn from_models(raw: &serde_json::Value, requested: &str) -> Option<String> {
+    let ids: Vec<&str> = raw
+        .get("data")?
+        .as_array()?
+        .iter()
+        .filter_map(|entry| entry.get("id").and_then(serde_json::Value::as_str))
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .collect();
+
+    ids.iter()
+        .find(|id| matches(id, requested))
+        .or(ids.first())
+        .map(|id| id.to_string())
 }
 
 /// The model id one `GET /props` answer names.
@@ -52,15 +67,18 @@ pub fn from_props(raw: &serde_json::Value) -> Option<String> {
 /// setting on, applied to what the server reported rather than to a directory
 /// listing: the name is a prefix of the weights file name, ignoring case. The
 /// two must agree, because that setting is what picks the file a start loads.
-/// A server names its weights as a path, a file name, or a bare alias, so only
-/// the file name without its `.gguf` suffix is compared.
+/// A server names its weights as a path, a file name, or a bare alias, so both
+/// sides are cut down the same way, to the file name without its `.gguf`
+/// suffix. `model_file` resolves a setting that already carries that suffix, so
+/// the guard must not then call the very file such a start loaded a mismatch.
 pub fn matches(served: &str, requested: &str) -> bool {
-    let requested = requested.trim().to_ascii_lowercase();
+    let requested = file_stem(requested);
     !requested.is_empty() && file_stem(served).starts_with(&requested)
 }
 
 /// The weights file name a server reported, without its directory or suffix.
 pub fn file_stem(served: &str) -> String {
+    let served = served.trim();
     let name = served
         .rsplit(['/', '\\'])
         .next()
@@ -81,7 +99,35 @@ mod tests {
             "data": [{ "id": "qwen3.8-4b-Q4_K_M.gguf", "object": "model" }],
         });
 
-        assert_eq!(from_models(&raw).as_deref(), Some("qwen3.8-4b-Q4_K_M.gguf"));
+        assert_eq!(
+            from_models(&raw, "qwen3.8-4b").as_deref(),
+            Some("qwen3.8-4b-Q4_K_M.gguf")
+        );
+    }
+
+    /// Ollama and LM Studio list every model they can serve, and the order is
+    /// not the client's to pick. The requested one wins wherever it sits.
+    #[test]
+    fn a_list_of_many_models_answers_with_the_one_that_was_asked_for() {
+        let raw = json!({
+            "object": "list",
+            "data": [
+                { "id": "gemma3:latest", "object": "model" },
+                { "id": "qwen3.8-4b:latest", "object": "model" },
+                { "id": "granite-4.2-3b", "object": "model" },
+            ],
+        });
+
+        assert_eq!(
+            from_models(&raw, "qwen3.8-4b").as_deref(),
+            Some("qwen3.8-4b:latest")
+        );
+        // A list that holds none of them names its first entry, so the refusal
+        // can say what the server does hold.
+        assert_eq!(
+            from_models(&raw, "phi-5-mini").as_deref(),
+            Some("gemma3:latest")
+        );
     }
 
     #[test]
@@ -95,7 +141,7 @@ mod tests {
             // answers a probe with.
             json!({ "choices": [{ "message": { "content": "[]" } }] }),
         ] {
-            assert_eq!(from_models(&raw), None, "{raw}");
+            assert_eq!(from_models(&raw, "qwen3.8-4b"), None, "{raw}");
         }
         assert_eq!(from_props(&json!({})), None);
         assert_eq!(from_props(&json!({ "model_path": "" })), None);
@@ -124,6 +170,23 @@ mod tests {
         ] {
             assert!(matches(served, "qwen3.8-4b"), "{served}");
         }
+    }
+
+    /// `model_file` resolves a setting that already carries the suffix, so a
+    /// start loads that exact file. The guard must agree with it.
+    #[test]
+    fn a_requested_name_that_carries_the_gguf_suffix_matches_the_file_it_names() {
+        for served in [
+            "gemma-4-e4b-it-Q4_K_M.gguf",
+            "/models/gemma-4-e4b-it-Q4_K_M.gguf",
+            "gemma-4-e4b-it-q4_k_m",
+        ] {
+            assert!(matches(served, "gemma-4-e4b-it-Q4_K_M.gguf"), "{served}");
+        }
+        assert!(!matches(
+            "granite-4.2-3b-Q4_K_M.gguf",
+            "gemma-4-e4b-it-Q4_K_M.gguf"
+        ));
     }
 
     #[test]

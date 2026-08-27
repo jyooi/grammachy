@@ -1019,13 +1019,6 @@ fn missed_items(set: &SetTables) -> String {
     out
 }
 
-/// The sentence that names where one row's memory number came from.
-///
-/// A row that ran names its own source rather than a rule read off the engine,
-/// because a llama.cpp row on a graphics device and one on the CPU are the same
-/// engine and two different numbers. A skipped row measured nothing, so it has
-/// no source to name and prints no line. `name` arrives quoted, because a
-/// Models row may name its thinking mode outside the backticks.
 /// The line that names the weights the server behind one row actually held.
 ///
 /// A row whose server named no model prints nothing: `openaiBaseUrl` may name
@@ -1039,6 +1032,13 @@ fn served_line(name: &str, outcome: &Outcome) -> String {
     }
 }
 
+/// The sentence that names where one row's memory number came from.
+///
+/// A row that ran names its own source rather than a rule read off the engine,
+/// because a llama.cpp row on a graphics device and one on the CPU are the same
+/// engine and two different numbers. A skipped row measured nothing, so it has
+/// no source to name and prints no line. `name` arrives quoted, because a
+/// Models row may name its thinking mode outside the backticks.
 fn memory_source_line(name: &str, outcome: &Outcome) -> String {
     match outcome {
         Outcome::Skipped(_) => String::new(),

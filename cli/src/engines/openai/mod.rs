@@ -27,7 +27,7 @@ pub mod response;
 pub mod served;
 pub mod unit;
 
-use std::sync::OnceLock;
+use std::sync::Mutex;
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
@@ -127,14 +127,61 @@ impl Config {
 /// adapter's start behaviour is covered without a systemd unit.
 pub type Starter = Box<dyn Fn(&str, &Endpoint) -> Result<(), StartFailure> + Send + Sync>;
 
+/// What the guard does with a server that named another model.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Mismatch {
+    /// Stop the unit, so the start path can load the requested weights.
+    Reload,
+    /// Refuse the Check. A reload already had its turn.
+    Refuse,
+}
+
+/// What one run of the served-model guard decided.
+///
+/// `weights` is what the server named, and `settled` is whether a later probe
+/// may still change the answer. A silent port and a server that named no model
+/// both leave the question open, so neither one settles it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Confirmed {
+    weights: Option<String>,
+    settled: bool,
+}
+
+impl Confirmed {
+    /// The server did not say which weights it holds, so the question is open.
+    fn open() -> Self {
+        Confirmed {
+            weights: None,
+            settled: false,
+        }
+    }
+
+    /// The server named the weights the Check asked for.
+    fn named(weights: String) -> Self {
+        Confirmed {
+            weights: Some(weights),
+            settled: true,
+        }
+    }
+}
+
+/// What the served-model guard found so far.
+///
+/// `verdict` is `None` until the first probe. One adapter is built per bench
+/// row and per `check` run, so the first probe is once per row and once per
+/// Check of the shell. A settled verdict is never asked again, which is what
+/// keeps a 365-item row at a small constant number of probes.
+#[derive(Default)]
+struct Guard {
+    verdict: Option<Result<Option<String>, EngineFailure>>,
+    settled: bool,
+}
+
 pub struct Openai {
     config: Config,
     starter: Starter,
     stopper: Stopper,
-    /// What the served-model guard found, filled by the first Check and read by
-    /// every later one. One adapter is built per bench row and per `check`
-    /// run, so this is once per row and once per Check of the shell.
-    served: OnceLock<Result<Option<String>, EngineFailure>>,
+    served: Mutex<Guard>,
 }
 
 impl Openai {
@@ -145,7 +192,7 @@ impl Openai {
                 unit::start(model, endpoint.bind_host(), endpoint.port)
             }),
             stopper: model::stopper(),
-            served: OnceLock::new(),
+            served: Mutex::default(),
         }
     }
 
@@ -155,7 +202,7 @@ impl Openai {
             config,
             starter,
             stopper: model::stopper(),
-            served: OnceLock::new(),
+            served: Mutex::default(),
         }
     }
 
@@ -168,7 +215,7 @@ impl Openai {
             config,
             starter,
             stopper,
-            served: OnceLock::new(),
+            served: Mutex::default(),
         }
     }
 
@@ -176,13 +223,27 @@ impl Openai {
     ///
     /// `None` until the first Check, and `None` for a server that names no
     /// model. A benchmark row prints this beside the name it asked for, so the
-    /// file says what was measured rather than only what was requested.
+    /// file says what was measured rather than only what was requested. A row
+    /// whose port was silent until the start path brought a server up reports
+    /// what that server named, because the guard asks it again once it answers.
     pub fn served_weights(&self) -> Option<String> {
-        self.served
-            .get()
-            .and_then(|outcome| outcome.as_ref().ok())
+        self.guard()
+            .verdict
+            .as_ref()
+            .and_then(|verdict| verdict.as_ref().ok())
             .cloned()
             .flatten()
+    }
+
+    /// The guard state, whatever an earlier panic left behind.
+    ///
+    /// A poisoned lock says a Check panicked, and the worst a stale verdict
+    /// costs is one more probe. That is a better answer than a panic of its own
+    /// inside an engine adapter.
+    fn guard(&self) -> std::sync::MutexGuard<'_, Guard> {
+        self.served
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
     /// One POST to the chat completions of the endpoint.
@@ -286,7 +347,8 @@ impl Openai {
         let Ok(raw) = serde_json::from_str::<serde_json::Value>(&text) else {
             return Served::Unknown;
         };
-        match served::from_models(&raw).or_else(|| served::from_props(&raw)) {
+        match served::from_models(&raw, &options.openai_model).or_else(|| served::from_props(&raw))
+        {
             Some(id) => Served::Id(id),
             None => Served::Unknown,
         }
@@ -305,21 +367,83 @@ impl Openai {
         found
     }
 
-    /// The served-model guard: confirm the weights before the first Check.
+    /// The served-model guard before the first Check of this adapter's life.
     ///
-    /// A silent port needs no guard, because the start path below brings the
-    /// server up with `openaiModel` itself. A server that names no model is an
-    /// open question rather than a mismatch, and an open question never refuses
-    /// a Check.
+    /// A silent port and a server that names no model both leave the question
+    /// open rather than refuse the Check: the start path brings a server up
+    /// with `openaiModel` itself, and `openaiBaseUrl` may name any
+    /// OpenAI-compatible server, of which only llama-server says what it holds.
+    /// Neither answer settles anything, so [`Self::confirm_started`] asks again
+    /// once a server does answer.
+    fn confirm(&self, endpoint: &Endpoint, options: &CheckOptions) -> Result<(), EngineFailure> {
+        let mut guard = self.guard();
+        if let Some(verdict) = guard.verdict.clone() {
+            return verdict.map(drop);
+        }
+        self.store(&mut guard, endpoint, options, Mismatch::Reload)
+    }
+
+    /// The served-model guard after the start path brought a server up.
+    ///
+    /// A silent port and a port still reading its weights both answered the
+    /// first probe with nothing final, so the answer in hand was measured
+    /// against weights this adapter never confirmed. Asking again is what
+    /// closes that window.
+    ///
+    /// This second question refuses a named mismatch rather than reloading it.
+    /// The adapter has just started the server for `openaiModel` and the port
+    /// still holds another model, so no further stop of the unit can reload it.
+    fn confirm_started(
+        &self,
+        endpoint: &Endpoint,
+        options: &CheckOptions,
+    ) -> Result<(), EngineFailure> {
+        let mut guard = self.guard();
+        if guard.settled {
+            return guard.verdict.clone().unwrap_or(Ok(None)).map(drop);
+        }
+        self.store(&mut guard, endpoint, options, Mismatch::Refuse)
+    }
+
+    /// Probe the server and record what it answered.
+    ///
+    /// Only a settled verdict is final. An open one is kept for the report and
+    /// asked again at the one boundary that can change it, so a server that
+    /// names no model still costs one probe rather than one per sentence.
+    fn store(
+        &self,
+        guard: &mut Guard,
+        endpoint: &Endpoint,
+        options: &CheckOptions,
+        on_mismatch: Mismatch,
+    ) -> Result<(), EngineFailure> {
+        let outcome = self.verify_served(endpoint, options, on_mismatch);
+        guard.settled = outcome.as_ref().is_ok_and(|it| it.settled) || outcome.is_err();
+        guard.verdict = Some(
+            outcome
+                .as_ref()
+                .map(|it| it.weights.clone())
+                .map_err(Clone::clone),
+        );
+        outcome.map(drop)
+    }
+
+    /// One probe, and the verdict it earns.
     fn verify_served(
         &self,
         endpoint: &Endpoint,
         options: &CheckOptions,
-    ) -> Result<Option<String>, EngineFailure> {
+        on_mismatch: Mismatch,
+    ) -> Result<Confirmed, EngineFailure> {
         match self.probe(endpoint, options) {
-            Served::Id(id) if served::matches(&id, &options.openai_model) => Ok(Some(id)),
+            Served::Id(id) if served::matches(&id, &options.openai_model) => {
+                Ok(Confirmed::named(id))
+            }
+            Served::Id(id) if on_mismatch == Mismatch::Refuse => {
+                Err(mismatch(endpoint, &id, &options.openai_model))
+            }
             Served::Id(id) => self.reload(endpoint, options, &id),
-            Served::Silent | Served::Unknown => Ok(None),
+            Served::Silent | Served::Unknown => Ok(Confirmed::open()),
         }
     }
 
@@ -336,7 +460,7 @@ impl Openai {
         endpoint: &Endpoint,
         options: &CheckOptions,
         was: &str,
-    ) -> Result<Option<String>, EngineFailure> {
+    ) -> Result<Confirmed, EngineFailure> {
         if !self.config.start_unit {
             return Err(mismatch(endpoint, was, &options.openai_model));
         }
@@ -346,10 +470,12 @@ impl Openai {
         loop {
             match self.probe(endpoint, options) {
                 Served::Id(id) if served::matches(&id, &options.openai_model) => {
-                    return Ok(Some(id))
+                    return Ok(Confirmed::named(id))
                 }
                 // The port is free, so the start path loads the right weights.
-                Served::Silent => return Ok(None),
+                // What it loads is still unconfirmed, so the question stays
+                // open until that server answers.
+                Served::Silent => return Ok(Confirmed::open()),
                 _ if Instant::now() >= deadline => {
                     return Err(mismatch(endpoint, was, &options.openai_model))
                 }
@@ -417,16 +543,19 @@ impl Engine for Openai {
 
         // Before the first Check: the server must hold the weights that were
         // asked for. Nothing is measured or checked against another model.
-        self.served
-            .get_or_init(|| self.verify_served(&endpoint, options))
-            .clone()?;
+        self.confirm(&endpoint, options)?;
 
         let body = prompt::request_body(text, options, force_of(options)).to_string();
 
         let answer = match self.request(&endpoint, options, &body) {
             Err(EngineFailure::Unavailable(message)) => {
                 if self.config.start_unit {
-                    self.start_and_retry(&endpoint, options, &body)?
+                    let answer = self.start_and_retry(&endpoint, options, &body)?;
+                    // A server came up, or a loading one finished. Either way
+                    // the probe above settled nothing, so ask again and throw
+                    // this answer away when the weights are the wrong ones.
+                    self.confirm_started(&endpoint, options)?;
+                    answer
                 } else {
                     return Err(EngineFailure::Unavailable(message));
                 }

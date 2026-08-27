@@ -44,7 +44,10 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   `cli/src/engines/openai/served.rs` is the whole guard against that (HUF-236): the adapter reads `GET /v1/models` and then `GET /props` once, before its first Check, and `served::matches` compares what the server named with `openaiModel` on the prefix rule `unit::model_file` uses.
   A named mismatch stops the unit through the `Stopper` value and lets the start path load the right weights; a port that still holds the wrong model is `bad_arguments` naming both.
   A server that names no model is checked as before, because `openaiBaseUrl` accepts any OpenAI-compatible server.
-  The answer is cached per adapter, and one adapter is built per bench row and per `check` run, so a 365-item row pays one probe.
+  `served::from_models` reads the whole `data` list and prefers an entry that matches, because Ollama and LM Studio list every model they can serve.
+  Only a named answer settles the question: a silent port and a port that answers HTTP 503 while it reads its weights both leave it open.
+  So `Openai::confirm_started` asks again after the start path has a server up, and that second question refuses a mismatch rather than reloading one.
+  Only a settled answer is cached, and one adapter is built per bench row and per `check` run, so a 365-item row pays a small constant number of probes.
   `Engine::served_model` carries it to `Measurement::served`, which is the "Weights served for" line under both bench tables.
   Every stub of `cli/tests/bench.rs` and `cli/tests/openai_stub.rs` therefore has to route on the request line: a probe is not a Check and must not reach the counters.
 - The `openai` base URL host must be loopback, and `cli/src/engines/openai/endpoint.rs` is the only place that decides it.

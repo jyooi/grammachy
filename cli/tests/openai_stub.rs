@@ -62,6 +62,18 @@ impl Stub {
     /// The same stub, naming the weights it serves to the probe.
     fn holding(answer: Answer, served: ServedModel) -> Stub {
         let listener = TcpListener::bind("127.0.0.1:0").expect("a loopback port is free");
+        Stub::on(listener, answer, served)
+    }
+
+    /// The same stub on a port a test already knows, which is how a starter
+    /// brings a server up on a port that was silent a moment ago.
+    fn on_port(port: u16, answer: Answer, served: ServedModel) -> Stub {
+        let listener =
+            TcpListener::bind(("127.0.0.1", port)).expect("the silent port is free again");
+        Stub::on(listener, answer, served)
+    }
+
+    fn on(listener: TcpListener, answer: Answer, served: ServedModel) -> Stub {
         let address = listener
             .local_addr()
             .expect("the port is known")
@@ -321,13 +333,24 @@ fn adapter_with_budget(
 /// No case may reach the unit the live shell uses, so the stopper is the test's
 /// own here exactly as the starter is.
 fn adapter_with_stopper(start_unit: bool, starts: &Starts, stops: &Stops) -> Openai {
+    adapter_with_stopper_and_budget(start_unit, Duration::from_millis(0), starts, stops)
+}
+
+/// The same adapter with a startup budget, for the cases where the server does
+/// come up, or finishes loading, on a later request.
+fn adapter_with_stopper_and_budget(
+    start_unit: bool,
+    startup_budget: Duration,
+    starts: &Starts,
+    stops: &Stops,
+) -> Openai {
     let started = Arc::clone(&starts.0);
     let stopped = Arc::clone(&stops.0);
     Openai::with_server_control(
         Config {
             timeout: Duration::from_secs(2),
             start_unit,
-            startup_budget: Duration::from_millis(0),
+            startup_budget,
         },
         Box::new(move |_model: &str, _endpoint: &Endpoint| {
             started.fetch_add(1, Ordering::SeqCst);
@@ -345,6 +368,15 @@ fn options(base_url: &str) -> CheckOptions {
         openai_base_url: base_url.to_string(),
         ..CheckOptions::default()
     }
+}
+
+/// The port half of one `host:port` address.
+fn port_of(address: &str) -> u16 {
+    address
+        .rsplit(':')
+        .next()
+        .and_then(|port| port.parse().ok())
+        .expect("the address names a port")
 }
 
 /// An address on the loopback interface with nothing listening on it.
@@ -851,4 +883,146 @@ fn a_silent_port_is_started_rather_than_refused() {
         matches!(failure, EngineFailure::Unavailable(_)),
         "{failure:?}"
     );
+}
+
+/// An adapter whose starter brings a stub up on a port that is silent now.
+///
+/// That is the bench path: the run stops the unit before a Models row, so the
+/// row's adapter probes a port with nothing on it and learns nothing from it.
+fn adapter_that_brings_up(
+    port: u16,
+    served: &'static str,
+    held: &Arc<std::sync::Mutex<Option<Stub>>>,
+    stops: &Stops,
+) -> Openai {
+    let slot = Arc::clone(held);
+    let stopped = Arc::clone(&stops.0);
+    Openai::with_server_control(
+        Config {
+            timeout: Duration::from_secs(2),
+            start_unit: true,
+            startup_budget: Duration::from_secs(5),
+        },
+        Box::new(move |_model: &str, _endpoint: &Endpoint| {
+            let mut slot = slot.lock().expect("the stub slot is readable");
+            if slot.is_none() {
+                *slot = Some(Stub::on_port(port, Answer::Json(ANSWER), Some(served)));
+            }
+            Ok(())
+        }),
+        Box::new(move |_unit: &str| {
+            stopped.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }),
+    )
+}
+
+/// A silent port answers the guard nothing, so the answer is not the final one.
+/// Once the start path has a server up, the guard asks it what it holds, and
+/// the row can name the weights it was measured on.
+#[test]
+fn a_server_the_start_path_brought_up_is_asked_what_it_serves() {
+    let address = silent_address();
+    let held = Arc::new(std::sync::Mutex::new(None));
+    let stops = Stops::default();
+    let served = "qwen3.8-4b-Q4_K_M.gguf";
+    let adapter = adapter_that_brings_up(port_of(&address), served, &held, &stops);
+
+    let issues = adapter
+        .check(TEXT, &options(&format!("http://{address}")))
+        .expect("the started server answers");
+
+    assert_eq!(issues.len(), 1);
+    assert_eq!(
+        adapter.served_weights().as_deref(),
+        Some(served),
+        "the row names what the server it started actually held"
+    );
+    assert_eq!(stops.count(), 0, "nothing disagreed, so nothing reloaded");
+}
+
+/// The other half of the same window. The server the start path brought up
+/// holds another model, so the answer it already gave is thrown away and the
+/// Check refuses rather than reporting a quality those weights never produced.
+#[test]
+fn a_started_server_that_holds_another_model_refuses_the_check() {
+    let address = silent_address();
+    let held = Arc::new(std::sync::Mutex::new(None));
+    let stops = Stops::default();
+    let adapter = adapter_that_brings_up(
+        port_of(&address),
+        "granite-4.2-3b-Q4_K_M.gguf",
+        &held,
+        &stops,
+    );
+
+    let failure = adapter
+        .check(TEXT, &options(&format!("http://{address}")))
+        .expect_err("the started server holds another model");
+
+    match failure {
+        EngineFailure::BadArguments(message) => {
+            assert!(message.contains("granite-4.2-3b-Q4_K_M.gguf"), "{message}");
+            assert!(message.contains(REQUESTED), "{message}");
+        }
+        other => panic!("expected bad_arguments, got {other:?}"),
+    }
+    assert_eq!(
+        adapter.served_weights(),
+        None,
+        "a refused Check names no weights"
+    );
+    let stub = held.lock().expect("the stub slot is readable");
+    let checks = stub
+        .as_ref()
+        .expect("the starter brought a stub up")
+        .checks();
+    assert_eq!(
+        checks.len(),
+        1,
+        "the one answer the wrong weights gave is thrown away: {checks:?}"
+    );
+}
+
+/// llama.cpp answers HTTP 503 while it reads its weights, so a probe of a
+/// loading server learns nothing either. The guard asks again once the load
+/// finishes, which is what keeps the original HUF-236 failure out of that
+/// window.
+#[test]
+fn a_server_that_was_still_loading_is_asked_again_once_it_answers() {
+    let served = "qwen3.8-4b-Q4_K_M.gguf";
+    let stub = Stub::holding(Answer::LoadingThenJson(1, ANSWER), Some(served));
+    let (starts, stops) = (Starts::default(), Stops::default());
+    let adapter = adapter_with_stopper_and_budget(true, Duration::from_secs(5), &starts, &stops);
+
+    let issues = adapter
+        .check(TEXT, &options(&stub.base_url()))
+        .expect("the server finishes loading and answers");
+
+    assert_eq!(issues.len(), 1);
+    assert_eq!(adapter.served_weights().as_deref(), Some(served));
+}
+
+/// The same window, with the wrong weights behind it.
+#[test]
+fn a_server_that_finished_loading_another_model_refuses_the_check() {
+    let stub = Stub::holding(
+        Answer::LoadingThenJson(1, ANSWER),
+        Some("granite-4.2-3b-Q4_K_M.gguf"),
+    );
+    let (starts, stops) = (Starts::default(), Stops::default());
+    let adapter = adapter_with_stopper_and_budget(true, Duration::from_secs(5), &starts, &stops);
+
+    let failure = adapter
+        .check(TEXT, &options(&stub.base_url()))
+        .expect_err("the loaded weights are another model");
+
+    match failure {
+        EngineFailure::BadArguments(message) => {
+            assert!(message.contains("granite-4.2-3b-Q4_K_M.gguf"), "{message}");
+            assert!(message.contains(REQUESTED), "{message}");
+        }
+        other => panic!("expected bad_arguments, got {other:?}"),
+    }
+    assert_eq!(adapter.served_weights(), None);
 }
