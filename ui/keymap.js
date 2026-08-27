@@ -35,6 +35,11 @@ var MODE_IDLE = "idle"
 var MODE_REVIEW = "review"
 var MODE_COMPOSE_EDIT = "composeEdit"
 var MODE_COMPOSE_REVIEW = "composeReview"
+// The quick popup cards that carry the Clear button and no Issues to decide,
+// spec section 6: the Check in flight, the failure card, the notice, and a
+// result with nothing to fix. Esc leaves and Ctrl + L clears; nothing else is
+// on offer there, because there is nothing to accept, skip, copy, or apply.
+var MODE_QUICK_CLEAR = "quickClear"
 // The Remove confirm of the Models list, spec section 7. It sits over the
 // Settings view, which owns every other key, so this mode carries the two
 // answers to that one question and nothing else.
@@ -90,9 +95,11 @@ function action(event, codes, mode) {
   if (mode === MODE_COMPOSE_EDIT) return control && enter ? CHECK : NONE
 
   // Clear is the popup's alone, spec section 6: it drops the capture and the
-  // review that came with it. Compose has a Draft behind its review and keeps
-  // it, so the same press must not reach there.
-  if (mode === MODE_REVIEW && control && key === codes.l) return CLEAR
+  // review that came with it. It reaches every quick card that draws the Clear
+  // button, so the button and the key agree. Compose has a Draft behind its
+  // review and keeps it, so the same press must not reach there.
+  if (control && key === codes.l)
+    return mode === MODE_REVIEW || mode === MODE_QUICK_CLEAR ? CLEAR : NONE
 
   if (mode !== MODE_REVIEW && mode !== MODE_COMPOSE_REVIEW) return NONE
 
@@ -133,6 +140,7 @@ if (typeof module !== "undefined" && module.exports) {
     MODE_REVIEW: MODE_REVIEW,
     MODE_COMPOSE_EDIT: MODE_COMPOSE_EDIT,
     MODE_COMPOSE_REVIEW: MODE_COMPOSE_REVIEW,
+    MODE_QUICK_CLEAR: MODE_QUICK_CLEAR,
     MODE_MODEL_CONFIRM: MODE_MODEL_CONFIRM,
     MODE_CLOUD_CONSENT: MODE_CLOUD_CONSENT
   }

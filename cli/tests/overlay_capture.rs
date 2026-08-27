@@ -15,15 +15,15 @@ fn read(relative: &str) -> String {
     std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("{relative} is readable: {error}"))
 }
 
-/// The body of one `function <name>(...)` in a QML or JavaScript file.
-fn function_body(source: &str, name: &str) -> String {
-    let needle = format!("function {name}(");
+/// The balanced `{ ... }` block that follows `needle`, which is how a QML
+/// handler such as `onExited` is read as well as a `function`.
+fn block_after(source: &str, needle: &str, label: &str) -> String {
     let start = source
-        .find(&needle)
-        .unwrap_or_else(|| panic!("the source declares {name}"));
+        .find(needle)
+        .unwrap_or_else(|| panic!("the source declares {label}"));
     let open = source[start..]
         .find('{')
-        .unwrap_or_else(|| panic!("{name} has a body"))
+        .unwrap_or_else(|| panic!("{label} has a body"))
         + start;
 
     let mut depth = 0usize;
@@ -39,7 +39,12 @@ fn function_body(source: &str, name: &str) -> String {
             _ => {}
         }
     }
-    panic!("{name} has a closing brace")
+    panic!("{label} has a closing brace")
+}
+
+/// The body of one `function <name>(...)` in a QML or JavaScript file.
+fn function_body(source: &str, name: &str) -> String {
+    block_after(source, &format!("function {name}("), name)
 }
 
 /// The bug: the compositor keeps the last primary selection, so a summon with
@@ -139,6 +144,53 @@ fn the_primary_selection_is_released_when_the_popup_closes() {
     );
 }
 
+/// Spec sections 2 and 3: Compose captures nothing, so a Compose that closes
+/// owns no primary selection to release and no capture to record. `resetRun`
+/// drops the source window and leaves the text of the run before it in place,
+/// so the text alone cannot say whether this run captured.
+#[test]
+fn a_run_that_captured_nothing_records_nothing_and_releases_nothing() {
+    let source = read("Overlay.qml");
+
+    assert!(
+        source.contains("property bool runCaptured: false"),
+        "the overlay records whether this run took a Selection"
+    );
+    assert!(
+        function_body(&source, "captured").contains("root.runCaptured = true"),
+        "the one step that takes a Selection is what arms it"
+    );
+    assert!(
+        function_body(&source, "resetRun").contains("root.runCaptured = false"),
+        "and every summon starts with nothing captured"
+    );
+    assert!(
+        !function_body(&source, "showCompose").contains("root.runCaptured = true"),
+        "Compose takes no Selection of its own"
+    );
+    assert!(
+        !function_body(&source, "showNothingNew").contains("root.runCaptured = true"),
+        "and a summon that found nothing new took none either"
+    );
+
+    // Both steps of the close sit behind that one question, so a surface that
+    // captured nothing takes nothing away.
+    let close = function_body(&source, "close");
+    let asked = close
+        .find("if (root.runCaptured)")
+        .expect("the close asks whether this run captured");
+    let recorded = close
+        .find("root.consumeCapture(")
+        .expect("the close records the capture");
+    let released = close
+        .find("root.releasePrimary()")
+        .expect("the close releases the selection");
+    assert!(
+        asked < recorded && asked < released,
+        "the record and the release both sit behind it: {close}"
+    );
+}
+
 /// Replace is the one path that outlives the close: it closes the popup, asks
 /// for the source window, and only then types over the highlight that is still
 /// there. Releasing the primary selection at the close would take that
@@ -153,17 +205,20 @@ fn a_replace_holds_the_release_back_until_it_has_typed() {
         "a Replace still to type holds the release back: {release}"
     );
 
-    assert!(
-        source.contains("root.replacePending = true"),
-        "the Replace path arms that wait before it closes the popup"
-    );
-    let armed = source
+    // Both steps sit in the one `wl-copy` exit handler, so the two offsets are
+    // measured inside that block alone. A whole-file search would find some
+    // later `root.close()` whatever the order in the handler is.
+    let copied = source
+        .find("id: copyProcess")
+        .expect("the overlay copies the Corrected text with wl-copy");
+    let exited = block_after(&source[copied..], "onExited", "the wl-copy exit handler");
+    let armed = exited
         .find("root.replacePending = true")
         .expect("the Replace arms the wait");
-    let closed = source[armed..]
+    let closed = exited
         .find("root.close()")
-        .expect("the Replace closes the popup after it");
-    assert!(closed > 0, "the wait is armed before the close");
+        .expect("the Replace closes the popup");
+    assert!(armed < closed, "the wait is armed before the close: {exited}");
 
     // The keystroke is what ends it, and a Replace that never types must not
     // leave the release waiting for ever.
@@ -292,6 +347,25 @@ fn clear_is_reachable_from_the_key_map_and_from_the_hero() {
     assert!(
         source.contains("onClearRequested: root.clearCapture()"),
         "the hero button lands on the same one"
+    );
+
+    // The button shows on every quick card but the empty state and the
+    // too-long card, so the key has to reach the same set. The review mode
+    // covers a result with Issues; this mode covers the rest.
+    let mode = function_body(&source, "keyMode");
+    assert!(
+        mode.contains("Keymap.MODE_QUICK_CLEAR"),
+        "a quick card with no Issues to decide still answers Ctrl + L: {mode}"
+    );
+    for phase in ["checking", "error", "notice"] {
+        assert!(
+            mode.contains(&format!("root.phase === \"{phase}\"")),
+            "the {phase} card is one of them: {mode}"
+        );
+    }
+    assert!(
+        !mode.contains("root.phase === \"empty\"") && !mode.contains("root.phase === \"toolong\""),
+        "and the two cards that draw no Clear button are not: {mode}"
     );
 
     let card = read("ui/QuickCard.qml");

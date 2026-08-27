@@ -99,18 +99,45 @@ function nothingNew(run) {
 // `Overlay.consumeCapture`: the record the next summon is measured against,
 // and nothing else. The compositor is not touched here.
 function consume(box, text, address) {
+  if (typeof text !== "string" || text.length === 0) return
   if (Capture.isStale(text, address, box.last)) return
   box.last = Capture.kept(text, address)
 }
 
-// `Overlay.close` and `Overlay.releasePrimary`: the run is over, so the
-// primary selection it came from goes. A Replace still to type holds it back,
-// because the source window keeps the highlight it is about to paste over.
-function closePopup(box, run) {
+// `Overlay.releasePrimary`: the primary selection goes. A Replace still to
+// type holds it back, because the source window keeps the highlight it is
+// about to paste over.
+function release(box, run) {
   if (box.replacePending) return run
   box.primary = ""
   run.released += 1
   return run
+}
+
+// `Overlay.close`: a run that captured is over, so what it captured is
+// recorded and the primary selection it came from goes. A run that captured
+// nothing owns no selection, so it records none and takes none away.
+function closePopup(box, run) {
+  if (!run.captured) return run
+  consume(box, run.capturedText, run.address)
+  return release(box, run)
+}
+
+// `Overlay.showCompose`: SUPER + SHIFT + G opens Compose on the kept Draft and
+// captures nothing at all. `Overlay.resetRun` drops the source window of the
+// run before it and leaves that run's text in place, which is why the text
+// alone cannot say whether this run captured.
+function showCompose(previous) {
+  const before = previous || {}
+  return {
+    phase: "editing",
+    surface: "compose",
+    capturedText: before.capturedText === undefined ? "" : before.capturedText,
+    address: "",
+    captured: false,
+    issues: null,
+    released: 0
+  }
 }
 
 // `Overlay.applyCorrected` with auto-replace on: the popup closes, the source
@@ -128,7 +155,15 @@ function replace(box, run) {
 // window, then the primary selection of step 1, then the Ctrl + C fallback of
 // step 2, then the freshness rule, then one Check.
 function summon(binary, box) {
-  const run = { phase: "capturing", capturedText: "", issues: null, released: 0 }
+  const run = {
+    phase: "capturing",
+    surface: "quick",
+    capturedText: "",
+    address: "",
+    captured: false,
+    issues: null,
+    released: 0
+  }
 
   const address = box.address
   box.reads += 1
@@ -151,6 +186,8 @@ function summon(binary, box) {
   if (Capture.isStale(text, address, box.last)) return nothingNew(run)
 
   run.capturedText = text
+  run.address = address
+  run.captured = true
   consume(box, text, address)
   return check(binary, text, run)
 }
@@ -166,7 +203,15 @@ function check(binary, text, run) {
 
 // `Overlay.checkLastAgain`: the kept text with no capture at all.
 function checkLastAgain(binary, box) {
-  const run = { phase: "checking", capturedText: box.last.text, issues: null, released: 0 }
+  const run = {
+    phase: "checking",
+    surface: "quick",
+    capturedText: box.last.text,
+    address: "",
+    captured: false,
+    issues: null,
+    released: 0
+  }
   if (box.last.text.length === 0) return nothingNew(run)
   return check(binary, box.last.text, run)
 }
@@ -178,9 +223,9 @@ function clearCapture(box, run) {
   run.issues = null
   run.focusIndex = 0
   run.applied = false
-  // Clear ends the run, so the selection it came from goes the same way a
-  // close releases it.
-  closePopup(box, run)
+  // Clear ends a quick run that did capture, so the selection it came from
+  // goes the same way a close releases it.
+  release(box, run)
   return nothingNew(run)
 }
 
@@ -248,6 +293,40 @@ test("a Replace types over the selection before the release takes it", () => {
     "the highlight was still there when the keystroke landed")
   assert.equal(run.released, 1)
   assert.equal(box.primary, "", "and it goes once the keystroke is out")
+})
+
+// Spec sections 2 and 3: SUPER + SHIFT + G opens Compose and captures nothing.
+// A terminal drops its own highlight when it loses primary ownership, so a
+// surface that took no Selection must take none away either.
+test("a Compose that closes releases nothing and records nothing", () => {
+  const box = machine({ primary: "Their going to the park." })
+
+  const run = closePopup(box, showCompose())
+
+  assert.equal(run.released, 0)
+  assert.equal(box.primary, "Their going to the park.", "the highlight is still there")
+  assert.equal(box.last.text, "", "and nothing was recorded as consumed")
+})
+
+// The hero's Compose button opens Compose over a quick run that did capture.
+// Compose keeps that run's text and drops its source window, so a close that
+// recorded the pair would file the text against no window and lose the
+// compare the next summon rests on.
+test("a Compose opened after a Check leaves the kept record whole", () => {
+  const binary = stub("compose-after-check")
+  const box = machine({ primary: "Their going to the park." })
+
+  const first = summon(binary, box)
+  assert.equal(first.phase, "result")
+  assert.equal(checkCount("compose-after-check"), 1)
+
+  closePopup(box, showCompose(first))
+
+  // The compositor still holds the same selection from the same window.
+  box.primary = "Their going to the park."
+  const second = summon(binary, box)
+  assert.equal(second.phase, "empty", "the same text from the same window is still stale")
+  assert.equal(checkCount("compose-after-check"), 1, "and no second Check ran")
 })
 
 test("a different selection from the same window is fresh", () => {

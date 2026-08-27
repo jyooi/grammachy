@@ -122,7 +122,7 @@ Run the whole key map of spec section 6 on the same card:
 | A | Accept every open Issue |
 | Ctrl + C | Copy the Corrected text |
 | Ctrl + Enter | Apply: copy, or replace when auto-replace is on |
-| Ctrl + L | Clear the capture and the review, popup open |
+| Ctrl + L | Clear the capture and the review, popup open. It works on every quick card that shows the `Clear` button |
 | Esc | Close the popup |
 
 Ctrl + C and Ctrl + Enter stay off until one Fix is accepted, the same as the Apply button.

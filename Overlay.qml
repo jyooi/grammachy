@@ -169,6 +169,11 @@ Item {
   // source window keeps its highlight until then, so the primary selection is
   // held back until the keystroke is out.
   property bool replacePending: false
+  // This run took a Selection from a source window, spec section 3. Compose
+  // captures nothing, and a summon that found nothing new took nothing either.
+  // Neither of those owns the primary selection, so neither may record a
+  // capture or release one when it closes.
+  property bool runCaptured: false
 
   // ------------------------------------------------------------- models
   //
@@ -397,11 +402,16 @@ Item {
     // A chunked run launches one Check after another, so a card that is gone
     // must not leave one walking the rest of the Draft.
     root.cancelChunkRun()
-    // Spec section 3: the run is over, whether it ended in Apply, Replace,
-    // Clear, or Close, so what it captured is recorded and the primary
-    // selection it came from is released.
-    root.consumeCapture(root.capturedText, Anchor.windowAddress(root.sourceWindow))
-    root.releasePrimary()
+    // Spec section 3: a run that captured is over, whether it ended in Apply,
+    // Replace, Clear, or Close, so what it captured is recorded and the primary
+    // selection it came from is released. A run that captured nothing owns no
+    // selection, so it takes none away and records none. `resetRun` leaves
+    // `capturedText` in place while it drops the source window, so the text
+    // alone cannot answer this.
+    if (root.runCaptured) {
+      root.consumeCapture(root.capturedText, Anchor.windowAddress(root.sourceWindow))
+      root.releasePrimary()
+    }
     root.opened = false
   }
 
@@ -465,6 +475,8 @@ Item {
     root.sourceWindow = null
     // Whatever the last Replace was waiting on, this summon is not it.
     root.replacePending = false
+    // This summon has captured nothing yet, so it owns no primary selection.
+    root.runCaptured = false
     // Spec section 5.3: closing the overlay does not cancel a download, so a
     // summon leaves `models`, `modelBusy`, and the process in flight alone. The
     // confirm is a question about a card that is gone, so it goes.
@@ -624,6 +636,7 @@ Item {
     }
     root.capturedText = text
     root.truncated = false
+    root.runCaptured = true
     root.consumeCapture(text, address)
     root.runCheck(text)
   }
@@ -1639,6 +1652,13 @@ Item {
       return Keymap.MODE_IDLE
     }
     if (root.phase === "result" && root.issues.length > 0) return Keymap.MODE_REVIEW
+    // Spec section 6: the quick cards that carry the Clear button and no Issues
+    // to decide answer Esc and Ctrl + L, and nothing else. `ui/QuickCard.qml`
+    // draws that button on these four phases and on no other, so the button and
+    // the key reach exactly the same cards.
+    if (root.phase === "checking" || root.phase === "error"
+      || root.phase === "notice" || root.phase === "result")
+      return Keymap.MODE_QUICK_CLEAR
     return Keymap.MODE_IDLE
   }
 

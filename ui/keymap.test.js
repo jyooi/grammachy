@@ -40,6 +40,7 @@ const editing = inMode(Keymap.MODE_COMPOSE_EDIT)
 const composeReview = inMode(Keymap.MODE_COMPOSE_REVIEW)
 const confirming = inMode(Keymap.MODE_MODEL_CONFIRM)
 const consenting = inMode(Keymap.MODE_CLOUD_CONSENT)
+const quickClear = inMode(Keymap.MODE_QUICK_CLEAR)
 
 test("every key of the map answers its own action", () => {
   assert.equal(reviewing(CODES.returnKey), Keymap.ACCEPT)
@@ -64,11 +65,35 @@ test("Ctrl + L clears the popup and nothing else does", () => {
 
 // Clear is the popup's alone: Compose keeps a Draft behind its review, and
 // spec section 6 says the Draft is the one thing Clear never touches.
-test("Ctrl + L reaches no card but the popup review", () => {
+test("Ctrl + L reaches no Compose card and no confirm", () => {
   assert.equal(composeReview(CODES.l, CODES.control), Keymap.NONE)
   assert.equal(editing(CODES.l, CODES.control), Keymap.NONE)
   assert.equal(idle(CODES.l, CODES.control), Keymap.NONE)
   assert.equal(confirming(CODES.l, CODES.control), Keymap.NONE)
+})
+
+// Spec section 6: the quick cards that draw the Clear button but hold no
+// Issues answer the key too, so the button and the shortcut agree.
+test("a quick card with nothing to decide still clears", () => {
+  assert.equal(quickClear(CODES.l, CODES.control), Keymap.CLEAR)
+  assert.equal(quickClear(CODES.escape), Keymap.CLOSE)
+})
+
+// That mode has no Issues, so it offers none of the review answers.
+test("a quick card with nothing to decide answers Esc and Ctrl + L alone", () => {
+  assert.equal(quickClear(CODES.returnKey), Keymap.NONE)
+  assert.equal(quickClear(CODES.enter), Keymap.NONE)
+  assert.equal(quickClear(CODES.space), Keymap.NONE)
+  assert.equal(quickClear(CODES.up), Keymap.NONE)
+  assert.equal(quickClear(CODES.down), Keymap.NONE)
+  assert.equal(quickClear(CODES.a), Keymap.NONE)
+  assert.equal(quickClear(CODES.c, CODES.control), Keymap.NONE)
+  assert.equal(quickClear(CODES.returnKey, CODES.control), Keymap.NONE)
+  // A stray L with no Ctrl, and a Ctrl + L the compositor also claimed, are
+  // not the shortcut.
+  assert.equal(quickClear(CODES.l), Keymap.NONE)
+  assert.equal(quickClear(CODES.l, CODES.control | CODES.alt), Keymap.NONE)
+  assert.equal(quickClear(CODES.l, CODES.control | CODES.meta), Keymap.NONE)
 })
 
 test("the keypad Enter accepts and replaces like the main Return", () => {
