@@ -24,7 +24,7 @@ The shell loads third-party plugins from `~/.config/omarchy/plugins/<plugin-id>/
 A plain clone is the recommended way, because the shell watches that directory and reloads plugin code when a file changes.
 
 ```bash
-git clone --branch fm/grammachy-huf-198 <repo-url> ~/.config/omarchy/plugins/io.github.jyooi.grammachy
+git clone <repo-url> ~/.config/omarchy/plugins/io.github.jyooi.grammachy
 ```
 
 To work from an existing checkout instead, link it:
