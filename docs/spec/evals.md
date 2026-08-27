@@ -74,13 +74,13 @@ One loader, one metrics module.
 | Style creep | Unpaired Issues on interference sentences, per 100 interference sentences. |
 | Valid | A Check is valid when it returned a result envelope. Invalid counts as zero Issues (a miss for catch rate and recall) and is excluded from precision, exact fix, and latency. An Issue dropped for a bad substring lowers validity by 1 / Issues of that Check. |
 | p50, p95 latency | Nearest rank over valid Checks: sort ascending, take element ceil(p x n), no interpolation. |
-| Resident memory | Measured on the device: llama-server `/metrics` or the Vulkan allocation for GPU rows, RSS for CPU rows. RSS alone is wrong for GPU rows (HUF-209). |
+| Resident memory | Measured on the device for a llama-server row: the DRM fdinfo of that process, which reports the memory one DRM client holds. A card names its card memory, an integrated processor names the system memory it maps, and the two pools are never added together. A server with no DRM client, such as a CPU-only build, keeps the RSS of its process, and so does every other server engine. RSS alone is wrong for GPU rows (HUF-209). llama-server `/metrics` is not the source: it is off unless the server runs with `--metrics`, and it carries no memory gauge. The report names the source of every measured row under the table, and a skipped row names none. |
 | Cost per 1,000 Checks | Sum of `usage.cost` / priced Checks x 1,000, USD to two decimals. Local rows print `0.00 (local)`; a cloud answer without `usage.cost` prints `n/a` and is logged. |
 | Recall by native language | A separate table, one column per language present; a language with fewer than 10 edits prints the raw count. |
 | Useful fix | From the judgements file (section 4.4): useful / judged non-exact hits. Printed only with `--judgements`. |
 | Thinking | Local rows only: `on` or `off`, the mode the row ran under (section 4.1). Cloud rows print `-`. |
 
-Rounding: rates to one decimal, counts as `n of m (rate)`, latency integer ms, memory integer MB, cost two decimals.
+Rounding: rates to one decimal, counts as `n of m (rate)`, latency integer ms, memory whole MB below a gigabyte and one decimal above it, cost two decimals.
 
 ## 4. The `bench` runner
 
@@ -91,7 +91,7 @@ Rounding: rates to one decimal, counts as `n of m (rate)`, latency integer ms, m
 | `--engine <slug>` | Repeatable. `openrouter` rows require `--max-cost`. |
 | `--model <name>` | Repeatable, for `openai`. |
 | `--cloud-model <id>` | Repeatable, for `openrouter`. |
-| `--max-cost <usd>` | Whole-run cap on the sum of `usage.cost`; required when any `openrouter` row runs, refused otherwise. When the next Check would pass it, the current row ends as `skipped: cost cap <usd> USD reached after N sentences` and the remaining rows skip with the same reason. |
+| `--max-cost <usd>` | Whole-run cap on the sum of `usage.cost`; required when any `openrouter` row runs, refused otherwise. When the next Check would pass it, the current row ends as `skipped: cost cap <usd> USD reached after N sentences` and the remaining rows skip with the same reason. Cloud rows run beside each other, so a run may pass the cap by at most one Check for each cloud row in flight. |
 | `--thinking off\|on\|both` | Local rows only. Default `on`, the product default. `both` runs every local row twice and prints both with a Thinking column. The eval run uses `both`. [HUF-217](https://linear.app/huffman/issue/HUF-217) |
 | `--record <dir>` | Writes every Check's answer to `<dir>/checks.json` (section 4.3). |
 | `--judgements <file>` | Adds the Useful fix column from a judgements file (section 4.4). |

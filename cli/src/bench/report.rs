@@ -1,4 +1,4 @@
-//! The Markdown report `grammachy bench` prints, spec section 13.1.
+//! The Markdown report `grammachy bench` prints, `docs/spec/evals.md` section 5.
 //!
 //! The output of one run is the whole benchmark file: `grammachy bench > docs/
 //! benchmarks/<version>.md` is how a release records its numbers. So this
@@ -17,7 +17,7 @@
 //! engine. Cloud rows compete only for the separate cloud line.
 
 use crate::bench::machine::Machine;
-use crate::bench::memory;
+use crate::bench::memory::Reading;
 use crate::bench::metrics::Tally;
 use crate::bench::weights::{Terms, Weights};
 
@@ -31,8 +31,8 @@ const VALIDITY_FLOOR: f64 = 95.0;
 #[derive(Debug, Clone)]
 pub struct Measurement {
     pub tally: Tally,
-    /// Resident memory in bytes, or `None` when it could not be read.
-    pub memory_bytes: Option<u64>,
+    /// Resident memory, and where the run read it.
+    pub memory: Reading,
     /// How long the whole row took, server start included.
     pub wall_ms: u64,
 }
@@ -58,8 +58,6 @@ impl Outcome {
 #[derive(Debug, Clone)]
 pub struct EngineRow {
     pub engine: String,
-    /// What resident memory means for this engine, named under the table.
-    pub memory_kind: &'static str,
     pub outcome: Outcome,
 }
 
@@ -138,10 +136,7 @@ impl Report {
         }
         out.push('\n');
         for row in &self.engines {
-            out.push_str(&format!(
-                "Resident memory of `{}` is {}.\n",
-                row.engine, row.memory_kind
-            ));
+            out.push_str(&memory_source_line(&row.engine, &row.outcome));
         }
         out.push('\n');
         out
@@ -183,6 +178,9 @@ impl Report {
             ));
         }
         out.push('\n');
+        for row in &self.models {
+            out.push_str(&memory_source_line(&row.model, &row.outcome));
+        }
         for row in &self.models {
             if let Outcome::Measured(measurement) = &row.outcome {
                 out.push_str(&format!(
@@ -336,7 +334,7 @@ impl Report {
             None => {}
         }
         out.push_str(&format!(
-            "Ranking: exact fix rate, then F0.5, then lower p50 (HUF-205). Floors: validity at least {VALIDITY_FLOOR:.0}% and no more false positives than the default engine, `{}`{}. A recommended local model must also fit the machine tier above (spec section 13.1).\n\n",
+            "Ranking: exact fix rate, then F0.5, then lower p50 (HUF-205). Floors: validity at least {VALIDITY_FLOOR:.0}% and no more false positives than the default engine, `{}`{}. A recommended local model must also fit the machine tier above (`docs/spec/evals.md` section 5).\n\n",
             self.default_engine,
             match default_fp {
                 Some(fp) => format!(", which earned {fp}"),
@@ -378,6 +376,22 @@ impl Report {
     }
 }
 
+/// The sentence that names where one row's memory number came from.
+///
+/// A row that ran names its own source rather than a rule read off the engine,
+/// because a llama.cpp row on a graphics device and one on the CPU are the same
+/// engine and two different numbers. A skipped row measured nothing, so it has
+/// no source to name and prints no line.
+fn memory_source_line(name: &str, outcome: &Outcome) -> String {
+    match outcome {
+        Outcome::Skipped(_) => String::new(),
+        Outcome::Measured(measurement) => format!(
+            "Resident memory of `{name}` is {}.\n",
+            measurement.memory.source.line()
+        ),
+    }
+}
+
 /// The four measured cells of one Engines row, in table order.
 fn engine_cells(outcome: &Outcome) -> Vec<String> {
     match outcome {
@@ -386,7 +400,7 @@ fn engine_cells(outcome: &Outcome) -> Vec<String> {
             measurement.tally.catch_rate_cell(),
             measurement.tally.false_positive_cell(),
             format!("{} ms", measurement.tally.p50_ms),
-            memory::cell(measurement.memory_bytes),
+            measurement.memory.cell(),
         ],
     }
 }
@@ -457,7 +471,7 @@ fn cost_cells(row: &ModelRow) -> Vec<String> {
             vec![
                 format!("{} ms", tally.p50_ms),
                 format!("{} ms", tally.p95_ms),
-                memory::cell(measurement.memory_bytes),
+                measurement.memory.cell(),
                 cost,
             ]
         }
@@ -481,6 +495,7 @@ const MEASUREMENT_NOTE: &str = "\
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::bench::memory::Source;
     use crate::bench::weights;
 
     fn tally(caught: usize, exact: usize, false_positives: usize, valid: usize) -> Tally {
@@ -506,9 +521,13 @@ mod tests {
     }
 
     fn measured(tally: Tally, memory_bytes: Option<u64>) -> Outcome {
+        on_device(tally, memory_bytes, Source::ServerRss)
+    }
+
+    fn on_device(tally: Tally, memory_bytes: Option<u64>, source: Source) -> Outcome {
         Outcome::Measured(Box::new(Measurement {
             tally,
-            memory_bytes,
+            memory: Reading::new(memory_bytes, source),
             wall_ms: 12_000,
         }))
     }
@@ -539,12 +558,10 @@ mod tests {
             engines: vec![
                 EngineRow {
                     engine: "languagetool".to_string(),
-                    memory_kind: "the RSS of its server process",
                     outcome: measured(tally(10, 5, 0, 40), Some(731_000_000)),
                 },
                 EngineRow {
                     engine: "openai".to_string(),
-                    memory_kind: "the RSS of its server process",
                     outcome: Outcome::Skipped("llama.cpp is not installed.".to_string()),
                 },
             ],
@@ -622,6 +639,80 @@ mod tests {
         assert!(
             rendered.contains("--engine openai --model <name>"),
             "{rendered}"
+        );
+    }
+
+    #[test]
+    fn a_measured_engine_names_the_pool_its_memory_number_came_from() {
+        let mut report = report();
+        report.engines[0].outcome = Outcome::Skipped("LanguageTool is not installed.".to_string());
+        report.engines[1].outcome =
+            on_device(tally(22, 18, 1, 40), Some(1_800_000_000), Source::Device);
+
+        let rendered = report.render();
+
+        assert!(
+            rendered.contains("| `openai` | 22 of 30 (73.3%) | 1 of 10 | 20 ms | 1.8 GB |"),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains(
+                "Resident memory of `openai` is the device memory its server process holds, read from the DRM fdinfo of that process rather than from its RSS.\n"
+            ),
+            "the row names the pool it was measured in: {rendered}"
+        );
+        assert!(
+            !rendered.contains("Resident memory of `languagetool`"),
+            "a skipped row measured nothing, so it names no source: {rendered}"
+        );
+    }
+
+    #[test]
+    fn an_engine_on_an_integrated_processor_names_the_shared_pool_instead() {
+        let mut report = report();
+        report.engines[1].outcome = on_device(
+            tally(22, 18, 1, 40),
+            Some(1_800_000_000),
+            Source::DeviceShared,
+        );
+
+        let rendered = report.render();
+
+        assert!(
+            rendered.contains("Resident memory of `openai` is the system memory its server process maps onto an integrated graphics processor, read from the DRM fdinfo of that process rather than from its RSS.\n"),
+            "{rendered}"
+        );
+    }
+
+    #[test]
+    fn every_measured_model_names_its_own_pool_under_the_cost_table() {
+        let mut report = report();
+        report.models = vec![
+            model(
+                "gemma-3n-e4b-it",
+                "openai",
+                weights::of("gemma-3n-e4b-it"),
+                on_device(tally(24, 20, 0, 40), Some(1_800_000_000), Source::Device),
+            ),
+            model(
+                "qwen2.5-3b-instruct",
+                "openai",
+                weights::of("qwen2.5-3b-instruct"),
+                Outcome::Skipped("llama.cpp is not installed.".to_string()),
+            ),
+        ];
+
+        let rendered = report.render();
+
+        assert!(
+            rendered.contains(
+                "Resident memory of `gemma-3n-e4b-it` is the device memory its server process holds, read from the DRM fdinfo of that process rather than from its RSS.\n"
+            ),
+            "a measured model names its pool under the Cost table: {rendered}"
+        );
+        assert!(
+            !rendered.contains("Resident memory of `qwen2.5-3b-instruct`"),
+            "a skipped model measured nothing, so it names no source: {rendered}"
         );
     }
 

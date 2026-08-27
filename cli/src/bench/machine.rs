@@ -1,4 +1,4 @@
-//! The machine a benchmark file was measured on, spec section 13.1.
+//! The machine a benchmark file was measured on, `docs/spec/evals.md` section 5.
 //!
 //! The recommended model must fit a named memory tier, so a benchmark file that
 //! does not say which machine produced it cannot be compared with the next one.

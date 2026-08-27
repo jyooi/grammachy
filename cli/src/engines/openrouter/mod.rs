@@ -9,6 +9,12 @@
 //!
 //! The loopback rule of the `openai` engine is untouched: `endpoint::parse` is
 //! not consulted here because there is no base URL to parse.
+//!
+//! One transient answer, HTTP 429 or a 5xx, may be retried once. The retry is
+//! opt in through [`Config::retry_after`] and is off by default: a Check from
+//! the shell must fail at once, because its card carries a Retry button and the
+//! user decides. `grammachy bench` turns it on, because one rate limit must not
+//! cost a whole row (`docs/spec/evals.md` section 4.1).
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -24,6 +30,12 @@ pub const ENDPOINT: &str = "https://openrouter.ai/api/v1/chat/completions";
 
 /// The Check timeout of spec section 4 for this engine.
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// How long a caller that retries waits before the one retry.
+///
+/// One second, because a burst limit clears in about that, and a longer pause
+/// is paid again on every retry of a run that already takes tens of minutes.
+pub const RETRY_DELAY: Duration = Duration::from_secs(1);
 
 /// Points the adapter at another key file, so tests never read the real one.
 /// Not a user-facing setting.
@@ -44,6 +56,10 @@ pub struct Config {
     pub timeout: Duration,
     pub key_file: Option<PathBuf>,
     pub url: String,
+    /// How long to wait before retrying one transient answer, or `None` to
+    /// never retry. `None` is the product default, so a Check from the shell
+    /// answers at once and its card decides what to do next.
+    pub retry_after: Option<Duration>,
 }
 
 impl Default for Config {
@@ -52,6 +68,7 @@ impl Default for Config {
             timeout: DEFAULT_TIMEOUT,
             key_file: default_key_file(),
             url: ENDPOINT.to_string(),
+            retry_after: None,
         }
     }
 }
@@ -136,6 +153,35 @@ fn read_key(config: &Config) -> Result<String, EngineFailure> {
     }
 }
 
+/// One failed attempt at a Check, and whether it is worth one more.
+struct Attempt {
+    failure: EngineFailure,
+    /// The status behind a transient answer, or `None` when asking again would
+    /// give the same answer.
+    transient: Option<u16>,
+}
+
+impl Attempt {
+    /// A failure no retry can help: a rejected key, an unknown model, a
+    /// timeout, or an endpoint that is not there.
+    fn final_failure(failure: EngineFailure) -> Attempt {
+        Attempt {
+            failure,
+            transient: None,
+        }
+    }
+}
+
+/// Whether one HTTP status is worth asking again.
+///
+/// 429 is a rate limit that clears on its own, and a 5xx is the provider
+/// rather than the request (`docs/spec/evals.md` section 4.1). Every other
+/// status is about the key, the model, or the body, so a retry would earn the
+/// same answer and cost a second Check.
+pub fn is_transient(status: u16) -> bool {
+    status == 429 || (500..600).contains(&status)
+}
+
 pub struct Openrouter {
     config: Config,
 }
@@ -145,7 +191,30 @@ impl Openrouter {
         Openrouter { config }
     }
 
-    fn request(&self, key: &str, body: &str) -> Result<Value, EngineFailure> {
+    /// One Check, with the one retry of a transient answer when the caller
+    /// asked for it.
+    ///
+    /// The retry is logged on stderr, because a benchmark row that took twice
+    /// as long must say why. Nothing is logged when no retry happens, so the
+    /// product path stays silent.
+    fn request(&self, key: &str, body: &str, model: &str) -> Result<Value, EngineFailure> {
+        let attempt = match self.send(key, body) {
+            Ok(answer) => return Ok(answer),
+            Err(attempt) => attempt,
+        };
+        let (Some(delay), Some(status)) = (self.config.retry_after, attempt.transient) else {
+            return Err(attempt.failure);
+        };
+
+        eprintln!(
+            "grammachy: OpenRouter answered HTTP {status} for {model}; retrying once after {} s.",
+            delay.as_secs_f64()
+        );
+        std::thread::sleep(delay);
+        self.send(key, body).map_err(|again| again.failure)
+    }
+
+    fn send(&self, key: &str, body: &str) -> Result<Value, Attempt> {
         // Redirects and proxies stay off, so the text goes to openrouter.ai
         // and nowhere the response or the environment could send it.
         // A status is read here rather than raised by ureq, so the error body
@@ -164,21 +233,25 @@ impl Openrouter {
             .header("Authorization", &format!("Bearer {key}"))
             .header("X-Title", "Grammachy")
             .send(body)
-            .map_err(|error| self.classify(error))?;
+            .map_err(|error| Attempt::final_failure(self.classify(error)))?;
 
         let status = answer.status().as_u16();
-        let text = answer
-            .into_body()
-            .read_to_string()
-            .map_err(|error| EngineFailure::Failed(format!("OpenRouter sent no body: {error}")))?;
+        let text = answer.into_body().read_to_string().map_err(|error| {
+            Attempt::final_failure(EngineFailure::Failed(format!(
+                "OpenRouter sent no body: {error}"
+            )))
+        })?;
         if status != 200 {
-            return Err(classify_status(status, &text));
+            return Err(Attempt {
+                failure: classify_status(status, &text),
+                transient: is_transient(status).then_some(status),
+            });
         }
 
         serde_json::from_str(&text).map_err(|error| {
-            EngineFailure::Failed(format!(
+            Attempt::final_failure(EngineFailure::Failed(format!(
                 "OpenRouter sent an answer that is not a chat completion: {error}"
-            ))
+            )))
         })
     }
 
@@ -260,7 +333,7 @@ impl Engine for Openrouter {
         let key = read_key(&self.config)?;
 
         let body = request_body(text, options).to_string();
-        let raw = self.request(&key, &body)?;
+        let raw = self.request(&key, &body, &options.openrouter_model)?;
 
         let cost = raw
             .get("usage")
@@ -371,6 +444,25 @@ mod tests {
             classify_status(503, "not json"),
             EngineFailure::Failed(_)
         ));
+    }
+
+    #[test]
+    fn only_a_rate_limit_or_a_provider_fault_is_worth_asking_again() {
+        assert!(is_transient(429));
+        for status in [500, 502, 503, 504, 529, 599] {
+            assert!(is_transient(status), "{status}");
+        }
+        // The key, the credit, the model, and the body all answer the same
+        // the second time, so a retry only spends another Check.
+        for status in [200, 400, 401, 402, 403, 404, 422, 600] {
+            assert!(!is_transient(status), "{status}");
+        }
+    }
+
+    #[test]
+    fn the_product_path_never_retries_so_a_card_answers_at_once() {
+        assert_eq!(Config::default().retry_after, None);
+        assert_eq!(Config::from_env().retry_after, None);
     }
 
     #[test]
