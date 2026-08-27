@@ -22,7 +22,7 @@ import "format.js" as Format
 BorderSurface {
   id: root
 
-  // "editing", "confirm", "checking", "result", "error", or "notice".
+  // "editing", "confirm", "checking", "result", "error", "setup", or "notice".
   property string phase: "editing"
   // The Draft. Edit mode reads and writes it; review mode leaves it alone.
   property string draftText: ""
@@ -48,6 +48,9 @@ BorderSurface {
   // `ui/errors.js` and the one-line `grammachy doctor` answer beside it.
   property var errorCard: null
   property string diagnosis: ""
+
+  // The setup card of spec section 10, shown from the `setup` phase.
+  property var setupCard: null
 
   // The chunked run of spec section 9. `chunkNumber` is the Chunk being
   // checked, counted from one, and `chunkElapsedMs` is the wall clock of this
@@ -99,6 +102,7 @@ BorderSurface {
   // One button of the inline failure of spec section 9. The action is a button
   // id from `ui/errors.js`; Overlay.qml owns where each one goes.
   signal errorActionRequested(string action)
+  signal setupActionRequested(string action)
   signal accepted(int index)
   signal skipped(int index)
   signal acceptAllRequested()
@@ -126,6 +130,7 @@ BorderSurface {
   readonly property bool checking: root.showsCard && root.phase === "checking"
   readonly property bool reviewing: root.showsCard && root.phase === "result"
   readonly property bool hasError: root.showsCard && root.phase === "error" && Boolean(root.errorCard)
+  readonly property bool hasSetup: root.showsCard && root.phase === "setup"
   readonly property bool hasIssues: root.reviewing && root.issueCount > 0
   readonly property bool isEmptyResult: root.reviewing && root.issueCount === 0
   readonly property var focusedIssue: root.hasIssues && root.focusIndex >= 0 && root.focusIndex < root.issueCount
@@ -167,6 +172,7 @@ BorderSurface {
         root.runningEngine, root.chunkElapsedMs)
     }
     if (root.phase === "error") return root.errorCard ? String(root.errorCard.meta) : "check did not finish"
+    if (root.phase === "setup") return "companion tool missing"
     if (root.phase === "notice") return "check did not finish"
     // A chunked run is counted the way the progress line above it was, because
     // a Draft of many Chunks takes seconds rather than a moment.
@@ -401,6 +407,15 @@ BorderSurface {
         card: root.errorCard
         diagnosis: root.diagnosis
         onActionRequested: function(action) { root.errorActionRequested(action) }
+      }
+
+      SetupCard {
+        anchors.top: parent.top
+        width: parent.width
+        visible: root.hasSetup
+
+        card: root.setupCard
+        onActionRequested: function(action) { root.setupActionRequested(action) }
       }
 
       // ------------------------------------------------------- empty state

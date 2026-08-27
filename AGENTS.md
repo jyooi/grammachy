@@ -98,7 +98,9 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   `bin/bootstrap.sh` is the end-user download: curl against the public release URL first, falling back to `gh release download` only on a 404 with `gh` authenticated, writing to a temp file beside the target and moving it into place only once the sha256 matches, so a mismatch or an interrupted run never leaves `bin/grammachy` half written.
   Its seams are `GRAMMACHY_BOOTSTRAP_LOCK`, `GRAMMACHY_BOOTSTRAP_OUT`, `GRAMMACHY_BOOTSTRAP_REPO`, `GRAMMACHY_BOOTSTRAP_BASE_URL`, `GRAMMACHY_BOOTSTRAP_CURL`, and `GRAMMACHY_BOOTSTRAP_GH` (`never` disables the gh fallback); `cli/tests/bootstrap.rs` runs the real script against a stub curl and never reaches the network.
   `ui/SetupCard.qml` draws the model `ui/setupCard.js` owns from `cli.lock`'s text and the run's own state (`Overlay.qml`'s `bootstrapRunning`, `bootstrapExitCode`, `bootstrapLog`, read through a `FileView` and a streaming `Process`); an empty pinned sha256 reads as `UNPINNED` and shows the developer path with no Install button.
-  `Overlay.showSetup` is the `Setup` button of the `bad_arguments` card (spec section 8) and the `setup` phase it opens; neither it nor `resetRun` touches the bootstrap state, so closing and reopening the popup mid-install leaves the run going, the same rule an engine install keeps.
+  `startQuick` and `startComposeCheck` open the setup card when `bin/grammachy` is absent, before capture or chunking.
+  `Overlay.showSetup` is also the `Setup` button of the `bad_arguments` card (spec section 8).
+  Neither it nor `resetRun` touches the bootstrap state, so closing and reopening the popup mid-install leaves the run going, the same rule an engine install keeps.
 - The Omarchy plugin is the repo root: `manifest.json`, `BarWidget.qml`, `Overlay.qml`, and `ui/`.
   `Overlay.qml` owns capture, the CLI run, the key map dispatch, the Apply path, the review state, the Draft, and the settings storage.
   Every QML file in `ui/` only draws.

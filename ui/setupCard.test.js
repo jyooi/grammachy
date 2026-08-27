@@ -6,6 +6,13 @@ const assert = require("node:assert/strict")
 
 const Setup = require("./setupCard.js")
 
+test("a missing companion binary opens the setup card before any Check", () => {
+  assert.equal(Setup.companionMissing(false), true)
+  assert.equal(Setup.companionMissing(undefined), true)
+  assert.equal(Setup.companionMissing(null), true)
+  assert.equal(Setup.companionMissing(true), false)
+})
+
 test("readLock reads the two pinned fields", () => {
   assert.deepEqual(
     Setup.readLock('{"version": "0.1.0", "sha256": "abc123"}'),

@@ -62,7 +62,8 @@ Item {
 
   // Quick: "capturing", "empty", "checking", "result", "error", "notice",
   // "setup", or "toolong".
-  // Compose: "editing", "confirm", "checking", "result", "error", or "notice".
+  // Compose: "editing", "confirm", "checking", "result", "error", "setup",
+  // or "notice".
   property string phase: "capturing"
   // The whole capture, spec section 3. Every Check runs on this or on its head.
   property string capturedText: ""
@@ -219,6 +220,9 @@ Item {
   readonly property string binaryPath: Util.isPlainObject(root.manifest) && root.manifest.__sourceDir
     ? String(root.manifest.__sourceDir).replace(/\/$/, "") + "/bin/grammachy"
     : String(Qt.resolvedUrl("bin/grammachy")).replace(/^file:\/\//, "")
+  // True when `test -x` finds bin/grammachy. `startQuick` and
+  // `startComposeCheck` read this before capture or chunking.
+  property bool companionFound: false
 
   // The plugin folder's own root, the same one `binaryPath` sits under.
   readonly property string pluginRoot: Util.isPlainObject(root.manifest) && root.manifest.__sourceDir
@@ -506,8 +510,17 @@ Item {
   // Where each button of the setup card goes, spec section 10.
   function runSetupAction(action) {
     if (action === Setup.INSTALL) root.installBootstrap()
-    else if (action === Setup.RETRY) root.retryCheck()
+    else if (action === Setup.RETRY) root.retrySetupCheck()
     else if (action === Setup.CLOSE) root.close()
+  }
+
+  function retrySetupCheck() {
+    if (root.surface === "compose") {
+      root.phase = "editing"
+      root.startComposeCheck()
+      return
+    }
+    root.retryCheck()
   }
 
   // ---------------------------------------------------------------- capture
@@ -519,6 +532,10 @@ Item {
   function startQuick() {
     root.resetRun()
     root.surface = "quick"
+    if (Setup.companionMissing(root.companionFound)) {
+      root.showSetup()
+      return
+    }
     root.phase = "capturing"
     root.capturedText = ""
     root.probeSourceWindow()
@@ -941,7 +958,11 @@ Item {
   function startComposeCheck() {
     if (root.surface !== "compose" || root.phase !== "editing") return
     if (root.draftRefusal().length > 0) return
-    // A second Check must not be answered by the first one's output.
+    if (Setup.companionMissing(root.companionFound)) {
+      root.showSetup()
+      return
+    }
+    // The first Check must not answer a second Check.
     root.runGeneration += 1
     root.selectionText = root.draftText
     root.issues = []
@@ -1824,6 +1845,23 @@ Item {
     onLoadFailed: console.warn("grammachy: cli.lock could not be read:", root.cliLockPath)
   }
 
+  // FileView does not watch a missing file. Watch the bin directory instead.
+  // The probe runs again when Install writes bin/grammachy.
+  FileView {
+    id: companionDir
+    path: root.pluginRoot + "/bin"
+    watchChanges: true
+    printErrors: false
+    onFileChanged: companionProbe.running = true
+  }
+
+  Process {
+    id: companionProbe
+    running: true
+    command: ["test", "-x", root.binaryPath]
+    onExited: function(exitCode) { root.companionFound = exitCode === 0 }
+  }
+
   // The setup card's Install button, spec section 10: `bin/bootstrap.sh`,
   // streamed into one log in the order its lines arrived, stdout and stderr
   // folded together because the reader wants the story, not which stream
@@ -1841,6 +1879,7 @@ Item {
     onExited: function(exitCode, exitStatus) {
       root.bootstrapRunning = false
       root.bootstrapExitCode = exitCode
+      if (exitCode === 0) root.companionFound = true
     }
     stdout: SplitParser {
       splitMarker: "\n"
@@ -2121,6 +2160,7 @@ Item {
         engineMessage: root.engineMessage
         errorCard: root.errorCard
         diagnosis: root.errorDiagnosis
+        setupCard: root.setupCardModel
         draftCapUnits: root.draftCapUnits
 
         // The chunked run of spec section 9, counted from one for the reader.
@@ -2159,6 +2199,7 @@ Item {
         onReplaceDraftRequested: root.replaceDraft()
         onKeepDraftRequested: root.keepDraft()
         onErrorActionRequested: function(action) { root.runErrorAction(action) }
+        onSetupActionRequested: function(action) { root.runSetupAction(action) }
         onAccepted: function(index) { root.decide(index, true) }
         onSkipped: function(index) { root.decide(index, false) }
         onAcceptAllRequested: root.acceptAllOpen()

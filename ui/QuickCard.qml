@@ -63,8 +63,7 @@ BorderSurface {
   property var errorCard: null
   property string diagnosis: ""
 
-  // The setup card of spec section 10, shown from the `setup` phase that
-  // `Setup` on the `bad_arguments` card above leads to.
+  // The setup card of spec section 10, shown from the `setup` phase.
   property var setupCard: null
 
   // The Settings view, spec section 7. The values arrive already resolved
@@ -539,8 +538,8 @@ BorderSurface {
         Item { Layout.fillWidth: true }
 
         Button {
-          // An error card draws its own Close, in its own button row.
-          visible: root.showsCheck && !root.hasIssues && !root.hasError
+          // An error card and the setup card draw their own Close.
+          visible: root.showsCheck && !root.hasIssues && !root.hasError && root.phase !== "setup"
           text: "Close"
           tooltipText: "Esc"
           bordered: true

@@ -360,9 +360,9 @@ Two more cards belong to the same session:
 - **Settings from a card.** Bring the `engine_unavailable` card back, click the gear or `Settings`, then click `Back`.
   The same card is still behind the Settings view, because Settings opens the Settings view of the same card.
   Switch `Engine` to `Harper` and click `Retry`: the Check now runs in process and succeeds.
-- **No companion binary.** Move `bin/grammachy` aside, reload the plugin, and click `G` on a selection.
-  The card reads `Grammachy could not run the check` with `Close` and `Setup`.
-  `Setup` opens the setup card of spec section 10, with an Install button that runs `bin/bootstrap.sh` and streams its output.
+- **No companion binary.** Move `bin/grammachy` aside, reload the plugin, and click the bar widget.
+  The setup card of spec section 10 opens, with an Install button that runs `bin/bootstrap.sh` and streams its output.
+  A Check that fails later still offers Setup on the `bad_arguments` card.
   See [Cutting a release](#18-cutting-a-release) for the state before cli.lock pins a hash.
   Put the binary back and reload.
 

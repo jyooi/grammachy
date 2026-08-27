@@ -28,6 +28,14 @@ function isPlainObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value)
 }
 
+// Whether a launch must open the setup card instead of a Check.
+// Pass true when bin/grammachy exists and the file is executable.
+// A missing binary opens the setup card on both surfaces, before capture
+// or chunking. Spec section 12 step 2 is a bar click with no Check first.
+function companionMissing(present) {
+  return present !== true
+}
+
 // The two fields cli.lock pins, spec section 10. Text that will not parse,
 // or that carries no string for either field, reads the same as an empty
 // lock: nothing is pinned, so there is nothing to install from.
@@ -118,6 +126,7 @@ if (typeof module !== "undefined" && module.exports) {
     INSTALL: INSTALL,
     RETRY: RETRY,
     CLOSE: CLOSE,
+    companionMissing: companionMissing,
     readLock: readLock,
     card: card
   }
