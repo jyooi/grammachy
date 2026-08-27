@@ -804,8 +804,8 @@ mod tests {
         };
 
         // A Check whose server reported no token count keeps its two Issues
-        // out of the denominator, so the ratio stays 60 over 2 rather than
-        // 60 over 4.
+        // out of the denominator, so the ratio stays 40 over 1 rather than
+        // 40 over 3.
         let mut silent = recorded(
             "zh-02",
             BOOK,

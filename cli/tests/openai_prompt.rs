@@ -211,12 +211,23 @@ fn the_grammar_names_the_four_issue_fields_in_the_schema_order() {
         .lines()
         .find(|line| line.starts_with("issue ::="))
         .expect("the issue rule is there");
-    let keys: Vec<&str> = ["original", "fix", "reason", "category"]
+    let positions: Vec<(&str, Option<usize>)> = ["original", "fix", "reason", "category"]
         .into_iter()
-        .filter(|key| issue.contains(&format!("\\\"{key}\\\":")))
+        .map(|key| (key, issue.find(&format!("\\\"{key}\\\":"))))
         .collect();
 
-    assert_eq!(keys, ["original", "fix", "reason", "category"]);
+    let missing: Vec<&str> = positions
+        .iter()
+        .filter(|(_, at)| at.is_none())
+        .map(|(key, _)| *key)
+        .collect();
+    assert!(missing.is_empty(), "the issue rule omits {missing:?}");
+
+    let found: Vec<usize> = positions.iter().filter_map(|(_, at)| *at).collect();
+    assert!(
+        found.windows(2).all(|pair| pair[0] < pair[1]),
+        "the issue rule names the keys out of schema order: {positions:?}"
+    );
 }
 
 /// Every double-quoted literal of one GBNF rule body.
