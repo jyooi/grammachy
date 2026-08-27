@@ -264,6 +264,19 @@ mod tests {
         assert_eq!(of("qwen3-8b").terms, Terms::Permissive);
     }
 
+    /// The two sub-4 GB catalogue rows of the on-device target both take
+    /// Apache-2.0 from a family prefix, so the license rule passes for them.
+    #[test]
+    fn the_sub_four_gigabyte_catalogue_rows_are_apache_licensed() {
+        for model in ["qwen3.8-4b", "Qwen3.8-4B-Q4_K_M", "granite-4.2-3b"] {
+            let weights = of(model);
+
+            assert_eq!(weights.license, "Apache-2.0", "{model}");
+            assert_eq!(weights.terms, Terms::Permissive, "{model}");
+            assert!(weights.is_eligible(), "{model}");
+        }
+    }
+
     #[test]
     fn the_small_apache_rows_of_the_candidate_list_are_known() {
         for model in [

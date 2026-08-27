@@ -65,6 +65,8 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   The catalogue is `mod.rs` and every row is pinned twice, by sha256 and by byte size.
   Both numbers are the `x-linked-etag` and `x-linked-size` of an unauthenticated Hugging Face request.
   A row belongs there only when that request answers 200 without a token.
+  A row name must also name the start of the row file name, ignoring case, because `unit::model_file` resolves the `openaiModel` setting on that prefix.
+  A name that breaks the rule downloads and lists, and then no engine and no bench row can run it.
   The three verbs agree on one pair of paths, the row's pinned file name and its `.part`.
   So a hand-placed `.gguf` is never listed and never deleted.
   The licence of a row comes from `bench::weights::of`, the one product rule of spec section 13.1.

@@ -459,9 +459,13 @@ fn model_list_prints_one_envelope_with_every_catalogue_row() {
     assert_eq!(value["verb"], "list");
     assert_eq!(value["directory"], directory.display().to_string());
     assert!(value["freeBytes"].as_u64().is_some());
-    assert_eq!(value["models"].as_array().unwrap().len(), 3);
+    assert_eq!(value["models"].as_array().unwrap().len(), 5);
     assert_eq!(value["models"][0]["state"], "ready");
     assert_eq!(value["models"][1]["state"], "absent");
+    assert_eq!(value["models"][3]["name"], "qwen3.8-4b");
+    assert_eq!(value["models"][3]["licence"], "Apache-2.0");
+    assert_eq!(value["models"][4]["name"], "granite-4.2-3b");
+    assert_eq!(value["models"][4]["licence"], "Apache-2.0");
 }
 
 #[test]
