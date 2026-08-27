@@ -85,6 +85,14 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   Every cloud failure carries its reason word in the message, and `cli/tests/openrouter_stub.rs` maps each one from a recorded response.
   `ui/errors.js` parses that trailing `(reason: <word>)` to pick the card body, so a change to the message wording moves the card too.
   The `engine_unavailable` card sets `needsDiagnosis` false for this slug alone, because `doctor` reads no piece of this machine that a cloud failure is about.
+  `openrouterModel` has no built-in default: `settings::DEFAULT_OPENROUTER_MODEL` is the empty string, so a blank field, a blank flag, and a missing key all answer `bad_arguments` in the adapter.
+  `settings::non_empty` is the one fallback rule the file reader and the flags share, and `settings::OPENROUTER_MODEL_PLACEHOLDER` is what the empty field shows and never a value.
+  The cloud surface of `docs/spec/evals.md` section 7 lives in `ui/settings.js`: the `Cloud LLM (OpenRouter)` row, the `openrouterModel` and `cloudConsent` descriptors, `needsCloudConsent`, `cloudConsentCard`, and the `keyState`/`keyHint` pair the Settings hint draws.
+  The consent gate sits on `Overlay.launchCheck`, the one route out to the CLI, so the quick popup, every Chunk of a Draft, and every retry pass through it and the card can never be gone round.
+  `Overlay.cloudConsentGiven` answers for the session beside the stored key, because `updateEntryInline` comes back a moment later and a chunked run must not ask twice.
+  `Overlay.refreshCloudKey` is the only reader of the key state, through `doctor --engine openrouter --json`; no QML may open the key file.
+  `BarWidget.qml` draws the cloud glyph from `settings`, the inline entry the bar host re-assigns on every write, so the glyph moves with no reload.
+  `cli/tests/overlay_cloud.rs` keeps `Overlay.qml`, both cards, `ui/SettingsView.qml`, and the bar widget on those calls, and `ui/settings.test.js` runs the rules and the gate against a counting stub.
 - `grammachy setup` lives in `cli/src/setup/`, spec section 10.
   It prints one JSON envelope (`SetupEnvelope`).
   Exit 1 uses `setup_failed`.
@@ -171,7 +179,7 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   `draw.rs` draws with a fixed seed, and `sidecar.rs` is the committed text-free selection.
   A cache the machine cannot fill is a skipped table with a reason, never an error.
   Redraw `cli/tests/fixtures/eval-set.sidecar.json` with `cargo test --test evalset_sidecar -- --ignored`, which needs a filled cache.
-  `docs/dev.md` section 16 has the steps.
+  `docs/dev.md` section 17 has the steps.
   No test may fetch the corpus: the seams are `GRAMMACHY_EVAL_CACHE`, `GRAMMACHY_EVAL_FETCH=never`, `GRAMMACHY_EVAL_BASE_URL`, and `GRAMMACHY_EVAL_SHA256`.
 - The judge of `docs/spec/evals.md` section 4.4 is two halves that must agree on one rule.
   `cli/bench/judge.py` grades a recorded run, and `cli/src/bench/judge.rs` reads the answer into the Useful fix column.

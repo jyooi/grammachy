@@ -22,6 +22,9 @@ var BACK = "back"
 // The Remove confirm of the Models list, spec section 7.
 var REMOVE_MODEL = "removeModel"
 var KEEP_MODEL = "keepModel"
+// The cloud consent card, `docs/spec/evals.md` section 7.
+var CLOUD_CONTINUE = "cloudContinue"
+var CLOUD_CANCEL = "cloudCancel"
 
 // Which card the press landed on. The popup review keys are the whole map;
 // Compose reuses them in its own review mode and keeps almost nothing in edit
@@ -34,6 +37,10 @@ var MODE_COMPOSE_REVIEW = "composeReview"
 // Settings view, which owns every other key, so this mode carries the two
 // answers to that one question and nothing else.
 var MODE_MODEL_CONFIRM = "modelConfirm"
+// The cloud consent card of `docs/spec/evals.md` section 7. It stands in front
+// of the first cloud Check, so it carries the two answers to that one question
+// and nothing else.
+var MODE_CLOUD_CONSENT = "cloudConsent"
 
 // The action a key press asks for, or NONE.
 //
@@ -61,6 +68,16 @@ function action(event, codes, mode) {
     if (key === codes.escape) return KEEP_MODEL
     if (foreign || control) return NONE
     return enter ? REMOVE_MODEL : NONE
+  }
+
+  // The consent card is a question too, and it is answered the same way: Esc
+  // sends nothing, and only a bare Enter lets the text go. Ctrl + Enter is
+  // Apply on every other card, so a reader who pressed it out of habit never
+  // sends their text to a cloud by accident.
+  if (mode === MODE_CLOUD_CONSENT) {
+    if (key === codes.escape) return CLOUD_CANCEL
+    if (foreign || control) return NONE
+    return enter ? CLOUD_CONTINUE : NONE
   }
 
   if (key === codes.escape) return mode === MODE_COMPOSE_REVIEW ? BACK : CLOSE
@@ -102,10 +119,13 @@ if (typeof module !== "undefined" && module.exports) {
     BACK: BACK,
     REMOVE_MODEL: REMOVE_MODEL,
     KEEP_MODEL: KEEP_MODEL,
+    CLOUD_CONTINUE: CLOUD_CONTINUE,
+    CLOUD_CANCEL: CLOUD_CANCEL,
     MODE_IDLE: MODE_IDLE,
     MODE_REVIEW: MODE_REVIEW,
     MODE_COMPOSE_EDIT: MODE_COMPOSE_EDIT,
     MODE_COMPOSE_REVIEW: MODE_COMPOSE_REVIEW,
-    MODE_MODEL_CONFIRM: MODE_MODEL_CONFIRM
+    MODE_MODEL_CONFIRM: MODE_MODEL_CONFIRM,
+    MODE_CLOUD_CONSENT: MODE_CLOUD_CONSENT
   }
 }

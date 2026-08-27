@@ -10,6 +10,7 @@ use grammachy::args::{
 };
 use grammachy::settings::{
     StoredSettings, DEFAULT_LOCAL_THINKING, DEFAULT_OPENAI_BASE_URL, DEFAULT_OPENAI_MODEL,
+    DEFAULT_OPENROUTER_MODEL, OPENROUTER_MODEL_PLACEHOLDER,
 };
 
 /// A `shell.json` whose bar layout carries the plugin entry.
@@ -254,5 +255,67 @@ fn an_empty_api_key_is_a_value_and_not_a_missing_key() {
     assert_eq!(
         CheckOptions::resolve(&no_flags(), &entry).openai_api_key,
         ""
+    );
+}
+
+// -------------------------------------------------- the cloud model id
+//
+// Spec section 7: `openrouterModel` has no built-in default. A blank field, a
+// blank flag, and a missing key are one answer, and the adapter turns that
+// answer into `bad_arguments`. The placeholder is what the Settings field
+// shows and is never a value.
+
+#[test]
+fn the_cloud_model_has_no_built_in_default() {
+    assert_eq!(DEFAULT_OPENROUTER_MODEL, "");
+    assert_eq!(
+        CheckOptions::resolve(&no_flags(), &StoredSettings::default()).openrouter_model,
+        ""
+    );
+    assert_ne!(OPENROUTER_MODEL_PLACEHOLDER, DEFAULT_OPENROUTER_MODEL);
+}
+
+#[test]
+fn a_blank_cloud_model_reads_the_way_a_missing_one_does() {
+    for body in [
+        r#""openrouterModel": """#,
+        r#""openrouterModel": "   ""#,
+        r#""openrouterModel": null"#,
+    ] {
+        let entry = stored(body);
+        assert_eq!(entry.openrouter_model, None, "{body}");
+        assert_eq!(
+            CheckOptions::resolve(&no_flags(), &entry).openrouter_model,
+            "",
+            "{body}"
+        );
+    }
+}
+
+#[test]
+fn a_blank_flag_falls_back_rather_than_winning_as_an_empty_id() {
+    let entry = stored(r#""openrouterModel": "vendor/stored""#);
+    let blank = CheckArgs {
+        openrouter_model: Some("  ".to_string()),
+        ..no_flags()
+    };
+
+    assert_eq!(
+        CheckOptions::resolve(&blank, &entry).openrouter_model,
+        "vendor/stored"
+    );
+    assert_eq!(
+        CheckOptions::resolve(&blank, &StoredSettings::default()).openrouter_model,
+        ""
+    );
+}
+
+#[test]
+fn the_flag_wins_over_the_stored_cloud_model() {
+    let entry = stored(r#""openrouterModel": "vendor/stored""#);
+
+    assert_eq!(
+        CheckOptions::resolve(&all_flags(), &entry).openrouter_model,
+        "vendor/flagged"
     );
 }

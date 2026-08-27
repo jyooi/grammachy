@@ -22,7 +22,8 @@ import "format.js" as Format
 BorderSurface {
   id: root
 
-  // "editing", "confirm", "checking", "result", "error", or "notice".
+  // "editing", "confirm", "checking", "result", "error", "cloudConsent", or
+  // "notice".
   property string phase: "editing"
   // The Draft. Edit mode reads and writes it; review mode leaves it alone.
   property string draftText: ""
@@ -72,6 +73,12 @@ BorderSurface {
   property string openaiBaseUrl: ""
   property string openaiModel: ""
   property bool localThinking: true
+  property string openrouterModel: ""
+  property var cloudKey: null
+
+  // The cloud consent card of `docs/spec/evals.md` section 7, or null. The
+  // model comes from `ui/settings.js`, so this file draws it and words nothing.
+  property var consentCard: null
 
   // The Models list of spec section 5.3, passed straight to the Settings view.
   // The card knows nothing about it: Overlay.qml owns every process.
@@ -110,6 +117,8 @@ BorderSurface {
   signal closeRequested()
   signal settingsToggled()
   signal settingChanged(string name, var value)
+  signal cloudContinueRequested()
+  signal cloudCancelRequested()
   signal modelDownloadRequested(string name)
   signal modelCancelRequested()
   signal modelUseRequested(string name)
@@ -127,6 +136,8 @@ BorderSurface {
   readonly property bool showsCard: !root.settingsOpen
   readonly property bool editing: root.showsCard && root.phase === "editing"
   readonly property bool confirming: root.showsCard && root.phase === "confirm"
+  readonly property bool consenting: root.showsCard && root.phase === "cloudConsent"
+    && Boolean(root.consentCard)
   readonly property bool checking: root.showsCard && root.phase === "checking"
   readonly property bool reviewing: root.showsCard && root.phase === "result"
   readonly property bool hasError: root.showsCard && root.phase === "error" && Boolean(root.errorCard)
@@ -163,6 +174,7 @@ BorderSurface {
   function metaLine() {
     if (root.phase === "editing") return "draft, " + Format.units(root.draftUnits)
     if (root.phase === "confirm") return "replace the draft?"
+    if (root.consenting) return String(root.consentCard.meta)
     // The progress line of spec section 9, once the Chunk list says how many
     // Chunks there are. Before that the run is still deciding.
     if (root.phase === "checking") {
@@ -245,6 +257,8 @@ BorderSurface {
       openaiBaseUrl: root.openaiBaseUrl
       openaiModel: root.openaiModel
       localThinking: root.localThinking
+      openrouterModel: root.openrouterModel
+      cloudKey: root.cloudKey
       models: root.models
       modelBusy: root.modelBusy
       modelBusyBytes: root.modelBusyBytes
@@ -396,6 +410,38 @@ BorderSurface {
         }
       }
 
+      // --------------------------------------------- the cloud consent card
+      //
+      // `docs/spec/evals.md` section 7: the first Check on the cloud engine
+      // waits behind this. The Draft is still there behind it, and Cancel goes
+      // straight back to it.
+
+      ColumnLayout {
+        anchors.top: parent.top
+        width: parent.width
+        visible: root.consenting
+        spacing: Style.spacing.md
+
+        Text {
+          Layout.fillWidth: true
+          text: root.consenting ? String(root.consentCard.title) : ""
+          color: Color.popups.text
+          wrapMode: Text.Wrap
+          font.family: Style.font.family
+          font.pixelSize: Style.font.title
+          font.bold: true
+        }
+
+        Text {
+          Layout.fillWidth: true
+          text: root.consenting ? String(root.consentCard.body) : ""
+          color: Color.popups.text
+          wrapMode: Text.Wrap
+          font.family: Style.font.family
+          font.pixelSize: Style.font.body
+        }
+      }
+
       // -------------------------------------------- the inline chunk failure
       //
       // Spec section 9: the error of the Chunk that failed, over the Issues the
@@ -538,6 +584,28 @@ BorderSurface {
         foreground: Color.popups.text
         fontFamily: Style.font.family
         onClicked: root.closeRequested()
+      }
+
+      // Cancel leads, because the question is whether text may leave this
+      // machine and the safe answer is no.
+      Button {
+        visible: root.consenting
+        text: "Cancel"
+        tooltipText: "Esc"
+        bordered: true
+        foreground: Color.popups.text
+        fontFamily: Style.font.family
+        onClicked: root.cloudCancelRequested()
+      }
+
+      Button {
+        visible: root.consenting
+        text: "Continue"
+        tooltipText: "Enter"
+        bordered: true
+        foreground: Color.urgent
+        fontFamily: Style.font.family
+        onClicked: root.cloudContinueRequested()
       }
 
       // Spec section 2: the confirm keeps the Draft unless the reader says

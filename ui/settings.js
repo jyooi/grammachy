@@ -12,16 +12,34 @@
 
 var PLUGIN_ID = "io.github.jyooi.grammachy"
 
-// Every key the Settings view owns, with the default of spec section 7.
+// What the empty `openrouterModel` field shows, the recommended cloud model of
+// `docs/spec/evals.md` section 5.1. It is a placeholder and never a value:
+// spec section 7 gives that key no built-in default, so an empty field stays
+// empty and the CLI answers `bad_arguments`. `settings::OPENROUTER_MODEL_
+// PLACEHOLDER` is the Rust copy, kept equal by `cli/tests/overlay_cloud.rs`.
+var OPENROUTER_MODEL_PLACEHOLDER = "google/gemini-3.7-flash"
+
+// Every key the overlay reads, with the default of spec section 7.
 // `targetEnglish` and `openaiApiKey` are file only, so they get no descriptor
 // and no control; `mergedEntry` still carries them across a write untouched.
+//
+// `cloudConsent` is file only in the sense of section 7 too: the Settings view
+// draws no control for it, and only the consent card writes it. It still needs
+// a descriptor, because the overlay reads it through `valueOf` to decide
+// whether that card is due.
+//
+// `openrouterModel` is the one text field whose fallback is the empty string,
+// which is what makes an unset cloud model `bad_arguments` rather than a model
+// nobody chose.
 var DESCRIPTORS = {
   nativeLanguage: { type: "enum", values: ["none", "zh", "ms", "es", "fr", "de", "pt", "ja"], fallback: "none" },
-  engine: { type: "enum", values: ["languagetool", "openai", "harper"], fallback: "languagetool" },
+  engine: { type: "enum", values: ["languagetool", "openai", "harper", "openrouter"], fallback: "languagetool" },
   autoReplace: { type: "boolean", fallback: false },
   openaiBaseUrl: { type: "string", fallback: "http://127.0.0.1:8080" },
   openaiModel: { type: "string", fallback: "qwen3.8-4b" },
-  localThinking: { type: "boolean", fallback: true }
+  localThinking: { type: "boolean", fallback: true },
+  openrouterModel: { type: "string", fallback: "" },
+  cloudConsent: { type: "boolean", fallback: false }
 }
 
 // The dropdown rows, in the order spec section 7 fixes. The labels are the
@@ -40,8 +58,13 @@ var NATIVE_LANGUAGE_OPTIONS = [
 var ENGINE_OPTIONS = [
   { value: "languagetool", label: "LanguageTool" },
   { value: "openai", label: "Local LLM" },
-  { value: "harper", label: "Harper" }
+  { value: "harper", label: "Harper" },
+  { value: "openrouter", label: "Cloud LLM (OpenRouter)" }
 ]
+
+// The one engine that sends text off this machine, `docs/spec/evals.md`
+// section 7. Every rule below that says "cloud" means this slug.
+var CLOUD_ENGINE = "openrouter"
 
 function isPlainObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value)
@@ -127,18 +150,78 @@ function mergedEntry(entry, name, value) {
   return next
 }
 
+// ------------------------------------------------------------- the cloud
+
+// Whether the consent card of `docs/spec/evals.md` section 7 is due.
+//
+// Only a Check on the cloud engine asks, and it asks once: the stored
+// `cloudConsent` is the whole answer. Picking the engine in the dropdown never
+// asks, because no text has left the machine yet, so a hand-edited
+// `shell.json` still meets this gate on its first Check.
+function needsCloudConsent(engineSlug, entry) {
+  if (String(engineSlug) !== CLOUD_ENGINE) return false
+  return valueOf(entry, "cloudConsent") !== true
+}
+
+// The consent card itself. The overlay draws the title, the body, and the meta
+// line; `Continue` writes `cloudConsent` and `Cancel` sends nothing.
+function cloudConsentCard(modelId) {
+  var model = typeof modelId === "string" ? modelId : ""
+  return {
+    title: "Send text to OpenRouter?",
+    body: "The cloud engine sends the text of this check to openrouter.ai, which passes it to the model provider."
+      + " No other engine sends your text off this machine."
+      + " Continue keeps this answer, and every later cloud check runs without this card.",
+    meta: model.length > 0 ? "cloud engine, " + model : "cloud engine, no model set"
+  }
+}
+
+// The OpenRouter key state, read out of one `grammachy doctor --json` report.
+//
+// The key is a 0600 file the CLI owns, so `doctor` is the only reader the
+// overlay has and no QML ever touches the key itself. A report that never
+// arrived, or one that carries no `key` check, answers null rather than a
+// guess at which state it is in.
+function keyState(report) {
+  if (!isPlainObject(report) || !Array.isArray(report.checks)) return null
+  for (var i = 0; i < report.checks.length; i++) {
+    var check = report.checks[i]
+    if (!isPlainObject(check) || String(check.id) !== "key") continue
+    return {
+      present: check.ok === true,
+      remedy: typeof check.remedy === "string" ? check.remedy : ""
+    }
+  }
+  return null
+}
+
+// The hint line under the cloud model field. The setup command is whatever
+// `doctor` named as the remedy, so the two never drift apart.
+function keyHint(state) {
+  if (!isPlainObject(state)) return ""
+  var head = state.present === true ? "key: present" : "key: missing"
+  var remedy = typeof state.remedy === "string" ? state.remedy : ""
+  return remedy.length > 0 ? head + ". Run: " + remedy : head
+}
+
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
     PLUGIN_ID: PLUGIN_ID,
     DESCRIPTORS: DESCRIPTORS,
     NATIVE_LANGUAGE_OPTIONS: NATIVE_LANGUAGE_OPTIONS,
     ENGINE_OPTIONS: ENGINE_OPTIONS,
+    CLOUD_ENGINE: CLOUD_ENGINE,
+    OPENROUTER_MODEL_PLACEHOLDER: OPENROUTER_MODEL_PLACEHOLDER,
     entryOf: entryOf,
     defaultOf: defaultOf,
     isKnown: isKnown,
     valueOf: valueOf,
     labelOf: labelOf,
     normalised: normalised,
-    mergedEntry: mergedEntry
+    mergedEntry: mergedEntry,
+    needsCloudConsent: needsCloudConsent,
+    cloudConsentCard: cloudConsentCard,
+    keyState: keyState,
+    keyHint: keyHint
   }
 }

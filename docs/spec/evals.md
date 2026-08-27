@@ -221,6 +221,7 @@ Contract: [HUF-206](https://linear.app/huffman/issue/HUF-206); key placement: [H
   Timeout 30 s, kept equal in Rust and `ui/errors.js` by test.
   Cost stays inside Rust as `cost: Option<f64>` on the engine result; the 5.1 envelope is unchanged.
 - Settings: `openrouterModel` (text, placeholder of section 5.1) and file-only `cloudConsent`; dropdown label "Cloud LLM (OpenRouter)"; empty model id is `bad_arguments`.
+  The placeholder is never a fallback: `openrouterModel` has no built-in default, which v1 section 7 states as the one resolved rule.
 - Key: `~/.config/grammachy/openrouter-key`, directory 0700, file 0600, written by `printf '%s' "$KEY" | grammachy setup --openrouter-key`, removed by `setup --remove`, never in `shell.json`, never through QML.
 - Consent card "Send text to OpenRouter?" gates the first Check in `Overlay`; Continue stores `cloudConsent`, Cancel sends nothing.
   The bar widget draws the cloud glyph with the tooltip "Grammachy: cloud engine, text is sent to OpenRouter".

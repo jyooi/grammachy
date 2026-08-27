@@ -38,6 +38,7 @@ const idle = inMode(Keymap.MODE_IDLE)
 const editing = inMode(Keymap.MODE_COMPOSE_EDIT)
 const composeReview = inMode(Keymap.MODE_COMPOSE_REVIEW)
 const confirming = inMode(Keymap.MODE_MODEL_CONFIRM)
+const consenting = inMode(Keymap.MODE_CLOUD_CONSENT)
 
 test("every key of the map answers its own action", () => {
   assert.equal(reviewing(CODES.returnKey), Keymap.ACCEPT)
@@ -164,4 +165,34 @@ test("a modified Enter does not answer the model confirm", () => {
 test("Esc answers the confirm rather than closing the overlay", () => {
   assert.notEqual(confirming(CODES.escape), Keymap.CLOSE)
   assert.equal(confirming(CODES.escape, CODES.alt), Keymap.KEEP_MODEL)
+})
+
+// The cloud consent card, `docs/spec/evals.md` section 7. It is one question,
+// so it answers the keyboard the way the Remove confirm does.
+test("the consent card takes Esc as Cancel and a bare Enter as Continue", () => {
+  assert.equal(consenting(CODES.escape), Keymap.CLOUD_CANCEL)
+  assert.equal(consenting(CODES.returnKey), Keymap.CLOUD_CONTINUE)
+  assert.equal(consenting(CODES.enter), Keymap.CLOUD_CONTINUE)
+})
+
+// Ctrl + Enter is Apply on every other card, so it must never be the key that
+// sends the text to a cloud.
+test("Ctrl + Enter never continues a cloud check", () => {
+  assert.equal(consenting(CODES.returnKey, CODES.control), Keymap.NONE)
+  assert.equal(consenting(CODES.enter, CODES.control), Keymap.NONE)
+})
+
+test("the consent card answers nothing else", () => {
+  for (const key of [CODES.space, CODES.up, CODES.down, CODES.a, CODES.c]) {
+    assert.equal(consenting(key), Keymap.NONE)
+  }
+  assert.equal(consenting(CODES.c, CODES.control), Keymap.NONE)
+  assert.equal(consenting(CODES.a, CODES.alt), Keymap.NONE)
+})
+
+// Esc leaves the popup everywhere else, and here it answers the question. A
+// card that closed the overlay instead would leave the question open behind it.
+test("Esc on the consent card is Cancel and never Close", () => {
+  assert.notEqual(consenting(CODES.escape), Keymap.CLOSE)
+  assert.equal(idle(CODES.escape), Keymap.CLOSE)
 })

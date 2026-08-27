@@ -636,7 +636,101 @@ The file the question asked about is still there.
     One verb runs at a time, so no press may go under an open question.
     Answer Keep, and the buttons come back.
 
-## 16. Running the automated checks
+## 16. The cloud engine and its consent card
+
+`docs/spec/evals.md` section 7.
+The cloud engine is the one engine that sends text off this machine, so this walkthrough is about what leaves and what does not.
+
+You need an OpenRouter key with a small credit on it.
+Nothing here spends more than a fraction of a cent.
+
+### The Settings entries
+
+1. Press SUPER + G on any selection, then click the gear.
+2. Open the Engine dropdown.
+   The fourth row says `Cloud LLM (OpenRouter)`.
+3. Pick it.
+   The Local LLM block goes and a Cloud model block takes its place.
+   The field is empty and its placeholder says `google/gemini-3.7-flash`.
+   Under it a line says the engine sends the text to openrouter.ai.
+4. Read the key hint at the bottom of the block.
+   With no key file it says `key: missing` and names the command that writes one:
+
+```bash
+~/.config/omarchy/plugins/io.github.jyooi.grammachy/bin/grammachy doctor --engine openrouter --json | python3 -m json.tool
+```
+
+The hint is the `key` check of that report.
+The Settings view never reads the key file itself.
+
+5. Write a key, then close and reopen Settings on this engine:
+
+```bash
+printf '%s' "$OPENROUTER_KEY" | ~/.config/omarchy/plugins/io.github.jyooi.grammachy/bin/grammachy setup --openrouter-key
+ls -l ~/.config/grammachy/openrouter-key
+```
+
+The file is mode 0600 and the hint now says `key: present`.
+
+6. Check that the model id and the consent never reach the same place:
+
+```bash
+python3 -c "import json;print(json.load(open('$HOME/.config/omarchy/shell.json')))" | grep -o "openrouter[^,]*"
+grep -r "$OPENROUTER_KEY" ~/.config/omarchy/shell.json ; echo "exit $?"
+```
+
+`shell.json` carries `openrouterModel` and never the key.
+The grep finds nothing and exits 1.
+
+### The bar glyph
+
+7. Look at the bar button.
+   Beside the `G` there is a cloud glyph.
+   Hover it: the tooltip says `Grammachy: cloud engine, text is sent to OpenRouter`.
+8. Set Engine back to Harper.
+   The glyph goes at once and the tooltip is the plain one again.
+   Set Engine to Cloud LLM (OpenRouter) again before the next step.
+
+### Cancel sends nothing
+
+9. Leave the Cloud model field empty and press the gear to leave Settings.
+10. Press Esc, then run a Check on a sentence with a mistake.
+    The card says `Send text to OpenRouter?` and names the model, or says no model is set.
+11. Watch the wire while you answer, in another terminal:
+
+```bash
+sudo tcpdump -n -c 5 host openrouter.ai
+```
+
+12. Press Cancel, or press Esc.
+    The card says nothing was sent, `tcpdump` catches no packet, and the Engine setting is still Cloud LLM (OpenRouter):
+
+```bash
+python3 -c "import json;print(json.load(open('$HOME/.config/omarchy/shell.json')))" | grep -o "cloudConsent[^,]*"
+```
+
+Nothing is stored: the grep finds no `cloudConsent`.
+
+### Continue runs every later check
+
+13. Open Settings, type `google/gemini-3.7-flash` into the Cloud model field, and leave Settings.
+14. Run the Check again and press Continue, or press Enter.
+    The Check runs and the marked text arrives.
+
+```bash
+python3 -c "import json;print(json.load(open('$HOME/.config/omarchy/shell.json')))" | grep -o "cloudConsent[^,]*"
+```
+
+It now says `cloudConsent': True`.
+
+15. Run a second Check.
+    No card stands in front of it.
+16. Press SUPER + SHIFT + G, paste a few paragraphs into the Draft, and press Ctrl + Enter.
+    The card appears once, before the first Chunk, and never between two Chunks of the same run.
+17. Empty the Cloud model field and run a Check.
+    The `bad_arguments` card says the cloud model is not set, because that field has no built-in default.
+
+## 17. Running the automated checks
 
 The same three plugin checks CI runs, against the shell installed on this machine:
 
@@ -693,7 +787,7 @@ The draw is seeded, so the same release redraws the same 325 items.
 The run adds the 40 fixture items to them, which the sidecar never holds.
 A different answer means the conversion rules changed.
 
-## 17. Removing it
+## 18. Removing it
 
 Remove the hotkeys, the menu entry, and the OpenRouter key first (spec section 10):
 

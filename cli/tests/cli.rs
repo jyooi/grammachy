@@ -507,3 +507,20 @@ fn model_needs_a_verb() {
     assert_eq!(result.status, 1);
     assert_eq!(envelope(&result)["error"]["code"], "bad_arguments");
 }
+
+// Spec section 7: `openrouterModel` has no built-in default, so the cloud
+// engine with nothing stored refuses before it opens a socket. No test here
+// may reach openrouter.ai, and this one never does: the refusal comes first.
+#[test]
+fn the_cloud_engine_with_no_model_prints_bad_arguments() {
+    let settings = settings_file(
+        "openrouter-blank-model.json",
+        r#""engine": "openrouter", "openrouterModel": """#,
+    );
+    let result = run_with_settings(&["check"], "He go home.", &settings);
+    let value = envelope(&result);
+
+    assert_eq!(result.status, 1);
+    assert_eq!(value["error"]["code"], "bad_arguments");
+    assert_eq!(value["error"]["message"], "The cloud model is not set.");
+}

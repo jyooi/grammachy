@@ -11,6 +11,7 @@ use serde::Serialize;
 use crate::args::EngineSlug;
 use crate::envelope::CONTRACT_VERSION;
 use crate::model;
+use crate::settings;
 
 use super::facts::{Backend, Facts, HardwareTier, KeyState, UnitState};
 
@@ -532,11 +533,15 @@ fn ready_line(facts: &Facts, engine: EngineSlug) -> String {
         }
         // The one engine that sends text off this machine, so the ready line
         // says where the text goes.
-        EngineSlug::Openrouter => {
-            let model = &facts.openrouter_model;
-            format!(
+        EngineSlug::Openrouter => match settings::non_empty(&facts.openrouter_model) {
+            Some(model) => format!(
                 "The key is in place and the model is {model}. Checks send text to openrouter.ai."
-            )
-        }
+            ),
+            // The model has no built-in default (spec section 7), so a report
+            // that named an empty one would name a Check that cannot run.
+            None => {
+                "The key is in place. Set the cloud model in Settings before a Check.".to_string()
+            }
+        },
     }
 }

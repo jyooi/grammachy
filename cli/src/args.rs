@@ -214,7 +214,8 @@ pub struct CheckArgs {
     pub thinking: Option<Thinking>,
 
     /// The model id the `openrouter` engine asks for, such as
-    /// `deepseek/deepseek-v4-flash`. Omitted uses the stored entry.
+    /// `google/gemini-3.7-flash`. Omitted or blank uses the stored entry,
+    /// which has no built-in default of its own (spec section 7).
     #[arg(long = "openrouter-model", value_name = "ID")]
     pub openrouter_model: Option<String>,
 }
@@ -360,7 +361,8 @@ pub struct CheckOptions {
     pub openai_base_url: String,
     pub openai_model: String,
     pub openai_api_key: String,
-    /// The model id the `openrouter` engine asks for. Empty is `bad_arguments`.
+    /// The model id the `openrouter` engine asks for. It has no built-in
+    /// default (spec section 7), so empty is `bad_arguments`.
     pub openrouter_model: String,
     /// Whether the local engine thinks before it answers (spec section 4).
     /// The adapter sends it per request, so a change needs no unit restart.
@@ -406,9 +408,14 @@ impl CheckOptions {
                 .openai_api_key
                 .clone()
                 .unwrap_or(defaults.openai_api_key),
+            // One `non_empty` rule for the flag and for the file, so a blank
+            // `--openrouter-model` reads the way a blank field does rather
+            // than winning as an empty model id.
             openrouter_model: args
                 .openrouter_model
-                .clone()
+                .as_deref()
+                .and_then(settings::non_empty)
+                .map(str::to_string)
                 .or_else(|| stored.openrouter_model.clone())
                 .unwrap_or(defaults.openrouter_model),
             local_thinking: args

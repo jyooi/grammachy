@@ -28,7 +28,9 @@
       "openaiBaseUrl": "http://127.0.0.1:8080",
       "openaiModel": "qwen3.8-4b",
       "openaiApiKey": "",
-      "localThinking": true
+      "localThinking": true,
+      "openrouterModel": "",
+      "cloudConsent": false
     },
     "schema": [
       {
@@ -63,7 +65,8 @@
         "options": [
           "languagetool",
           "openai",
-          "harper"
+          "harper",
+          "openrouter"
         ],
         "defaultValue": "languagetool"
       },
@@ -96,6 +99,18 @@
         "type": "boolean",
         "label": "Local LLM thinking",
         "defaultValue": true
+      },
+      {
+        "key": "openrouterModel",
+        "type": "string",
+        "label": "Cloud LLM model",
+        "defaultValue": ""
+      },
+      {
+        "key": "cloudConsent",
+        "type": "boolean",
+        "label": "Cloud LLM consent",
+        "defaultValue": false
       }
     ]
   }
