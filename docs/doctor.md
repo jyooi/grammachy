@@ -16,6 +16,12 @@ Doctor names that command only for a catalogue name.
 The `openaiModel` field takes any name, and a name the catalogue does not carry has no download.
 For such a name the detail says to place the `.gguf` file by hand, or to pick a catalogue model.
 
+The weights the `model` check names are the `openaiModel` setting, whose default is the recommended local model.
+That name comes from the benchmark tables by the rules of `docs/spec/evals.md` section 5, which `cli/src/bench/weights.rs` holds.
+The recommended local model is Apache-2.0 or MIT, its weights file is at or under 4 GB, its measured resident memory fits the 8 GB tier, and it ran with thinking on.
+The catalogue keeps a larger row such as `gemma-4-e4b-it` for reference.
+A user may still pick it, and the rules never make it the default.
+
 ```
 grammachy doctor [--engine <slug>] [--json]
 ```
@@ -41,7 +47,7 @@ Grammachy doctor
   ok       Java runtime        /usr/lib/jvm/default/bin/java
   missing  llama.cpp server    llama.cpp is not installed: /usr/bin/llama-server does not exist. Run: sudo pacman -S llama-cpp ggml-cpu ggml-vulkan
   missing  llama.cpp backend   llama.cpp is missing the ggml-cpu and ggml-vulkan backends. It needs ggml-cpu to answer at all. Run: sudo pacman -S ggml-cpu ggml-vulkan
-  missing  Model weights       No weights for gemma-4-e4b-it in /home/u/.local/share/grammachy/models. Run: grammachy model download gemma-4-e4b-it
+  missing  Model weights       No weights for qwen3.8-4b in /home/u/.local/share/grammachy/models. Run: grammachy model download qwen3.8-4b
   ok       Local LLM endpoint  127.0.0.1:8080
   missing  OpenRouter key      No OpenRouter key: /home/u/.config/grammachy/openrouter-key does not exist. Run: printf '%s' "$KEY" | grammachy setup --openrouter-key
   ok       LanguageTool unit   grammachy-languagetool is not running. The next Check starts it.

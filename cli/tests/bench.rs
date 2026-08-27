@@ -599,6 +599,22 @@ fn an_entry_that_names_nothing_still_carries_the_silent_address() {
     }
 }
 
+/// An empty models directory, so the weights-file size of a row is the size its
+/// catalogue row pins and never a `.gguf` the developer happens to keep.
+fn empty_models_dir() -> PathBuf {
+    let dir = scratch_dir().join("models");
+    std::fs::create_dir_all(&dir).expect("the models directory is created");
+    dir
+}
+
+/// The resident memory every server row of the suite reports.
+///
+/// The real number comes from a live LanguageTool or llama.cpp unit, which no
+/// case may need. Evals spec section 5 bars a local row over the 8 GB tier from
+/// the recommendation, so a run that measured nothing recommends nothing. This
+/// is what a 4B model holds on a real machine, and it is inside that tier.
+const RESIDENT_BYTES: u64 = 2_200_000_000;
+
 /// Run `grammachy bench` with the seams that keep the suite off this machine.
 ///
 /// The cloud engine is seamed too, onto a dead address and a scratch key file,
@@ -609,6 +625,18 @@ fn bench(settings: &Path, arguments: &[&str]) -> Run {
 
 /// The same run with the cloud engine pointed at one stub endpoint.
 fn bench_cloud(settings: &Path, arguments: &[&str], openrouter_url: &str) -> Run {
+    bench_seamed(settings, arguments, openrouter_url, RESIDENT_BYTES)
+}
+
+/// The same run with the resident memory of every server row chosen.
+///
+/// A case that wants the tier bar to bite names a number over the tier here.
+fn bench_seamed(
+    settings: &Path,
+    arguments: &[&str],
+    openrouter_url: &str,
+    resident_bytes: u64,
+) -> Run {
     let output = Command::new(env!("CARGO_BIN_EXE_grammachy"))
         .arg("bench")
         .args(arguments)
@@ -618,6 +646,8 @@ fn bench_cloud(settings: &Path, arguments: &[&str], openrouter_url: &str) -> Run
         .env("GRAMMACHY_SHELL_JSON", settings)
         .env("GRAMMACHY_OPENROUTER_URL", openrouter_url)
         .env("GRAMMACHY_OPENROUTER_KEY_FILE", key_file(settings))
+        .env("GRAMMACHY_MODELS_DIR", empty_models_dir())
+        .env("GRAMMACHY_BENCH_RESIDENT_BYTES", resident_bytes.to_string())
         .output()
         .expect("the binary runs");
 
@@ -731,7 +761,7 @@ fn a_named_model_is_evaluated_against_the_endpoint_of_the_settings() {
 
     let run = bench(
         &settings,
-        &["--engine", "openai", "--model", "qwen2.5-7b-instruct"],
+        &["--engine", "openai", "--model", "qwen3-4b-instruct"],
     );
 
     assert_eq!(run.status, 0);
@@ -739,18 +769,50 @@ fn a_named_model_is_evaluated_against_the_endpoint_of_the_settings() {
 
     // The stub answers the plural mistake of zh-02 for every sentence, so the
     // row carries one catch and a false positive on every correct sentence.
-    let model = row(&run.stdout, "qwen2.5-7b-instruct");
+    let model = row(&run.stdout, "qwen3-4b-instruct");
     assert!(model.contains("| 1 of 30 (3.3%) |"), "{model}");
     assert!(model.contains("| 0 of 10 |"), "{model}");
-    let cost = cost_row(&run.stdout, "qwen2.5-7b-instruct");
+    let cost = cost_row(&run.stdout, "qwen3-4b-instruct");
     assert!(
         cost.contains("| 0.00 (local) | Apache-2.0 | recommended |"),
         "{cost}"
     );
     assert!(
         run.stdout
-            .contains("grammachy bench --engine openai --model qwen2.5-7b-instruct"),
+            .contains("grammachy bench --engine openai --model qwen3-4b-instruct"),
         "the file names the command that produced it:\n{}",
+        run.stdout
+    );
+}
+
+/// Evals spec section 5: a local row over the 8 GB tier is a reference result
+/// and never the recommendation, however good its numbers are.
+#[test]
+fn a_local_row_over_the_memory_tier_is_shown_but_never_recommended() {
+    let settings = settings_file(
+        "over-tier.json",
+        &format!(
+            r#""openaiBaseUrl": "http://{}""#,
+            stub_server(answer_body(None))
+        ),
+    );
+
+    let run = bench_seamed(
+        &settings,
+        &["--engine", "openai", "--model", "qwen3-4b-instruct"],
+        &format!("http://{}", silent_address()),
+        9_000_000_000,
+    );
+
+    assert_eq!(run.status, 0, "{}", run.stdout);
+    let cost = cost_row(&run.stdout, "qwen3-4b-instruct");
+    assert!(cost.contains("| no, over the 8 GB tier |"), "{cost}");
+    // It is still a full row: the table shows every number it measured.
+    assert!(cost.contains("| 9.0 GB |"), "{cost}");
+    assert!(
+        run.stdout
+            .contains("No local row is eligible for the recommendation."),
+        "{}",
         run.stdout
     );
 }
@@ -773,7 +835,7 @@ fn a_model_with_non_commercial_weights_is_shown_but_never_recommended() {
             "--model",
             "qwen2.5-3b-instruct",
             "--model",
-            "qwen2.5-7b-instruct",
+            "qwen3-4b-instruct",
         ],
     );
 
@@ -790,7 +852,7 @@ fn a_model_with_non_commercial_weights_is_shown_but_never_recommended() {
         run.stdout
     );
     assert!(
-        cost_row(&run.stdout, "qwen2.5-7b-instruct").contains("| recommended |"),
+        cost_row(&run.stdout, "qwen3-4b-instruct").contains("| recommended |"),
         "{}",
         run.stdout
     );
@@ -816,7 +878,7 @@ fn the_thinking_flag_and_not_the_stored_setting_decides_the_mode_of_a_row() {
             ),
         );
 
-        let mut arguments = vec!["--engine", "openai", "--model", "qwen2.5-7b-instruct"];
+        let mut arguments = vec!["--engine", "openai", "--model", "qwen3-4b-instruct"];
         if let Some(flag) = flag {
             arguments.extend(["--thinking", flag]);
         }
@@ -864,7 +926,7 @@ fn thinking_both_prints_two_rows_for_one_local_model() {
             "--engine",
             "openai",
             "--model",
-            "qwen2.5-7b-instruct",
+            "qwen3-4b-instruct",
             "--thinking",
             "both",
         ],
@@ -873,7 +935,7 @@ fn thinking_both_prints_two_rows_for_one_local_model() {
     assert_eq!(run.status, 0, "{}", run.stdout);
     assert!(
         run.stdout.contains(
-            "Command: `grammachy bench --engine openai --model qwen2.5-7b-instruct --thinking both`."
+            "Command: `grammachy bench --engine openai --model qwen3-4b-instruct --thinking both`."
         ),
         "the file names the flag it was generated with: {}",
         run.stdout
@@ -882,22 +944,22 @@ fn thinking_both_prints_two_rows_for_one_local_model() {
     let cost: Vec<&str> = table(&run.stdout, "### Cost")
         .lines()
         .filter(|line| {
-            line.starts_with("| `qwen2.5-7b-instruct` | on |")
-                || line.starts_with("| `qwen2.5-7b-instruct` | off |")
+            line.starts_with("| `qwen3-4b-instruct` | on |")
+                || line.starts_with("| `qwen3-4b-instruct` | off |")
         })
         .collect();
     assert_eq!(cost.len(), 2, "one Cost row per mode: {}", run.stdout);
     assert!(
-        cost[0].starts_with("| `qwen2.5-7b-instruct` | on |"),
+        cost[0].starts_with("| `qwen3-4b-instruct` | on |"),
         "{cost:?}"
     );
     assert!(
-        cost[1].starts_with("| `qwen2.5-7b-instruct` | off |"),
+        cost[1].starts_with("| `qwen3-4b-instruct` | off |"),
         "{cost:?}"
     );
     assert!(
         run.stdout
-            .contains("Resident memory of `qwen2.5-7b-instruct` with thinking off is"),
+            .contains("Resident memory of `qwen3-4b-instruct` with thinking off is"),
         "the prose under the table says which row it means: {}",
         run.stdout
     );
@@ -907,16 +969,16 @@ fn thinking_both_prints_two_rows_for_one_local_model() {
     let wall: Vec<&str> = run
         .stdout
         .lines()
-        .filter(|line| line.starts_with("Wall time of `qwen2.5-7b-instruct`"))
+        .filter(|line| line.starts_with("Wall time of `qwen3-4b-instruct`"))
         .collect();
     assert_eq!(wall.len(), 2, "one wall time per row: {}", run.stdout);
     assert!(
-        wall[0].starts_with("Wall time of `qwen2.5-7b-instruct` with thinking on: ")
+        wall[0].starts_with("Wall time of `qwen3-4b-instruct` with thinking on: ")
             && wall[0].ends_with(" s for the whole set."),
         "the first row of a model claims no server start: {wall:?}"
     );
     assert!(
-        wall[1].starts_with("Wall time of `qwen2.5-7b-instruct` with thinking off: ")
+        wall[1].starts_with("Wall time of `qwen3-4b-instruct` with thinking off: ")
             && wall[1].ends_with(
                 " s for the whole set, on the server the earlier row of this model ran on."
             ),
@@ -929,7 +991,7 @@ fn thinking_both_prints_two_rows_for_one_local_model() {
     );
     assert!(
         run.stdout.contains(
-            "Recommended local model, the Settings default and the README line: `qwen2.5-7b-instruct`, with thinking"
+            "Recommended local model, the Settings default and the README line: `qwen3-4b-instruct`, with thinking"
         ),
         "the README line names the mode the winning row ran under: {}",
         run.stdout
@@ -988,7 +1050,7 @@ fn a_model_on_an_engine_that_takes_none_is_a_bad_arguments_envelope() {
 
     let run = bench(
         &settings,
-        &["--engine", "harper", "--model", "qwen2.5-7b-instruct"],
+        &["--engine", "harper", "--model", "qwen3-4b-instruct"],
     );
 
     assert_eq!(run.status, 1);
@@ -1152,7 +1214,7 @@ fn record_keeps_one_entry_per_thinking_mode_of_a_local_model() {
             "--engine",
             "openai",
             "--model",
-            "qwen2.5-7b-instruct",
+            "qwen3-4b-instruct",
             "--thinking",
             "both",
             "--record",
@@ -1170,7 +1232,7 @@ fn record_keeps_one_entry_per_thinking_mode_of_a_local_model() {
     for mode in [Some(true), Some(false)] {
         let rows: Vec<&RecordedCheck> = checks
             .iter()
-            .filter(|c| c.model == "qwen2.5-7b-instruct" && c.thinking == mode)
+            .filter(|c| c.model == "qwen3-4b-instruct" && c.thinking == mode)
             .collect();
         assert_eq!(
             rows.iter().map(|c| c.id.clone()).collect::<Vec<String>>(),
@@ -1181,7 +1243,7 @@ fn record_keeps_one_entry_per_thinking_mode_of_a_local_model() {
     assert_eq!(
         checks
             .iter()
-            .filter(|c| c.model == "qwen2.5-7b-instruct")
+            .filter(|c| c.model == "qwen3-4b-instruct")
             .count(),
         ids.len() * 2,
         "two rows for the named model and no more"

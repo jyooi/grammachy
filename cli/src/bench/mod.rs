@@ -765,10 +765,15 @@ fn model_row(
     spend: &Mutex<Spend>,
 ) -> (ModelRow, Vec<RecordedCheck>) {
     let options = row.options(base);
-    let weights = if row.slug.is_cloud() {
-        weights::HOSTED
+    // A cloud row keeps no weights on this machine, so it takes neither a
+    // license nor a file size. Both are what the local bars of `weights` read.
+    let (weights, file_bytes) = if row.slug.is_cloud() {
+        (weights::HOSTED, None)
     } else {
-        weights::of(&row.model)
+        (
+            weights::of(&row.model),
+            crate::model::file_bytes(&row.model),
+        )
     };
     let (outcome, checks) = measure(row.slug, &options, sentences, spend, Pass::Sentences);
     (
@@ -778,6 +783,7 @@ fn model_row(
             thinking: row.thinking,
             server_use,
             weights,
+            file_bytes,
             outcome,
         },
         checks,
@@ -1103,6 +1109,11 @@ fn one_per_item(checks: &[RecordedCheck]) -> Vec<&RecordedCheck> {
 /// LanguageTool is a JVM on the CPU, so RSS is the whole of what it holds. The
 /// llama.cpp server may hold its weights on a graphics device instead, where
 /// RSS cannot see them, so [`memory::server_reading`] asks the device first.
+///
+/// Both server readings answer [`memory::RESIDENT_SEAM`] first, because the
+/// number they read decides whether the row clears the tier bar of spec
+/// section 5. Without the seam a case that wants a recommended row would need a
+/// live server on the machine that runs the suite.
 fn memory_reading(slug: EngineSlug, before: Option<u64>) -> Reading {
     match slug {
         EngineSlug::Harper => {
@@ -1111,13 +1122,17 @@ fn memory_reading(slug: EngineSlug, before: Option<u64>) -> Reading {
                 .map(|(after, before)| after.saturating_sub(before));
             Reading::new(growth, Source::Growth)
         }
-        EngineSlug::Languagetool => {
-            let pid = memory::unit_main_pid(languagetool::unit::UNIT_NAME);
-            Reading::new(pid.and_then(memory::resident_bytes), Source::ServerRss)
-        }
-        EngineSlug::Openai => {
-            memory::server_reading(memory::unit_main_pid(openai::unit::UNIT_NAME))
-        }
+        EngineSlug::Languagetool => match memory::seam_bytes() {
+            Some(bytes) => Reading::new(Some(bytes), Source::ServerRss),
+            None => {
+                let pid = memory::unit_main_pid(languagetool::unit::UNIT_NAME);
+                Reading::new(pid.and_then(memory::resident_bytes), Source::ServerRss)
+            }
+        },
+        EngineSlug::Openai => match memory::seam_bytes() {
+            Some(bytes) => Reading::new(Some(bytes), Source::ServerRss),
+            None => memory::server_reading(memory::unit_main_pid(openai::unit::UNIT_NAME)),
+        },
         EngineSlug::Openrouter => Reading::new(None, Source::Provider),
     }
 }

@@ -72,7 +72,7 @@ test("a missing key reads as the spec section 7 default", () => {
   assert.equal(valueOf({ id: PLUGIN_ID }, "engine"), "languagetool")
   assert.equal(valueOf({ id: PLUGIN_ID }, "autoReplace"), false)
   assert.equal(valueOf({ id: PLUGIN_ID }, "openaiBaseUrl"), "http://127.0.0.1:8080")
-  assert.equal(valueOf({ id: PLUGIN_ID }, "openaiModel"), "gemma-4-e4b-it")
+  assert.equal(valueOf({ id: PLUGIN_ID }, "openaiModel"), "qwen3.8-4b")
   assert.equal(valueOf({ id: PLUGIN_ID }, "localThinking"), true)
 })
 
@@ -91,7 +91,7 @@ test("an unknown stored value reads as the default", () => {
   assert.equal(valueOf({ engine: 7 }, "engine"), "languagetool")
   assert.equal(valueOf({ autoReplace: "yes" }, "autoReplace"), false)
   assert.equal(valueOf({ openaiBaseUrl: "" }, "openaiBaseUrl"), "http://127.0.0.1:8080")
-  assert.equal(valueOf({ openaiModel: null }, "openaiModel"), "gemma-4-e4b-it")
+  assert.equal(valueOf({ openaiModel: null }, "openaiModel"), "qwen3.8-4b")
   assert.equal(valueOf({ localThinking: "off" }, "localThinking"), true)
   assert.equal(valueOf({ localThinking: 0 }, "localThinking"), true)
 })
@@ -111,7 +111,7 @@ test("reading never rewrites the entry it was handed", () => {
 test("a write keeps a known value and replaces an unknown one with the default", () => {
   assert.equal(normalised("engine", "harper"), "harper")
   assert.equal(normalised("engine", "claude"), "languagetool")
-  assert.equal(normalised("openaiModel", ""), "gemma-4-e4b-it")
+  assert.equal(normalised("openaiModel", ""), "qwen3.8-4b")
   assert.equal(normalised("openaiBaseUrl", "http://127.0.0.1:9090"), "http://127.0.0.1:9090")
   assert.equal(normalised("autoReplace", true), true)
   assert.equal(normalised("localThinking", false), false)

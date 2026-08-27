@@ -21,11 +21,18 @@ pub const PLUGIN_ID: &str = "io.github.jyooi.grammachy";
 
 /// Spec section 7 defaults for the two OpenAI text fields.
 pub const DEFAULT_OPENAI_BASE_URL: &str = "http://127.0.0.1:8080";
-pub const DEFAULT_OPENAI_MODEL: &str = "gemma-4-e4b-it";
 
-/// The placeholder cloud model until the benchmark picks the recommended one
-/// (HUF-206).
-pub const DEFAULT_OPENROUTER_MODEL: &str = "deepseek/deepseek-v4-flash";
+/// The recommended local model of `docs/benchmarks/`, evals spec section 5.
+///
+/// `bench::weights` is the rule this name answers to: Apache-2.0 or MIT, a
+/// weights file at or under 4 GB, inside the 8 GB tier, and measured with
+/// thinking on. `gemma-4-e4b-it` scored well and is 4.98 GB, so it stays a
+/// reference row of the benchmark files and is never the default.
+pub const DEFAULT_OPENAI_MODEL: &str = "qwen3.8-4b";
+
+/// The recommended cloud model, the best `openrouter` row with no cost ceiling
+/// (HUF-206, evals spec section 5.1).
+pub const DEFAULT_OPENROUTER_MODEL: &str = "google/gemini-3.7-flash";
 
 /// Spec section 4: thinking is on by default for the local engine, everywhere.
 pub const DEFAULT_LOCAL_THINKING: bool = true;

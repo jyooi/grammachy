@@ -14,7 +14,13 @@
 //! native language. The recommendation is decided here, from the rows: the
 //! best eligible local row by exact fix rate, then F0.5, then lower p50, above
 //! the validity floor and never with more false positives than the default
-//! engine. Cloud rows compete only for the separate cloud line.
+//! engine. `bench::weights` owns what makes a row eligible in the first place,
+//! license, thinking mode, weights file size, and tier fit. This module ranks
+//! what clears those bars and never invents a bar of its own.
+//!
+//! Cloud rows compete only for the separate cloud line, which takes quality
+//! with no cost ceiling. A second line names the cheapest cloud row inside the
+//! value window beside it, so the cost trade-off stays visible.
 //!
 //! A run with `--eval-set` prints those tables twice, once per set, and only
 //! the eval set decides (`docs/spec/evals.md` section 5). The other set prints
@@ -29,7 +35,7 @@ use crate::bench::machine::Machine;
 use crate::bench::memory::Reading;
 use crate::bench::metrics::Tally;
 use crate::bench::mode_word;
-use crate::bench::weights::{Terms, Weights};
+use crate::bench::weights::{self, Terms, Weights};
 
 /// What one row prints in every measured column when the row did not run.
 const SKIPPED: &str = "skipped";
@@ -57,8 +63,12 @@ pub enum Outcome {
 
 impl Outcome {
     fn tally(&self) -> Option<&Tally> {
+        self.measurement().map(|measurement| &measurement.tally)
+    }
+
+    fn measurement(&self) -> Option<&Measurement> {
         match self {
-            Outcome::Measured(measurement) => Some(&measurement.tally),
+            Outcome::Measured(measurement) => Some(measurement),
             Outcome::Skipped(_) => None,
         }
     }
@@ -106,6 +116,12 @@ pub struct ModelRow {
     /// Whether this row shares the server an earlier row of its model ran on.
     pub server_use: ServerUse,
     pub weights: Weights,
+    /// The size of the weights file on disk, which the on-device ceiling of
+    /// `bench::weights` is about.
+    ///
+    /// `None` for a cloud row, which keeps no weights on this machine, and for
+    /// a local name the run found neither a file nor a catalogue row for.
+    pub file_bytes: Option<u64>,
     pub outcome: Outcome,
 }
 
@@ -671,6 +687,7 @@ impl Report {
         let default_fp = self.default_engine_false_positives(set);
         let local_winner = self.winner(set, false, default_fp);
         let cloud_winner = self.winner(set, true, default_fp);
+        let value = self.value_cloud(set, default_fp, cloud_winner);
 
         set.models
             .iter()
@@ -682,6 +699,9 @@ impl Report {
                 if Some(index) == cloud_winner {
                     return "recommended cloud model".to_string();
                 }
+                if Some(index) == value {
+                    return "value cloud model".to_string();
+                }
                 match self.objection(row, default_fp) {
                     Some(why) => why,
                     None => "eligible".to_string(),
@@ -691,13 +711,30 @@ impl Report {
     }
 
     /// Why one row cannot be recommended, or `None` when it can.
+    ///
+    /// The bars come in the order that names the cheapest true reason first:
+    /// what the row is, then what it measured, then what it costs the machine.
+    /// A cloud row keeps no weights here, so the three local bars of
+    /// `bench::weights` never touch it.
     fn objection(&self, row: &ModelRow, default_fp: Option<usize>) -> Option<String> {
         if let Some(why) = row.weights.objection() {
             return Some(why.to_string());
         }
-        let Some(tally) = row.outcome.tally() else {
+        if !row.is_cloud() {
+            // The file size is a property of the model and the mode is a
+            // property of the row, so a model over the ceiling gives one
+            // reason on both of its rows rather than two.
+            if let Some(why) = weights::file_objection(row.file_bytes) {
+                return Some(why);
+            }
+            if let Some(why) = weights::thinking_objection(row.thinking) {
+                return Some(why);
+            }
+        }
+        let Some(measurement) = row.outcome.measurement() else {
             return Some("no, the row was skipped".to_string());
         };
+        let tally = &measurement.tally;
         if tally.validity_percent() < VALIDITY_FLOOR {
             return Some(format!("no, validity under {VALIDITY_FLOOR:.0}%"));
         }
@@ -706,6 +743,11 @@ impl Report {
                 "no, more false positives than `{}`",
                 self.default_engine
             ));
+        }
+        if !row.is_cloud() {
+            if let Some(why) = weights::tier_objection(measurement.memory.bytes) {
+                return Some(why);
+            }
         }
         None
     }
@@ -725,6 +767,82 @@ impl Report {
                     .then(b.p50_ms.cmp(&a.p50_ms))
             })
             .map(|(index, _, _)| index)
+    }
+
+    /// The cheapest eligible cloud row within the value window, or `None`.
+    ///
+    /// The cloud line takes quality with no cost ceiling (spec section 5.1), so
+    /// the value line is what keeps the cost trade-off visible. A row qualifies
+    /// when its exact fix rate is no more than [`weights::VALUE_WINDOW_POINTS`]
+    /// behind the recommended row and it costs less per 1,000 Checks. Nothing
+    /// cheaper inside the window means no value line at all: naming a row that
+    /// saves nothing would read as a trade-off the reader never got.
+    ///
+    /// The window is exact fix rate rather than [`Report::rank_score`]. The
+    /// judge grades the product default alone, so the swapped measure would
+    /// compare a graded row with an ungraded one on two different scales.
+    fn value_cloud(
+        &self,
+        set: &SetTables,
+        default_fp: Option<usize>,
+        recommended: Option<usize>,
+    ) -> Option<usize> {
+        let best = set.models.get(recommended?)?.outcome.tally()?;
+        let floor = best.exact_rate_percent() - weights::VALUE_WINDOW_POINTS;
+        let ceiling = best.cost_per_1000()?;
+
+        set.models
+            .iter()
+            .enumerate()
+            .filter(|(index, row)| row.is_cloud() && Some(*index) != recommended)
+            .filter(|(_, row)| self.objection(row, default_fp).is_none())
+            .filter_map(|(index, row)| {
+                let tally = row.outcome.tally()?;
+                let cost = tally.cost_per_1000()?;
+                (tally.exact_rate_percent() >= floor && cost < ceiling).then_some((index, cost))
+            })
+            .min_by(|(_, a), (_, b)| a.total_cmp(b))
+            .map(|(index, _)| index)
+    }
+
+    /// Why this run names no value cloud model, in one sentence.
+    ///
+    /// A reader of a committed benchmark file must be able to tell "nothing was
+    /// cheaper" from "nothing was priced" (HUF-232). So the comparison sentence
+    /// prints only when the run really compared two costs. Every other reason
+    /// gets a sentence of its own, and each sentence is true whenever it prints.
+    fn no_value_line(&self, set: &SetTables, default_fp: Option<usize>) -> String {
+        let recommended = self.winner(set, true, default_fp);
+        let priced = recommended
+            .and_then(|index| set.models.get(index))
+            .and_then(|row| row.outcome.tally())
+            .and_then(Tally::cost_per_1000);
+        let rivals: Vec<Option<f64>> = set
+            .models
+            .iter()
+            .enumerate()
+            .filter(|(index, row)| row.is_cloud() && Some(*index) != recommended)
+            .filter(|(_, row)| self.objection(row, default_fp).is_none())
+            .filter_map(|(_, row)| row.outcome.tally())
+            .map(Tally::cost_per_1000)
+            .collect();
+
+        let reason = if priced.is_none() {
+            "The recommended cloud row reported no cost".to_string()
+        } else if rivals.is_empty() {
+            match set.models.iter().filter(|row| row.is_cloud()).count() {
+                1 => "Only one cloud row ran".to_string(),
+                _ => "No other cloud row is eligible for the comparison".to_string(),
+            }
+        } else if rivals.iter().all(Option::is_none) {
+            "No other cloud row reported a cost".to_string()
+        } else {
+            format!(
+                "No cloud row is cheaper than the recommended one within {:.0} points of exact fix",
+                weights::VALUE_WINDOW_POINTS
+            )
+        };
+        format!("{reason}, so this run names no value cloud model.\n")
     }
 
     /// The false positives of the default engine on this set, when it ran.
@@ -768,7 +886,7 @@ impl Report {
         }
         match named("recommended cloud model") {
             Some(row) => out.push_str(&format!(
-                "Recommended cloud model, the `openrouterModel` line of the README: `{}`. Cloud is never the default engine.\n",
+                "Recommended cloud model, the `openrouterModel` line of the README: `{}`, on quality with no cost ceiling. Cloud is never the default engine.\n",
                 row.model
             )),
             None if set.models.iter().any(ModelRow::is_cloud) => {
@@ -776,14 +894,33 @@ impl Report {
             }
             None => {}
         }
+        // The value line prints only when a cheaper cloud row is inside the
+        // window, because a line that named the recommended row again would
+        // claim a trade-off the reader never got (spec section 5).
+        if let Some(row) = named("value cloud model") {
+            out.push_str(&format!(
+                "Value cloud model, the cheapest cloud row within {:.0} points of exact fix: `{}` at {} per 1,000 Checks, against {} for the recommended one.\n",
+                weights::VALUE_WINDOW_POINTS,
+                row.model,
+                cost_cell(row),
+                named("recommended cloud model").map(cost_cell).unwrap_or_default(),
+            ));
+        } else if named("recommended cloud model").is_some() {
+            out.push_str(&self.no_value_line(set, default_fp));
+        }
         out.push_str(&format!(
-            "Ranking: {}, then F0.5, then lower p50 (HUF-205). Floors: validity at least {VALIDITY_FLOOR:.0}% and no more false positives than the default engine, `{}`{}. A recommended local model must also fit the machine tier above (`docs/spec/evals.md` section 5).\n\n",
+            "Ranking: {}, then F0.5, then lower p50 (HUF-205). Floors: validity at least {VALIDITY_FLOOR:.0}% and no more false positives than the default engine, `{}`{}.\n",
             self.ranking_measure(set),
             self.default_engine,
             match default_fp {
                 Some(fp) => format!(", which earned {fp}"),
                 None => ", which was skipped in this run, so that floor was not applied".to_string(),
             }
+        ));
+        out.push_str(&format!(
+            "A recommended local model must also be Apache-2.0 or MIT, run with thinking on, hold a weights file of {} GB or less, and stay inside the {} GB tier by measured resident memory (`docs/spec/evals.md` section 5).\n\n",
+            weights::FILE_CEILING_GB,
+            weights::TIER_MEMORY_GB
         ));
         out
     }
@@ -978,21 +1115,30 @@ fn cost_cells(row: &ModelRow) -> Vec<String> {
         Outcome::Skipped(_) => vec![SKIPPED.to_string(); 4],
         Outcome::Measured(measurement) => {
             let tally = &measurement.tally;
-            let cost = if row.is_cloud() {
-                match tally.cost_per_1000() {
-                    Some(usd) => format!("{usd:.2} USD"),
-                    None => "n/a".to_string(),
-                }
-            } else {
-                "0.00 (local)".to_string()
-            };
             vec![
                 format!("{} ms", tally.p50_ms),
                 format!("{} ms", tally.p95_ms),
                 measurement.memory.cell(),
-                cost,
+                cost_cell(row),
             ]
         }
+    }
+}
+
+/// The Cost per 1,000 Checks cell of one row.
+///
+/// The value line under the tables reads the same cell, so the figure it names
+/// and the figure the table prints are one number.
+fn cost_cell(row: &ModelRow) -> String {
+    let Some(tally) = row.outcome.tally() else {
+        return SKIPPED.to_string();
+    };
+    if !row.is_cloud() {
+        return "0.00 (local)".to_string();
+    }
+    match tally.cost_per_1000() {
+        Some(usd) => format!("{usd:.2} USD"),
+        None => "n/a".to_string(),
     }
 }
 
@@ -1018,7 +1164,6 @@ mod tests {
     use crate::bench::fixture;
     use crate::bench::memory::Source;
     use crate::bench::metrics::Recorded;
-    use crate::bench::weights;
     use crate::envelope::{Category, Issue};
 
     fn tally(caught: usize, exact: usize, false_positives: usize, valid: usize) -> Tally {
@@ -1070,13 +1215,48 @@ mod tests {
         weights: Weights,
         outcome: Outcome,
     ) -> ModelRow {
+        // The real pinned size, so a case that names a catalogue row measures
+        // the real ceiling rather than a number this file invented. A cloud id
+        // is in no catalogue, which is the `None` a cloud row carries anyway.
+        let file_bytes = crate::model::catalogue_size_bytes(name);
         ModelRow {
             model: name.to_string(),
             engine: engine.to_string(),
             thinking,
             server_use: ServerUse::Fresh,
             weights,
+            file_bytes,
             outcome,
+        }
+    }
+
+    /// One cloud row at a chosen exact fix count and cost per 1,000 Checks.
+    ///
+    /// `cost_usd` is the whole row's spend over its priced Checks, so the cell
+    /// the Cost table prints is the figure the case names.
+    fn priced_cloud(id: &str, exact: usize, cost_per_1000: f64) -> ModelRow {
+        let mut numbers = tally(30, exact, 0, 40);
+        numbers.cost_usd = cost_per_1000 * numbers.priced as f64 / 1_000.0;
+        model(id, "openrouter", weights::HOSTED, measured(numbers, None))
+    }
+
+    /// One cloud row whose answers reported no cost, the `n/a` Cost cell.
+    ///
+    /// A provider that files no `usage.cost` leaves the run nothing to compare,
+    /// which is the recorded state of the cloud row of
+    /// `docs/benchmarks/pilot-2026-08-thinking-on.md`.
+    fn unpriced_cloud(id: &str, exact: usize) -> ModelRow {
+        let mut numbers = tally(30, exact, 0, 40);
+        numbers.cost_usd = 0.0;
+        numbers.priced = 0;
+        model(id, "openrouter", weights::HOSTED, measured(numbers, None))
+    }
+
+    /// One local row with a weights file of a size this case chooses.
+    fn sized_model(name: &str, file_bytes: Option<u64>, outcome: Outcome) -> ModelRow {
+        ModelRow {
+            file_bytes,
+            ..model(name, "openai", weights::of(name), outcome)
         }
     }
 
@@ -1225,17 +1405,17 @@ mod tests {
         let mut report = report();
         only(&mut report).models = vec![
             thinking_model(
-                "gemma-4-e4b-it",
+                "qwen3.8-4b",
                 "openai",
                 Some(true),
-                weights::of("gemma-4-e4b-it"),
+                weights::of("qwen3.8-4b"),
                 measured(tally(20, 12, 0, 40), Some(5_000_000_000)),
             ),
             thinking_model(
-                "gemma-4-e4b-it",
+                "qwen3.8-4b",
                 "openai",
                 Some(false),
-                weights::of("gemma-4-e4b-it"),
+                weights::of("qwen3.8-4b"),
                 measured(tally(18, 8, 0, 40), Some(5_000_000_000)),
             ),
             thinking_model(
@@ -1252,11 +1432,11 @@ mod tests {
         let rendered = report.render();
 
         assert!(
-            rendered.contains("| `gemma-4-e4b-it` | on | 20 ms |"),
+            rendered.contains("| `qwen3.8-4b` | on | 20 ms |"),
             "{rendered}"
         );
         assert!(
-            rendered.contains("| `gemma-4-e4b-it` | off | 20 ms |"),
+            rendered.contains("| `qwen3.8-4b` | off | 20 ms |"),
             "{rendered}"
         );
         assert!(
@@ -1268,14 +1448,13 @@ mod tests {
             "the Quality table says why one name is on two rows: {rendered}"
         );
         assert!(
-            rendered.contains(
-                "Wall time of `gemma-4-e4b-it` with thinking on: 12 s for the whole set.\n"
-            ),
+            rendered
+                .contains("Wall time of `qwen3.8-4b` with thinking on: 12 s for the whole set.\n"),
             "a row claims no server start, because the run starts no server: {rendered}"
         );
         assert!(
             rendered.contains(
-                "Wall time of `gemma-4-e4b-it` with thinking off: 12 s for the whole set, on the server the earlier row of this model ran on.\n"
+                "Wall time of `qwen3.8-4b` with thinking off: 12 s for the whole set, on the server the earlier row of this model ran on.\n"
             ),
             "the second row of a model says which server it shared: {rendered}"
         );
@@ -1285,7 +1464,7 @@ mod tests {
         );
         assert!(
             rendered.contains(
-                "Recommended local model, the Settings default and the README line: `gemma-4-e4b-it`, with thinking on."
+                "Recommended local model, the Settings default and the README line: `qwen3.8-4b`, with thinking on."
             ),
             "the README line names the winning row's mode: {rendered}"
         );
@@ -1505,22 +1684,19 @@ mod tests {
         report.max_cost = Some(10.0);
         report.cloud_spend_usd = 0.0016;
         only(&mut report).models = vec![
-            model(
-                "gemma-4-e4b-it",
-                "openai",
-                weights::of("gemma-4-e4b-it"),
-                measured(tally(28, 20, 0, 40), Some(5_000_000_000)),
+            sized_model(
+                "granite-4.2-3b",
+                Some(2_244_012_160),
+                measured(tally(28, 20, 0, 40), Some(3_000_000_000)),
             ),
-            model(
-                "qwen3.5-4b",
-                "openai",
-                weights::of("qwen3.5-4b"),
+            sized_model(
+                "qwen3.8-4b",
+                Some(2_783_446_304),
                 measured(tally(29, 25, 0, 40), Some(3_000_000_000)),
             ),
-            model(
+            sized_model(
                 "phi-4-mini",
-                "openai",
-                weights::of("phi-4-mini"),
+                Some(2_491_874_272),
                 measured(tally(29, 27, 3, 40), Some(3_000_000_000)),
             ),
             model(
@@ -1539,23 +1715,450 @@ mod tests {
 
         let rendered = report.render();
 
-        assert!(rendered.contains("| `qwen3.5-4b` | on | 20 ms | 50 ms | 3.0 GB | 0.00 (local) | Apache-2.0 | recommended |"), "{rendered}");
-        assert!(rendered.contains("| `gemma-4-e4b-it` | on | 20 ms | 50 ms | 5.0 GB | 0.00 (local) | Apache-2.0 | eligible |"), "{rendered}");
+        assert!(rendered.contains("| `qwen3.8-4b` | on | 20 ms | 50 ms | 3.0 GB | 0.00 (local) | Apache-2.0 | recommended |"), "{rendered}");
+        assert!(rendered.contains("| `granite-4.2-3b` | on | 20 ms | 50 ms | 3.0 GB | 0.00 (local) | Apache-2.0 | eligible |"), "{rendered}");
         assert!(rendered.contains("| `phi-4-mini` | on | 20 ms | 50 ms | 3.0 GB | 0.00 (local) | MIT | no, more false positives than `languagetool` |"), "{rendered}");
         assert!(rendered.contains("| `deepseek/deepseek-v4-flash-0731` | - | 20 ms | 50 ms | not measured | 0.02 USD | hosted | recommended cloud model |"), "{rendered}");
         assert!(rendered.contains("| `google/gemini-3.7-flash` | - | 20 ms | 50 ms | not measured | 0.02 USD | hosted | no, validity under 95% |"), "{rendered}");
         assert!(
             rendered.contains(
-                "Recommended local model, the Settings default and the README line: `qwen3.5-4b`, with thinking on."
+                "Recommended local model, the Settings default and the README line: `qwen3.8-4b`, with thinking on."
             ),
             "{rendered}"
         );
-        assert!(rendered.contains("Recommended cloud model, the `openrouterModel` line of the README: `deepseek/deepseek-v4-flash-0731`."), "{rendered}");
+        assert!(rendered.contains("Recommended cloud model, the `openrouterModel` line of the README: `deepseek/deepseek-v4-flash-0731`, on quality with no cost ceiling."), "{rendered}");
         assert!(
             rendered.contains("Cloud spend of this run: 0.0016 USD of the 10 USD cap, summed over the answers that reported a cost."),
             "{rendered}"
         );
-        assert!(rendered.contains("| `qwen3.5-4b` | 29 of 30 (96.7%) | 29 of 30 (96.7%) | 29 of 30 (96.7%) | 96.7% | 25 of 30 (83.3%) | 0 of 10 | 6.7 | 40 of 40 (100.0%) |"), "{rendered}");
+        assert!(rendered.contains("| `qwen3.8-4b` | 29 of 30 (96.7%) | 29 of 30 (96.7%) | 29 of 30 (96.7%) | 96.7% | 25 of 30 (83.3%) | 0 of 10 | 6.7 | 40 of 40 (100.0%) |"), "{rendered}");
+    }
+
+    /// The captain decision of 2026-08-27: 4 GB on disk is the on-device
+    /// target, so the shipped reference row is a row the file keeps and never
+    /// recommends.
+    #[test]
+    fn a_local_row_over_the_four_gigabyte_file_ceiling_is_never_recommended() {
+        let mut report = report();
+        only(&mut report).models = vec![
+            sized_model(
+                "gemma-4-e4b-it",
+                Some(4_977_171_584),
+                measured(tally(30, 28, 0, 40), Some(2_200_000_000)),
+            ),
+            sized_model(
+                "qwen3.8-4b",
+                Some(2_783_446_304),
+                measured(tally(28, 20, 0, 40), Some(2_200_000_000)),
+            ),
+        ];
+
+        let rendered = report.render();
+
+        assert!(
+            rendered.contains("| Apache-2.0 | no, the weights file is over 4 GB |"),
+            "the better row is kept and refused by the ceiling: {rendered}"
+        );
+        assert!(
+            rendered.contains(
+                "Recommended local model, the Settings default and the README line: `qwen3.8-4b`, with thinking on."
+            ),
+            "the best row under the ceiling wins: {rendered}"
+        );
+        assert!(
+            rendered.contains("| `gemma-4-e4b-it` | 30 of 30 (100.0%) |"),
+            "an over-size row still prints every number it measured: {rendered}"
+        );
+    }
+
+    /// Spec section 5: two rows level on exact fix rate are separated by F0.5.
+    ///
+    /// Both rows fix the same 25 sentences, so the first measure ties. One of
+    /// them pairs more Issues with an expected edit, which is the higher F0.5,
+    /// and that row takes the line.
+    #[test]
+    fn a_tie_on_exact_fix_is_broken_by_the_higher_f05() {
+        let mut report = report();
+        // The winner is listed first, so a run that ignored F0.5 and kept the
+        // last row of the tie would name the other one.
+        only(&mut report).models = vec![
+            sized_model(
+                "qwen3.8-4b",
+                Some(2_783_446_304),
+                measured(tally(29, 25, 0, 40), Some(2_200_000_000)),
+            ),
+            sized_model(
+                "granite-4.2-3b",
+                Some(2_244_012_160),
+                measured(tally(22, 25, 0, 40), Some(2_200_000_000)),
+            ),
+        ];
+
+        let rendered = report.render();
+
+        assert!(
+            rendered.contains("| `granite-4.2-3b` | 22 of 30 (73.3%) | 22 of 30 (73.3%) | 22 of 30 (73.3%) | 73.3% | 25 of 30 (83.3%) |"),
+            "both rows fix 25 of 30: {rendered}"
+        );
+        assert!(
+            rendered.contains("| `qwen3.8-4b` | 29 of 30 (96.7%) | 29 of 30 (96.7%) | 29 of 30 (96.7%) | 96.7% | 25 of 30 (83.3%) |"),
+            "both rows fix 25 of 30: {rendered}"
+        );
+        assert!(
+            rendered.contains(
+                "Recommended local model, the Settings default and the README line: `qwen3.8-4b`, with thinking on."
+            ),
+            "the higher F0.5 wins the tie: {rendered}"
+        );
+        assert!(
+            rendered.contains("| `granite-4.2-3b` | on | 20 ms | 50 ms | 2.2 GB | 0.00 (local) | Apache-2.0 | eligible |"),
+            "the loser is eligible and not refused: {rendered}"
+        );
+    }
+
+    /// Spec section 5: two rows level on exact fix rate and on F0.5 are
+    /// separated by the lower p50 latency.
+    #[test]
+    fn a_tie_on_exact_fix_and_f05_is_broken_by_the_lower_p50() {
+        let mut slower = tally(29, 25, 0, 40);
+        slower.p50_ms = 900;
+        let mut faster = tally(29, 25, 0, 40);
+        faster.p50_ms = 300;
+
+        let mut report = report();
+        // The winner is listed first, for the reason the F0.5 case gives.
+        only(&mut report).models = vec![
+            sized_model(
+                "granite-4.2-3b",
+                Some(2_244_012_160),
+                measured(faster, Some(2_200_000_000)),
+            ),
+            sized_model(
+                "qwen3.8-4b",
+                Some(2_783_446_304),
+                measured(slower, Some(2_200_000_000)),
+            ),
+        ];
+
+        let rendered = report.render();
+
+        assert!(
+            rendered.contains("| `qwen3.8-4b` | on | 900 ms | 50 ms | 2.2 GB | 0.00 (local) | Apache-2.0 | eligible |"),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains("| `granite-4.2-3b` | on | 300 ms | 50 ms | 2.2 GB | 0.00 (local) | Apache-2.0 | recommended |"),
+            "the lower p50 wins the tie: {rendered}"
+        );
+        assert!(
+            rendered.contains(
+                "Recommended local model, the Settings default and the README line: `granite-4.2-3b`, with thinking on."
+            ),
+            "{rendered}"
+        );
+    }
+
+    /// A local name the run could size neither on disk nor from the catalogue
+    /// is a row nobody showed to be under the ceiling.
+    #[test]
+    fn a_local_row_of_unknown_file_size_is_never_recommended() {
+        let mut report = report();
+        only(&mut report).models = vec![sized_model(
+            "qwen3.5-4b",
+            None,
+            measured(tally(30, 28, 0, 40), Some(2_200_000_000)),
+        )];
+
+        let rendered = report.render();
+
+        assert!(
+            rendered.contains("| Apache-2.0 | no, the size of the weights file is not known |"),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains("No local row is eligible for the recommendation."),
+            "{rendered}"
+        );
+    }
+
+    /// Spec section 5: the recommended local model fits the 8 GB tier by
+    /// measured resident memory, whatever the machine that ran the benchmark.
+    #[test]
+    fn a_local_row_over_the_tier_is_never_recommended() {
+        let mut report = report();
+        only(&mut report).models = vec![
+            sized_model(
+                "qwen3.8-4b",
+                Some(2_783_446_304),
+                measured(tally(30, 28, 0, 40), Some(9_000_000_000)),
+            ),
+            sized_model(
+                "granite-4.2-3b",
+                Some(2_244_012_160),
+                measured(tally(28, 20, 0, 40), Some(2_200_000_000)),
+            ),
+        ];
+
+        let rendered = report.render();
+
+        assert!(
+            rendered.contains("| 9.0 GB | 0.00 (local) | Apache-2.0 | no, over the 8 GB tier |"),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains(
+                "Recommended local model, the Settings default and the README line: `granite-4.2-3b`, with thinking on."
+            ),
+            "{rendered}"
+        );
+    }
+
+    /// A row the run never sized the memory of cannot be shown to fit.
+    #[test]
+    fn a_local_row_with_no_memory_reading_is_never_recommended() {
+        let mut report = report();
+        only(&mut report).models = vec![sized_model(
+            "qwen3.8-4b",
+            Some(2_783_446_304),
+            measured(tally(30, 28, 0, 40), None),
+        )];
+
+        let rendered = report.render();
+
+        assert!(
+            rendered.contains("| Apache-2.0 | no, the resident memory was not measured |"),
+            "{rendered}"
+        );
+    }
+
+    /// HUF-217 and the captain decision of 2026-08-27: thinking on is the
+    /// product default, so only a thinking-on row competes for the local line.
+    #[test]
+    fn only_a_thinking_on_row_competes_for_the_local_line() {
+        let mut report = report();
+        only(&mut report).models = vec![
+            ModelRow {
+                thinking: Some(false),
+                ..sized_model(
+                    "qwen3.8-4b",
+                    Some(2_783_446_304),
+                    measured(tally(30, 28, 0, 40), Some(2_200_000_000)),
+                )
+            },
+            sized_model(
+                "granite-4.2-3b",
+                Some(2_244_012_160),
+                measured(tally(28, 20, 0, 40), Some(2_200_000_000)),
+            ),
+        ];
+
+        let rendered = report.render();
+
+        assert!(
+            rendered.contains("| off | 20 ms | 50 ms | 2.2 GB | 0.00 (local) | Apache-2.0 | no, thinking off is not the product default |"),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains(
+                "Recommended local model, the Settings default and the README line: `granite-4.2-3b`, with thinking on."
+            ),
+            "the better thinking-off row never takes the line: {rendered}"
+        );
+    }
+
+    /// Spec section 5: the cloud line takes quality with no cost ceiling, and
+    /// the value line names the cheapest row inside the window beside it.
+    ///
+    /// The exact fix counts are the recorded cloud rows of
+    /// `docs/benchmarks/pilot-2026-08-compact.md`, which sit inside the window.
+    #[test]
+    fn the_value_cloud_line_names_the_cheapest_row_inside_the_window() {
+        let mut report = report();
+        report.max_cost = Some(10.0);
+        only(&mut report).models = vec![
+            priced_cloud("google/gemini-3.7-flash", 28, 0.34),
+            priced_cloud("deepseek/deepseek-v4-flash-0731", 27, 0.02),
+        ];
+
+        let rendered = report.render();
+
+        assert!(
+            rendered.contains("| `google/gemini-3.7-flash` | - | 20 ms | 50 ms | not measured | 0.34 USD | hosted | recommended cloud model |"),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains("| `deepseek/deepseek-v4-flash-0731` | - | 20 ms | 50 ms | not measured | 0.02 USD | hosted | value cloud model |"),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains("Value cloud model, the cheapest cloud row within 10 points of exact fix: `deepseek/deepseek-v4-flash-0731` at 0.02 USD per 1,000 Checks, against 0.34 USD for the recommended one."),
+            "{rendered}"
+        );
+    }
+
+    /// The recorded cloud rows of `docs/benchmarks/pilot-2026-08.md`, where the
+    /// cheap row is 13.3 points behind. A row outside the window is no value
+    /// line, and the file says so rather than staying silent.
+    #[test]
+    fn a_cheap_cloud_row_outside_the_window_is_no_value_line() {
+        let mut report = report();
+        report.max_cost = Some(10.0);
+        only(&mut report).models = vec![
+            priced_cloud("google/gemini-3.7-flash", 27, 0.34),
+            priced_cloud("deepseek/deepseek-v4-flash-0731", 23, 0.02),
+        ];
+
+        let rendered = report.render();
+
+        assert!(
+            rendered.contains("| 0.02 USD | hosted | eligible |"),
+            "the cheap row is eligible and is not the value line: {rendered}"
+        );
+        assert!(
+            rendered.contains("No cloud row is cheaper than the recommended one within 10 points of exact fix, so this run names no value cloud model."),
+            "{rendered}"
+        );
+    }
+
+    /// A row inside the window that costs no less than the recommended one
+    /// saves the reader nothing, so it is no value line.
+    #[test]
+    fn a_cloud_row_that_is_no_cheaper_is_no_value_line() {
+        let mut report = report();
+        report.max_cost = Some(10.0);
+        only(&mut report).models = vec![
+            priced_cloud("google/gemini-3.7-flash", 28, 0.34),
+            priced_cloud("deepseek/deepseek-v4-flash-0731", 27, 0.40),
+        ];
+
+        let rendered = report.render();
+
+        assert!(
+            rendered.contains("| 0.40 USD | hosted | eligible |"),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains(
+                "No cloud row is cheaper than the recommended one within 10 points of exact fix"
+            ),
+            "{rendered}"
+        );
+    }
+
+    /// HUF-232: a run that never compared two costs must not say nothing was
+    /// cheaper. `docs/benchmarks/pilot-2026-08-thinking-on.md` is the recorded
+    /// run of this case, where the cloud row's Cost cell is `n/a`.
+    #[test]
+    fn a_recommended_cloud_row_with_no_cost_says_so_rather_than_claiming_a_comparison() {
+        let mut report = report();
+        report.max_cost = Some(10.0);
+        only(&mut report).models = vec![
+            unpriced_cloud("google/gemini-3.7-flash", 28),
+            priced_cloud("deepseek/deepseek-v4-flash-0731", 23, 0.02),
+        ];
+
+        let rendered = report.render();
+
+        assert!(
+            rendered.contains("| n/a | hosted | recommended cloud model |"),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains(
+                "The recommended cloud row reported no cost, so this run names no value cloud model."
+            ),
+            "{rendered}"
+        );
+        assert!(
+            !rendered.contains("No cloud row is cheaper than the recommended one"),
+            "no cost was compared, so the file claims no comparison: {rendered}"
+        );
+    }
+
+    /// A run with one cloud row compared nothing either, and says which of the
+    /// two reasons applies.
+    #[test]
+    fn a_run_with_one_cloud_row_says_so_rather_than_claiming_a_comparison() {
+        let mut report = report();
+        report.max_cost = Some(10.0);
+        only(&mut report).models = vec![priced_cloud("google/gemini-3.7-flash", 28, 0.34)];
+
+        let rendered = report.render();
+
+        assert!(
+            rendered.contains("| 0.34 USD | hosted | recommended cloud model |"),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains("Only one cloud row ran, so this run names no value cloud model."),
+            "{rendered}"
+        );
+        assert!(
+            !rendered.contains("No cloud row is cheaper than the recommended one"),
+            "{rendered}"
+        );
+    }
+
+    /// The recommended row is priced and the other cloud row is not, so the
+    /// window was never applied to a second figure.
+    #[test]
+    fn a_second_cloud_row_with_no_cost_is_named_as_the_reason() {
+        let mut report = report();
+        report.max_cost = Some(10.0);
+        only(&mut report).models = vec![
+            priced_cloud("google/gemini-3.7-flash", 28, 0.34),
+            unpriced_cloud("deepseek/deepseek-v4-flash-0731", 27),
+        ];
+
+        let rendered = report.render();
+
+        assert!(
+            rendered.contains("| n/a | hosted | eligible |"),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains(
+                "No other cloud row reported a cost, so this run names no value cloud model."
+            ),
+            "{rendered}"
+        );
+        assert!(
+            !rendered.contains("No cloud row is cheaper than the recommended one"),
+            "{rendered}"
+        );
+    }
+
+    /// A cheaper cloud row the floors keep out is no comparison either, so the
+    /// file names the eligibility rather than the cost.
+    #[test]
+    fn a_cheaper_cloud_row_the_floors_keep_out_is_no_comparison() {
+        let mut report = report();
+        report.max_cost = Some(10.0);
+        let mut invalid = tally(30, 27, 0, 30);
+        invalid.cost_usd = 0.02 * 30.0 / 1_000.0;
+        invalid.priced = 30;
+        only(&mut report).models = vec![
+            priced_cloud("google/gemini-3.7-flash", 28, 0.34),
+            model(
+                "deepseek/deepseek-v4-flash-0731",
+                "openrouter",
+                weights::HOSTED,
+                measured(invalid, None),
+            ),
+        ];
+
+        let rendered = report.render();
+
+        assert!(
+            rendered.contains("| hosted | no, validity under 95% |"),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains(
+                "No other cloud row is eligible for the comparison, so this run names no value cloud model."
+            ),
+            "{rendered}"
+        );
     }
 
     #[test]
@@ -1605,9 +2208,9 @@ mod tests {
         };
         only(&mut report).models = vec![
             model(
-                "gemma-4-e4b-it",
+                "qwen3.8-4b",
                 "openai",
-                weights::of("gemma-4-e4b-it"),
+                weights::of("qwen3.8-4b"),
                 measured(local, None),
             ),
             model(
@@ -1621,7 +2224,7 @@ mod tests {
         let rendered = report.render();
 
         assert!(
-            rendered.contains("| `gemma-4-e4b-it` | 510 ms | 25.3 | 480 | 30.4 |"),
+            rendered.contains("| `qwen3.8-4b` | 510 ms | 25.3 | 480 | 30.4 |"),
             "{rendered}"
         );
         assert!(
@@ -1638,10 +2241,10 @@ mod tests {
         only(&mut report).engines[0].outcome =
             Outcome::Skipped("LanguageTool did not answer".to_string());
         only(&mut report).models = vec![model(
-            "gemma-4-e4b-it",
+            "qwen3.8-4b",
             "openai",
-            weights::of("gemma-4-e4b-it"),
-            measured(tally(28, 20, 4, 40), None),
+            weights::of("qwen3.8-4b"),
+            measured(tally(28, 20, 4, 40), Some(2_200_000_000)),
         )];
 
         let rendered = report.render();
@@ -1660,19 +2263,19 @@ mod tests {
     fn with_eval_set() -> Report {
         let mut report = report();
         only(&mut report).models = vec![model(
-            "gemma-4-e4b-it",
+            "qwen3.8-4b",
             "openai",
-            weights::of("gemma-4-e4b-it"),
-            measured(tally(28, 20, 0, 40), None),
+            weights::of("qwen3.8-4b"),
+            measured(tally(28, 20, 0, 40), Some(2_200_000_000)),
         )];
         let mut eval = fixture_set();
         eval.name = "Eval set";
         eval.source = "Eval set: 300 error sentences and 65 error-free ones.".to_string();
         eval.models = vec![model(
-            "gemma-4-e4b-it",
+            "qwen3.8-4b",
             "openai",
-            weights::of("gemma-4-e4b-it"),
-            measured(tally(29, 26, 0, 40), None),
+            weights::of("qwen3.8-4b"),
+            measured(tally(29, 26, 0, 40), Some(2_200_000_000)),
         )];
         report.sets.push(eval);
         report
@@ -1717,7 +2320,7 @@ mod tests {
         );
         assert!(
             rendered.contains(
-                "Recommended local model, the Settings default and the README line: `gemma-4-e4b-it`, with thinking on."
+                "Recommended local model, the Settings default and the README line: `qwen3.8-4b`, with thinking on."
             ),
             "{rendered}"
         );
@@ -1728,10 +2331,7 @@ mod tests {
         let rendered = with_eval_set().render();
 
         assert!(rendered.contains("### Missed items"), "{rendered}");
-        assert!(
-            rendered.contains("- `gemma-4-e4b-it`: zh-01\n"),
-            "{rendered}"
-        );
+        assert!(rendered.contains("- `qwen3.8-4b`: zh-01\n"), "{rendered}");
         assert!(
             rendered.contains(
                 "The sentence, the fix, and the model's own answer live in the record file"
@@ -1761,7 +2361,7 @@ mod tests {
                     },
                 );
                 hits.push(Hit {
-                    row: key("openai", "gemma-4-e4b-it"),
+                    row: key("openai", "qwen3.8-4b"),
                     id: id.to_string(),
                     result: format!("an answer for {id}"),
                 });
@@ -1820,18 +2420,17 @@ mod tests {
             crate::bench::metrics::LanguageRecall { pairs: 7, edits: 8 },
         );
         only(&mut report).models = vec![model(
-            "gemma-4-e4b-it",
+            "qwen3.8-4b",
             "openai",
-            weights::of("gemma-4-e4b-it"),
+            weights::of("qwen3.8-4b"),
             measured(tally, None),
         )];
 
         let rendered = report.render();
 
         assert!(
-            rendered.contains(
-                "| Model | zh | es |\n|---|---|---|\n| `gemma-4-e4b-it` | 7 of 8 | 0 of 0 |"
-            ),
+            rendered
+                .contains("| Model | zh | es |\n|---|---|---|\n| `qwen3.8-4b` | 7 of 8 | 0 of 0 |"),
             "{rendered}"
         );
     }
@@ -1841,19 +2440,19 @@ mod tests {
         use crate::bench::judge::{Assessment, Hit, Judgement, Judgements};
 
         let mut report = report();
-        // `gemma` wins on exact fix, `qwen` wins once useful fixes count.
+        // `qwen` wins on exact fix, `phi` wins once useful fixes count.
         only(&mut report).models = vec![
             model(
-                "gemma-4-e4b-it",
+                "qwen3.8-4b",
                 "openai",
-                weights::of("gemma-4-e4b-it"),
-                measured(tally(30, 12, 0, 40), None),
+                weights::of("qwen3.8-4b"),
+                measured(tally(30, 12, 0, 40), Some(2_200_000_000)),
             ),
             model(
                 "phi-4-mini-instruct",
                 "openai",
                 weights::of("phi-4-mini-instruct"),
-                measured(tally(30, 10, 0, 40), None),
+                measured(tally(30, 10, 0, 40), Some(2_200_000_000)),
             ),
         ];
 
@@ -1864,7 +2463,7 @@ mod tests {
         let mut judgements = Judgements::new();
         let mut labels = Judgements::new();
         let mut hits: Vec<Hit> = Vec::new();
-        // Five hits for `phi`, four of them useful, and one for `gemma`.
+        // Five hits for `phi`, four of them useful, and one for `qwen`.
         for index in 0..5 {
             let id = format!("zh-0{index}");
             let result = format!("answer {index}");
@@ -1894,7 +2493,7 @@ mod tests {
             .or_default()
             .insert("one gemma answer".to_string(), entry(true));
         hits.push(Hit {
-            row: key("openai", "gemma-4-e4b-it"),
+            row: key("openai", "qwen3.8-4b"),
             id: "es-01".to_string(),
             result: "one gemma answer".to_string(),
         });
@@ -1917,7 +2516,7 @@ mod tests {
             "{rendered}"
         );
         assert!(
-            rendered.contains("| `gemma-4-e4b-it` | 30 of 30 (100.0%) | 30 of 30 (100.0%) | 30 of 30 (100.0%) | 100.0% | 12 of 30 (40.0%) | 1 of 1 (100.0%) |"),
+            rendered.contains("| `qwen3.8-4b` | 30 of 30 (100.0%) | 30 of 30 (100.0%) | 30 of 30 (100.0%) | 100.0% | 12 of 30 (40.0%) | 1 of 1 (100.0%) |"),
             "{rendered}"
         );
     }
@@ -1965,7 +2564,7 @@ mod tests {
         assert!(rendered.contains("| 4 of 5 (80.0%) |"), "{rendered}");
         // The ranking falls back to exact fix rate, so `gemma` wins again.
         assert!(
-            rendered.contains("Recommended local model, the Settings default and the README line: `gemma-4-e4b-it`, with thinking on."),
+            rendered.contains("Recommended local model, the Settings default and the README line: `qwen3.8-4b`, with thinking on."),
             "{rendered}"
         );
         assert!(
@@ -1999,7 +2598,7 @@ mod tests {
                 name,
                 "openai",
                 weights::of(name),
-                measured(tally(30, *exact, 0, 40), None),
+                measured(tally(30, *exact, 0, 40), Some(2_200_000_000)),
             ));
             for index in 0..*row_hits {
                 let id = format!("{name}-{index}");
@@ -2035,7 +2634,7 @@ mod tests {
     #[test]
     fn one_row_the_file_covers_no_hit_of_drops_the_swapped_measure_for_every_row() {
         let rendered = coverage_report(&[
-            ("gemma-4-e4b-it", 15, 10, None),
+            ("qwen3.8-4b", 15, 10, None),
             ("phi-4-mini-instruct", 12, 10, Some(8)),
         ])
         .render();
@@ -2047,7 +2646,7 @@ mod tests {
         assert!(rendered.contains("| not judged (10 hits) |"), "{rendered}");
         assert!(
             rendered.contains(
-                "The Useful fix column does not count in the ranking, because the judgements file covers no non-exact hit of `gemma-4-e4b-it`.\n"
+                "The Useful fix column does not count in the ranking, because the judgements file covers no non-exact hit of `qwen3.8-4b`.\n"
             ),
             "{rendered}"
         );
@@ -2058,7 +2657,7 @@ mod tests {
         // 15 exact beats 12 exact. The swapped measure would have made it 12
         // plus 8 useful against 15 plus nothing, and handed it to `phi`.
         assert!(
-            rendered.contains("Recommended local model, the Settings default and the README line: `gemma-4-e4b-it`, with thinking on."),
+            rendered.contains("Recommended local model, the Settings default and the README line: `qwen3.8-4b`, with thinking on."),
             "{rendered}"
         );
     }
@@ -2068,7 +2667,7 @@ mod tests {
     #[test]
     fn a_row_with_no_non_exact_hit_does_not_drop_the_swapped_measure() {
         let rendered = coverage_report(&[
-            ("gemma-4-e4b-it", 12, 0, None),
+            ("qwen3.8-4b", 12, 0, None),
             ("phi-4-mini-instruct", 10, 5, Some(5)),
         ])
         .render();
@@ -2094,7 +2693,7 @@ mod tests {
     #[test]
     fn a_skipped_row_that_ran_some_checks_does_not_drop_the_swapped_measure() {
         let mut report = coverage_report(&[
-            ("gemma-4-e4b-it", 12, 0, None),
+            ("qwen3.8-4b", 12, 0, None),
             ("phi-4-mini-instruct", 10, 5, Some(5)),
             ("deepseek/deepseek-v4-flash-0731", 0, 2, None),
         ]);
@@ -2140,9 +2739,9 @@ mod tests {
         let mut hits: Vec<Hit> = Vec::new();
 
         only(&mut report).models = vec![model(
-            "gemma-4-e4b-it",
+            "qwen3.8-4b",
             "openai",
-            weights::of("gemma-4-e4b-it"),
+            weights::of("qwen3.8-4b"),
             Outcome::Skipped("llama.cpp is not installed.".to_string()),
         )];
         // Five graded hits of the `harper` Engines row, every one agreed with,
@@ -2188,7 +2787,7 @@ mod tests {
     fn the_chunk_table_prints_wall_time_validity_and_recall_per_local_row() {
         let mut report = report();
         report.chunks = vec![chunk_row(
-            "gemma-4-e4b-it",
+            "qwen3.8-4b",
             Some(true),
             ChunkOutcome::Measured(Box::new(ChunkMeasurement {
                 tally: recorded_chunk_pass(12, 0),
@@ -2201,7 +2800,7 @@ mod tests {
         assert!(rendered.contains("### Chunk"), "{rendered}");
         let row = rendered
             .lines()
-            .find(|line| line.starts_with("| `gemma-4-e4b-it` | on | 287 s"))
+            .find(|line| line.starts_with("| `qwen3.8-4b` | on | 287 s"))
             .unwrap_or_else(|| panic!("the Chunk row is printed:\n{rendered}"));
         // Seven Drafts answered, and twelve of each Draft's edits paired.
         assert!(row.contains("| 7 of 7 (100.0%) |"), "{row}");
@@ -2216,7 +2815,7 @@ mod tests {
     fn a_chunk_row_counts_a_draft_that_never_answered_against_its_validity() {
         let mut report = report();
         report.chunks = vec![chunk_row(
-            "gemma-4-e4b-it",
+            "qwen3.8-4b",
             Some(true),
             ChunkOutcome::Measured(Box::new(ChunkMeasurement {
                 tally: recorded_chunk_pass(10, 2),
@@ -2227,7 +2826,7 @@ mod tests {
         let rendered = report.render();
         let row = rendered
             .lines()
-            .find(|line| line.starts_with("| `gemma-4-e4b-it` | on |"))
+            .find(|line| line.starts_with("| `qwen3.8-4b` | on |"))
             .unwrap_or_else(|| panic!("the Chunk row is printed:\n{rendered}"));
 
         assert!(row.contains("| 5 of 7 (71.4%) |"), "{row}");
@@ -2240,7 +2839,7 @@ mod tests {
         let mut report = report();
         report.chunks = vec![
             chunk_row(
-                "gemma-4-e4b-it",
+                "qwen3.8-4b",
                 Some(true),
                 ChunkOutcome::Measured(Box::new(ChunkMeasurement {
                     tally: recorded_chunk_pass(12, 0),
@@ -2248,7 +2847,7 @@ mod tests {
                 })),
             ),
             chunk_row(
-                "gemma-4-e4b-it",
+                "qwen3.8-4b",
                 Some(false),
                 ChunkOutcome::Skipped("The model server did not answer in 90 s.".to_string()),
             ),
@@ -2257,15 +2856,15 @@ mod tests {
         let rendered = report.render();
 
         assert!(
-            rendered.contains("| `gemma-4-e4b-it` | on | 287 s |"),
+            rendered.contains("| `qwen3.8-4b` | on | 287 s |"),
             "{rendered}"
         );
         assert!(
-            rendered.contains("| `gemma-4-e4b-it` | off | skipped | skipped | skipped |"),
+            rendered.contains("| `qwen3.8-4b` | off | skipped | skipped | skipped |"),
             "{rendered}"
         );
         assert!(
-            rendered.contains("The Drafts of `gemma-4-e4b-it` with thinking off were not checked: The model server did not answer in 90 s."),
+            rendered.contains("The Drafts of `qwen3.8-4b` with thinking off were not checked: The model server did not answer in 90 s."),
             "{rendered}"
         );
     }
@@ -2289,7 +2888,7 @@ mod tests {
     fn the_chunk_table_prints_once_however_many_sets_the_run_holds() {
         let mut report = with_eval_set();
         report.chunks = vec![chunk_row(
-            "gemma-4-e4b-it",
+            "qwen3.8-4b",
             Some(true),
             ChunkOutcome::Measured(Box::new(ChunkMeasurement {
                 tally: recorded_chunk_pass(12, 0),

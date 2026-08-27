@@ -20,7 +20,7 @@ var DESCRIPTORS = {
   engine: { type: "enum", values: ["languagetool", "openai", "harper"], fallback: "languagetool" },
   autoReplace: { type: "boolean", fallback: false },
   openaiBaseUrl: { type: "string", fallback: "http://127.0.0.1:8080" },
-  openaiModel: { type: "string", fallback: "gemma-4-e4b-it" },
+  openaiModel: { type: "string", fallback: "qwen3.8-4b" },
   localThinking: { type: "boolean", fallback: true }
 }
 

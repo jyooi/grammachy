@@ -106,6 +106,13 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   `--engine openai --model <name>` fills the Models table and does not narrow the Engines table.
   An engine the machine cannot reach is a skipped row, never an error, so a machine without llama.cpp still produces a valid file.
   `cli/src/bench/weights.rs` is the product rule for which models may be recommended (`docs/spec/evals.md` section 5).
+  It holds every bar and `report.rs` only ranks what clears them: Apache-2.0 or MIT, a weights file at or under 4 GB, inside the 8 GB tier by measured resident memory, and thinking on.
+  A row that fails one still prints every number it measured, so `gemma-4-e4b-it` at 4.98 GB stays a reference row and never a default.
+  `ModelRow::file_bytes` is where that size comes from, filled by `model::file_bytes`: the file on disk first, the pinned catalogue size next.
+  A test that drives a transfer through `GRAMMACHY_MODEL_SIZE_BYTES` must not move it, which is why `model::catalogue_size_bytes` reads no seam.
+  The cloud line takes the best `openrouter` row with no cost ceiling, and the value line names the cheapest cloud row within 10 points of exact fix that also costs less.
+  The recommended local model is the `openaiModel` default, which lives in four files.
+  `cli/tests/overlay_model_default.rs` keeps them equal and proves the name clears the bars.
   A cloud row runs on the `openrouter` engine of `cli/src/engines/openrouter/`, described in its own entry above.
   It is why the binary carries a TLS stack: `ureq` runs with the `rustls` feature for it.
   A cloud row needs `--max-cost <usd>`, the cap on the whole run, and the flag is refused when no cloud row runs.
@@ -152,6 +159,8 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   The Chunk table is a gate, not a ranking: wall time, validity, and recall only.
   The Drafts run beside the fixture set alone, so `--eval-set` still checks them once and prints one table.
   `cli/tests/bench.rs` must seam every server the run can reach, LanguageTool and the OpenAI base URL both.
+  It must also seam `GRAMMACHY_BENCH_RESIDENT_BYTES`, which fixes what a server row measured.
+  The tier bar reads that number, so without the seam a recommended row would need a live `grammachy-llama` unit and CI would recommend nothing.
   The OpenAI default is a fixed loopback port, so a machine that already runs llama.cpp there answers a case meant to find nothing.
   `--eval-set` runs the 365-item eval set of `docs/spec/evals.md` section 2 beside the fixture tables, and only the eval set names a recommendation.
   ADR 0003 is the hard rule: the CLC FCE corpus is fetched at run time into the gitignored `cli/.eval-cache/`, and no part of it is committed.
