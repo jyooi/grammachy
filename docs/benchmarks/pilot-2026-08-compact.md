@@ -54,10 +54,6 @@ An answer that reported no cost stays out of that sum, so the figure is a lower 
 
 Time to first token and the token rate come from the model server's own timings. A rate marked `whole request` is output tokens over the request time as seen from this machine, network included, because the provider reports no timings.
 Output tokens per Issue is the output tokens of the row over the Issues the same Checks answered, so it prices one Issue rather than one Check.
-The grammar bounded every local row of this run, so no model thought first.
-A reader must set `localThinking` to false to reproduce these local rows, because the grammar now takes that route alone.
-The default is true and `bench` reads the Setting, so a default run takes the `json_schema` route instead.
-A comparison against `pilot-2026-08-thinking-on.md` is not like for like.
 
 ### Recall by native language
 
