@@ -10,6 +10,7 @@ import "ui/keymap.js" as Keymap
 import "ui/splice.js" as Splice
 import "ui/format.js" as Format
 import "ui/anchor.js" as Anchor
+import "ui/capture.js" as Capture
 import "ui/limits.js" as Limits
 import "ui/models.js" as ModelsJs
 
@@ -58,7 +59,8 @@ Item {
   // Which surface of spec section 2 is on screen: "quick" or "compose".
   property string surface: "quick"
 
-  // Quick: "capturing", "checking", "result", "error", "notice", or "toolong".
+  // Quick: "capturing", "empty", "checking", "result", "error", "notice", or
+  // "toolong".
   // Compose: "editing", "confirm", "checking", "result", "error", or "notice".
   // Both: "cloudConsent", the card in front of the first cloud Check.
   property string phase: "capturing"
@@ -154,6 +156,15 @@ Item {
   // in the global layout, or null when nothing was focused. The quick popup
   // opens beside it and Replace types into it, so both stop guessing.
   property var sourceWindow: null
+
+  // The capture the last Check consumed, spec section 3: the exact text and
+  // the address of the window it came from. The compositor keeps the primary
+  // selection for as long as the source window owns it, so a summon with
+  // nothing highlighted reads this text again; `ui/capture.js` is what calls
+  // that stale. It outlives a summon, because the summon after the next one
+  // reads the same selection.
+  property string lastCapturedText: ""
+  property string lastCapturedWindow: ""
 
   // ------------------------------------------------------------- models
   //
@@ -382,6 +393,9 @@ Item {
     // A chunked run launches one Check after another, so a card that is gone
     // must not leave one walking the rest of the Draft.
     root.cancelChunkRun()
+    // Spec section 3: the capture is done with, whether or not a Check ran on
+    // it, so the primary selection it came from is released here too.
+    root.consumeCapture(root.capturedText, Anchor.windowAddress(root.sourceWindow))
     root.opened = false
   }
 
@@ -561,10 +575,91 @@ Item {
     return typeof text === "string" && text.replace(/^\s+|\s+$/g, "").length > 0
   }
 
+  // The record `ui/capture.js` reads: what the last consumed capture held and
+  // where it came from.
+  function lastCapture() {
+    return Capture.kept(root.lastCapturedText, root.lastCapturedWindow)
+  }
+
+  // The capture is in hand, so the compositor may let the primary selection
+  // go. Spec section 3: this runs only once the capture is consumed, never
+  // before it, or a selection the reader still owns in another application
+  // would be taken away before the Check had read it.
+  //
+  // Consuming the same capture twice clears nothing again: the record already
+  // names it, and the selection is already gone.
+  function consumeCapture(text, address) {
+    if (typeof text !== "string" || text.length === 0) return
+    var window = typeof address === "string" ? address : ""
+    if (Capture.isStale(text, window, root.lastCapture())) return
+    root.lastCapturedText = text
+    root.lastCapturedWindow = window
+    clearPrimary.running = true
+  }
+
   function captured(text) {
+    var address = Anchor.windowAddress(root.sourceWindow)
+    // Spec section 3: the same text from the same window is the selection the
+    // last Check already ran on, so nothing is checked again for free.
+    if (Capture.isStale(text, address, root.lastCapture())) {
+      root.showNothingNew()
+      return
+    }
     root.capturedText = text
     root.truncated = false
+    root.consumeCapture(text, address)
     root.runCheck(text)
+  }
+
+  // Nothing new to check, spec sections 3 and 6. The popup stays open on the
+  // empty state, which offers the kept text rather than a second capture.
+  function showNothingNew() {
+    root.capturedText = ""
+    root.selectionText = ""
+    root.truncated = false
+    root.errorCard = null
+    root.errorDiagnosis = ""
+    root.engineMessage = ""
+    root.phase = "empty"
+  }
+
+  // `Check last text again`, spec section 6: the kept text with no capture at
+  // all, so a selection that has since changed cannot reach the engine.
+  function checkLastAgain() {
+    if (root.lastCapturedText.length === 0) return
+    root.capturedText = root.lastCapturedText
+    root.truncated = false
+    root.runCheck(root.lastCapturedText)
+  }
+
+  // `Clear`, spec section 6. The popup stays open on the empty state with
+  // nothing of the last Check left on it. The Draft is not touched: it is the
+  // one thing the plugin keeps, and no file holds a second copy of it.
+  function clearCapture() {
+    if (root.surface !== "quick") return
+    // A Check still in flight answers into a card that has moved on.
+    root.runGeneration += 1
+    checkProcess.launchPending = false
+    checkProcess.restartQueued = false
+    checkProcess.running = false
+    doctorProcess.restartQueued = false
+    doctorProcess.running = false
+    root.issues = []
+    root.decisions = []
+    root.focusIndex = 0
+    root.engine = ""
+    root.elapsedMs = 0
+    root.applied = false
+    root.noticeTitle = ""
+    root.noticeBody = ""
+    root.noticeMeta = ""
+    // A borrow of the clipboard is the reader's clipboard, so it goes back.
+    if (root.clipboardBorrowed && !restoreClipboard.running)
+      root.restoreBorrowedClipboard()
+    root.borrowedClipboard = ""
+    root.clipboardBorrowed = false
+    root.showNothingNew()
+    Qt.callLater(root.restoreFocus)
   }
 
   function onPrimaryCaptured(text, generation) {
@@ -596,11 +691,19 @@ Item {
 
   function onFallbackCaptured(text, generation) {
     if (!root.isLive(generation)) return
+    var borrowed = root.borrowedClipboard
     root.restoreBorrowedClipboard()
+    // Spec section 3: a field with nothing selected answers Ctrl + C by
+    // leaving the clipboard as it was, so what came back is an earlier copy
+    // rather than a Selection.
+    if (Capture.copiedNothing(borrowed, text)) {
+      root.showNothingNew()
+      return
+    }
     if (root.isSelection(text)) root.captured(text)
-    // Capture found nothing, so the CLI would answer `empty_selection` on an
-    // empty stdin. Showing that card here saves the round trip.
-    else root.showError(Errors.EMPTY_SELECTION, "")
+    // The capture found nothing at all, which is the same answer for the
+    // reader: there is nothing new to check.
+    else root.showNothingNew()
   }
 
   function restoreBorrowedClipboard() {
@@ -1486,6 +1589,7 @@ Item {
     down: Qt.Key_Down,
     a: Qt.Key_A,
     c: Qt.Key_C,
+    l: Qt.Key_L,
     control: Qt.ControlModifier,
     shift: Qt.ShiftModifier,
     alt: Qt.AltModifier,
@@ -1530,6 +1634,7 @@ Item {
     else if (action === Keymap.FOCUS_NEXT) root.moveFocus(1)
     else if (action === Keymap.ACCEPT_ALL) root.acceptAllOpen()
     else if (action === Keymap.COPY) root.copyCorrected()
+    else if (action === Keymap.CLEAR) root.clearCapture()
     else if (action === Keymap.APPLY) root.applyCorrected()
     else if (action === Keymap.REMOVE_MODEL) root.confirmRemoveModel(root.modelConfirm)
     else if (action === Keymap.CLOUD_CONTINUE) root.continueCloudCheck()
@@ -1624,6 +1729,15 @@ Item {
       waitForEnd: true
       onStreamFinished: root.onFallbackCaptured(text, fallbackPaste.startedGeneration)
     }
+  }
+
+  // Spec section 3: the primary selection is released once the capture is
+  // consumed, so the summon after this one reads what the reader highlights
+  // next rather than what they highlighted before. `consumeCapture` is the
+  // only caller, and it runs after the Check has the text in hand.
+  Process {
+    id: clearPrimary
+    command: ["wl-copy", "--primary", "--clear"]
   }
 
   // The clipboard was borrowed, not taken. Put it back exactly as it was.
@@ -2021,6 +2135,7 @@ Item {
         sourceText: root.selectionText
         fullText: root.capturedText
         truncated: root.truncated
+        lastCapturedText: root.lastCapturedText
         limitUnits: root.checkLimitUnits
         issues: root.issues
         decisions: root.decisions
@@ -2073,6 +2188,8 @@ Item {
         onAutoReplaceToggled: root.toggleAutoReplace()
         onFocusRequested: function(index) { root.focusIndex = index }
         onCheckFirstRequested: root.checkFirstUnits()
+        onCheckLastRequested: root.checkLastAgain()
+        onClearRequested: root.clearCapture()
         // Spec section 2: both the too-long card's `Open in Compose` and the
         // Compose button in the hero carry the Selection over as the Draft.
         onComposeRequested: root.composeWith(root.capturedText)

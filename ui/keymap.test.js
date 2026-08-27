@@ -17,6 +17,7 @@ const CODES = {
   down: 106,
   a: 107,
   c: 108,
+  l: 109,
   control: 1,
   shift: 2,
   alt: 4,
@@ -49,6 +50,25 @@ test("every key of the map answers its own action", () => {
   assert.equal(reviewing(CODES.escape), Keymap.CLOSE)
   assert.equal(reviewing(CODES.c, CODES.control), Keymap.COPY)
   assert.equal(reviewing(CODES.returnKey, CODES.control), Keymap.APPLY)
+  assert.equal(reviewing(CODES.l, CODES.control), Keymap.CLEAR)
+})
+
+// Spec section 6: Clear drops the capture and the review that came with it.
+test("Ctrl + L clears the popup and nothing else does", () => {
+  assert.equal(reviewing(CODES.l, CODES.control), Keymap.CLEAR)
+  // The bare letter is not a shortcut, so a stray L decides nothing.
+  assert.equal(reviewing(CODES.l), Keymap.NONE)
+  assert.equal(reviewing(CODES.l, CODES.control | CODES.alt), Keymap.NONE)
+  assert.equal(reviewing(CODES.l, CODES.control | CODES.meta), Keymap.NONE)
+})
+
+// Clear is the popup's alone: Compose keeps a Draft behind its review, and
+// spec section 6 says the Draft is the one thing Clear never touches.
+test("Ctrl + L reaches no card but the popup review", () => {
+  assert.equal(composeReview(CODES.l, CODES.control), Keymap.NONE)
+  assert.equal(editing(CODES.l, CODES.control), Keymap.NONE)
+  assert.equal(idle(CODES.l, CODES.control), Keymap.NONE)
+  assert.equal(confirming(CODES.l, CODES.control), Keymap.NONE)
 })
 
 test("the keypad Enter accepts and replaces like the main Return", () => {

@@ -19,6 +19,8 @@ var COPY = "copy"
 var APPLY = "apply"
 var CHECK = "check"
 var BACK = "back"
+// The Clear of the quick popup, spec section 6.
+var CLEAR = "clear"
 // The Remove confirm of the Models list, spec section 7.
 var REMOVE_MODEL = "removeModel"
 var KEEP_MODEL = "keepModel"
@@ -87,6 +89,11 @@ function action(event, codes, mode) {
   // is typing a draft. Ctrl + Enter is the one key the card keeps.
   if (mode === MODE_COMPOSE_EDIT) return control && enter ? CHECK : NONE
 
+  // Clear is the popup's alone, spec section 6: it drops the capture and the
+  // review that came with it. Compose has a Draft behind its review and keeps
+  // it, so the same press must not reach there.
+  if (mode === MODE_REVIEW && control && key === codes.l) return CLEAR
+
   if (mode !== MODE_REVIEW && mode !== MODE_COMPOSE_REVIEW) return NONE
 
   if (control) {
@@ -117,6 +124,7 @@ if (typeof module !== "undefined" && module.exports) {
     APPLY: APPLY,
     CHECK: CHECK,
     BACK: BACK,
+    CLEAR: CLEAR,
     REMOVE_MODEL: REMOVE_MODEL,
     KEEP_MODEL: KEEP_MODEL,
     CLOUD_CONTINUE: CLOUD_CONTINUE,
