@@ -28,6 +28,9 @@ follows.
 So a run that dies part way leaves the earlier file whole.
 A run that graded nothing refuses to touch a file that exists.
 Pass `--replace` to overwrite the file wholesale instead.
+The run proves it can write the output file before it pays for one call.
+A write that fails anyway prints the judgements on stdout rather than losing
+them.
 
 Usage:
 
@@ -273,6 +276,28 @@ def read_judgements(out: Path) -> dict[str, dict[str, dict]]:
     return existing
 
 
+def prove_out(out: Path) -> str | None:
+    """Prove the output path can hold a file, or say why it cannot.
+
+    Every call this script makes costs money, so a run that cannot store its
+    answers has to end before it pays for them. This is the rule `Plan::of`
+    holds for the record directory, through `open_record`.
+    """
+    pending = pending_path(out)
+    try:
+        out.parent.mkdir(parents=True, exist_ok=True)
+        pending.write_text("")
+    except OSError as failure:
+        return f"--out: {out} cannot be written: {failure}"
+    pending.unlink(missing_ok=True)
+    return None
+
+
+def pending_path(out: Path) -> Path:
+    """The sibling one run writes first and renames onto the output file."""
+    return out.with_name(out.name + ".pending")
+
+
 def write_judgements(out: Path, judgements: dict, replace: bool) -> int:
     """Fold this run's judgements over the file already there, and say how many.
 
@@ -294,7 +319,7 @@ def write_judgements(out: Path, judgements: dict, replace: bool) -> int:
     for item_id, answers in judgements.items():
         merged.setdefault(item_id, {}).update(answers)
 
-    pending = out.with_name(out.name + ".pending")
+    pending = pending_path(out)
     pending.write_text(json.dumps(merged, indent=2, ensure_ascii=False) + "\n")
     os.replace(pending, out)
     return kept
@@ -348,6 +373,12 @@ def main() -> int:
             print("\n--- the first prompt ---\n" + prompt_for(items[0]))
         return 0
 
+    out = arguments.out or checks_path.with_name("judgements.json")
+    refusal = prove_out(out)
+    if refusal is not None:
+        print(refusal, file=sys.stderr)
+        return 1
+
     with concurrent.futures.ThreadPoolExecutor(arguments.jobs) as pool:
         graded = list(pool.map(lambda item: judge(item, arguments.model), items))
 
@@ -365,8 +396,8 @@ def main() -> int:
         }
         spend += answer["cost_usd"] or 0.0
 
-    out = arguments.out or checks_path.with_name("judgements.json")
     refused = not judgements and out.exists() and not arguments.replace
+    dropped = False
     if refused:
         print(
             f"Nothing was graded, so {out} keeps every judgement it already holds.\n"
@@ -374,8 +405,21 @@ def main() -> int:
             file=sys.stderr,
         )
     else:
-        kept = write_judgements(out, judgements, arguments.replace)
-        print(f"{out} now holds this run's judgements over {kept} earlier ones.", file=sys.stderr)
+        try:
+            kept = write_judgements(out, judgements, arguments.replace)
+        except OSError as failure:
+            dropped = True
+            print(
+                f"{out} cannot be written: {failure}\n"
+                "This run's judgements follow on stdout, so nothing it paid for is lost.",
+                file=sys.stderr,
+            )
+            print(json.dumps(judgements, indent=2, ensure_ascii=False))
+        else:
+            print(
+                f"{out} now holds this run's judgements over {kept} earlier ones.",
+                file=sys.stderr,
+            )
     print(
         f"{len(items) - len(failures)} judged, {len(failures)} failed, "
         f"{spend:.2f} USD notional.",
@@ -383,7 +427,7 @@ def main() -> int:
     )
     for failure in failures:
         print(f"  {failure}", file=sys.stderr)
-    return 1 if failures or refused else 0
+    return 1 if failures or refused or dropped else 0
 
 
 if __name__ == "__main__":

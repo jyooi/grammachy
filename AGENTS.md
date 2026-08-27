@@ -124,8 +124,10 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   The OpenAI default is a fixed loopback port, so a machine that already runs llama.cpp there answers a case meant to find nothing.
 - The judge of `docs/spec/evals.md` section 4.4 is two halves that must agree on one rule.
   `cli/bench/judge.py` grades a recorded run, and `cli/src/bench/judge.rs` reads the answer into the Useful fix column.
-  Both select the same sample: a valid Check on an item with edits, where an Issue touches an expected span.
+  Both select nearly the same sample: a valid Check on an item with edits, where an Issue touches an expected span.
   The applied Fixes of that Check must also not reproduce `expected_text`.
+  `judge.py` also drops a thinking-off local row, and `RecordedCheck` carries no `thinking` field yet.
+  The Rust half needs that same predicate when HUF-217 adds the field.
   An item nothing touched is a plain miss and is never judged, because the writer is offered nothing to accept.
   Both files nest the key, item id then result text, which needs no delimiter and folds two models that answered alike onto one judgement.
   `cli/tests/fixtures/judge-labels.json` holds the 17 committed hand labels of HUF-210 and is compiled in.
