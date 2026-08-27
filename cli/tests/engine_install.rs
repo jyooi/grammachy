@@ -9,8 +9,9 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use grammachy::engines::install::{self, Engines, Extractor};
-use grammachy::model::{cancel, Downloader, Failure, State, Transfer};
+use grammachy::engines::install::{
+    self, cancel, Downloader, Engines, Extractor, Failure, State, Transfer,
+};
 
 /// What the fake transfer writes in place of a 250 MB archive.
 const FAKE_ARCHIVE: &[u8] = b"PK fake LanguageTool release for the test suite";
@@ -28,7 +29,7 @@ const ENTRY: &str = "languagetool-server.jar";
 fn pin_the_fake_digest() {
     std::env::set_var(
         install::SHA256_ENV,
-        grammachy::model::sha256_hex(FAKE_ARCHIVE),
+        grammachy::engines::install::sha256_hex(FAKE_ARCHIVE),
     );
 }
 
@@ -148,7 +149,7 @@ fn an_archive_that_does_not_match_the_pin_is_refused() {
 
     assert!(
         matches!(&failure, Failure::DownloadFailed(message)
-            if message.contains(&grammachy::model::sha256_hex(FAKE_ARCHIVE))),
+            if message.contains(&grammachy::engines::install::sha256_hex(FAKE_ARCHIVE))),
         "{failure:?}"
     );
     assert_eq!(

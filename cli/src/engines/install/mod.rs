@@ -2,9 +2,9 @@
 //!
 //! The optional engine components this machine keeps, and the three things a
 //! user does with them: see what is on disk, put one in place, and take it off
-//! again. It is [`crate::model`] for engines rather than for weights, and it
-//! reuses that module's transfer, digest, disk, and cancel wholesale, because
-//! an install is the same download with one more step.
+//! again. `transfer`, `digest`, `disk`, and `cancel` are its own generic
+//! download machinery (HUF-240 retired the `grammachy model` command that used
+//! to share it), because an install is a download with one more step.
 //!
 //! Only `languagetool` is a component. `harper` is compiled into the binary,
 //! `openai` talks to a server the user runs, and `openrouter` is a URL, so
@@ -28,16 +28,22 @@
 //! directory, or a real unit.
 
 pub mod archive;
+pub mod cancel;
 pub mod envelope;
+
+mod digest;
+mod disk;
+mod transfer;
 
 use std::path::{Path, PathBuf};
 
 use crate::args::{EngineNameArgs, EngineVerb};
 use crate::engines::languagetool;
-use crate::model::{self, disk, Downloader, Failure, State, Stopper, Transfer};
 
 pub use archive::{extractor, Extractor};
-pub use envelope::{EngineEnvelope, EngineReport, EngineRow};
+pub use digest::sha256_hex;
+pub use envelope::{EngineEnvelope, EngineReport, EngineRow, State};
+pub use transfer::{Downloader, Failure, Stopper, Transfer};
 
 /// Points the CLI at another engines directory. The test suite sets it, so no
 /// test writes the real one. Not a user-facing setting.
@@ -182,8 +188,7 @@ pub fn is_component(slug: &str) -> bool {
 
 /// Where the components live on this machine.
 ///
-/// The product path is the HOME one, the same rule `openai::unit::
-/// models_directory` keeps: the shell stores its settings under HOME
+/// The product path is the HOME one: the shell stores its settings under HOME
 /// (spec section 7), so `XDG_DATA_HOME` is not read.
 pub fn directory() -> Option<PathBuf> {
     if let Some(value) = std::env::var_os(DIRECTORY_ENV) {
@@ -244,9 +249,9 @@ impl Engines {
         Ok(Engines {
             directory: directory()
                 .ok_or_else(|| "HOME is not set, so there is no engines directory.".to_string())?,
-            download: model::downloader(),
+            download: transfer::downloader(),
             extract: extractor(),
-            stop: model::stopper(),
+            stop: transfer::stopper(),
         })
     }
 
@@ -358,7 +363,7 @@ impl Engines {
             }
         }
 
-        model::promote(&paths.partial, &paths.archive, &release.sha256)
+        transfer::promote(&paths.partial, &paths.archive, &release.sha256)
             .map_err(Failure::DownloadFailed)?;
         self.unpack(row, &release, &paths)?;
         self.finished_row(slug)
@@ -429,7 +434,7 @@ impl Engines {
 
         if paths.tree.exists() {
             if let Err(why) = (self.stop)(row.unit) {
-                if !model::stop_found_nothing_to_stop(&why) {
+                if !transfer::stop_found_nothing_to_stop(&why) {
                     return Err(Failure::BadArguments(why));
                 }
             }
@@ -519,7 +524,7 @@ pub fn run(verb: &EngineVerb) -> EngineEnvelope {
         EngineVerb::List => engines.list_envelope(),
         EngineVerb::Install(EngineNameArgs { slug }) => {
             // Only a transfer can be cancelled, so only a transfer listens.
-            model::cancel::listen();
+            cancel::listen();
             match engines.install(slug) {
                 Ok(row) => engines.report("install", vec![row]),
                 Err(failure) => EngineEnvelope::failure(failure),

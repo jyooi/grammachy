@@ -1,10 +1,10 @@
-//! The pinned digest of a weights file, spec section 10.
+//! The pinned digest of a downloaded archive, spec section 10.
 //!
-//! The catalogue pins every model by sha256, the way `cli.lock` pins the CLI
-//! binary, and the `.part` file is renamed only when the digest matches. That
-//! is one small hash over a multi-gigabyte file, so it is written here rather
-//! than pulled in as a dependency: the release binary is about 13 MB and this
-//! is the only thing in it that needs sha256 at all.
+//! The catalogue pins every component by sha256, the way `cli.lock` pins the
+//! CLI binary, and the `.part` file is renamed only when the digest matches.
+//! That is one small hash over a few hundred megabytes, so it is written here
+//! rather than pulled in as a dependency: the release binary is about 13 MB
+//! and this is the only thing in it that needs sha256 at all.
 
 use std::io::Read;
 use std::path::Path;
@@ -65,9 +65,10 @@ impl Sha256 {
 
     /// Take these bytes a block at a time.
     ///
-    /// The weights are gigabytes, so this walks whole 64-byte blocks rather
-    /// than single bytes: one bounds check and one branch per block instead of
-    /// per byte. The digest is the same either way.
+    /// A component archive is hundreds of megabytes, so this walks whole
+    /// 64-byte blocks rather than single bytes: one bounds check and one
+    /// branch per block instead of per byte. The digest is the same either
+    /// way.
     fn update(&mut self, data: &[u8]) {
         let mut rest = data;
 
@@ -210,8 +211,8 @@ mod tests {
     }
 
     /// The vectors above all fit in one block, so none of them reaches the two
-    /// branches every real weights file takes: the compress in `update` when
-    /// the buffer fills, and the two-block padding in `finalize` when the last
+    /// branches every real archive takes: the compress in `update` when the
+    /// buffer fills, and the two-block padding in `finalize` when the last
     /// block has no room for the length. These are the published FIPS 180-4
     /// vectors, so the expected digests are right independently of this code.
     #[test]
@@ -230,7 +231,7 @@ mod tests {
             sha256_hex(TWO_BLOCKS),
             "cf5b16a778af8380036ce59e7b0492370b249b11e8f07a51afac45037afee9d1"
         );
-        // A million bytes, which is the streaming case a 2.5 GB file is.
+        // A million bytes, which is the streaming case a large archive is.
         assert_eq!(
             sha256_hex(&vec![b'a'; 1_000_000]),
             "cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0"
@@ -263,7 +264,7 @@ mod tests {
     #[test]
     fn a_file_larger_than_one_read_hashes_the_same_as_its_bytes() {
         let directory = scratch("digest-stream");
-        let path = directory.join("weights.bin");
+        let path = directory.join("archive.bin");
         let bytes: Vec<u8> = (0..200_000u32).map(|index| (index % 251) as u8).collect();
         std::fs::write(&path, &bytes).expect("the file is written");
 

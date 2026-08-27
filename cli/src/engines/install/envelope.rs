@@ -1,18 +1,26 @@
 //! The JSON contract of `grammachy engine`, spec section 5.4.
 //!
-//! It is the shape of `grammachy model` (section 5.3) with the row swapped:
-//! every verb prints exactly one envelope, a report carries the whole list the
+//! Every verb prints exactly one envelope, a report carries the whole list the
 //! Settings view draws, and the error envelope is the shared one of section
 //! 5.1 with the two codes only a transfer can answer.
-//!
-//! The state words are the ones a weights row uses, because they say the same
-//! three things about a component on disk, so `ui/engines.js` and
-//! `ui/models.js` read one vocabulary.
 
 use serde::Serialize;
 
 use crate::envelope::{CheckError, ErrorBody, ErrorCode, CONTRACT_VERSION};
-use crate::model::{Failure, State};
+
+use super::transfer::Failure;
+
+/// What one optional component has on disk.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum State {
+    /// Nothing of it is here.
+    Absent,
+    /// A `.part` file is here, so an Install resumes rather than restarts.
+    Partial,
+    /// The whole archive is here, unpacked, and its digest matched the pin.
+    Ready,
+}
 
 /// One row of the optional engines list.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -94,9 +102,8 @@ impl EngineEnvelope {
 
     /// The envelope one [`Failure`] prints.
     ///
-    /// The codes are the ones `grammachy model` answers, because an install is
-    /// the same transfer with a second step: it can be refused, it can fail
-    /// part way, and it can be cancelled.
+    /// An install is a transfer with a second step: it can be refused, it can
+    /// fail part way, and it can be cancelled.
     pub fn failure(failure: Failure) -> Self {
         match failure {
             Failure::BadArguments(message) => {

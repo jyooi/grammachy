@@ -1,10 +1,9 @@
 //! `grammachy doctor`, spec sections 4, 8, 10, and 12.
 //!
-//! `doctor` looks at the binary, LanguageTool, llama.cpp, the model file, and
-//! the two transient units, and prints one line per piece. A missing piece
-//! carries the exact command that installs it, and for llama.cpp that command
-//! names the backend package this machine's hardware tier wants. Nothing here
-//! installs anything: pacman steps stay manual (spec section 10).
+//! `doctor` looks at the binary, LanguageTool, and its transient unit, and
+//! prints one line per piece. A missing piece carries the exact command that
+//! installs it. Nothing here installs anything: pacman steps stay manual
+//! (spec section 10).
 //!
 //! The same run also answers the one-line diagnosis the `engine_unavailable`
 //! card of spec section 8 shows under its body. `--json` prints the whole
@@ -20,7 +19,7 @@ pub mod report;
 
 use crate::args::EngineSlug;
 
-pub use facts::{Facts, HardwareTier, UnitState};
+pub use facts::{Facts, UnitState};
 pub use report::{Check, Report};
 
 /// What one `doctor` run prints and exits with.

@@ -6,7 +6,6 @@ use clap::Parser;
 use grammachy::args::{CheckArgs, CheckOptions, Cli, Command, EngineSlug};
 use grammachy::engines::install::{self as engine_install, EngineEnvelope};
 use grammachy::envelope::{Envelope, ErrorCode};
-use grammachy::model::{self, ModelEnvelope};
 use grammachy::settings::StoredSettings;
 use grammachy::setup::{Setup, SetupEnvelope};
 use grammachy::{bench, check, chunk, doctor};
@@ -18,8 +17,8 @@ use grammachy::{bench, check, chunk, doctor};
 /// when its arguments do not describe a run. A `--record` write that fails
 /// after the rows ran keeps the report on stdout and exits 1.
 /// `doctor` renders its report (spec section 10).
-/// `setup` renders its JSON envelope (spec section 10), and so do `model`
-/// (spec section 5.3) and `engine` (spec section 5.4).
+/// `setup` renders its JSON envelope (spec section 10), and so does `engine`
+/// (spec section 5.4).
 struct Output {
     text: String,
     exit_code: i32,
@@ -48,15 +47,6 @@ impl From<doctor::DoctorOutput> for Output {
         Output {
             text: output.text.trim_end().to_string(),
             exit_code: output.exit_code,
-        }
-    }
-}
-
-impl From<ModelEnvelope> for Output {
-    fn from(envelope: ModelEnvelope) -> Self {
-        Output {
-            text: envelope.to_json(),
-            exit_code: envelope.exit_code(),
         }
     }
 }
@@ -157,14 +147,10 @@ fn run() -> Option<Output> {
                 },
                 &StoredSettings::load(),
             );
-            let facts = doctor::Facts::collect(&options);
+            let facts = doctor::Facts::collect();
             Some(doctor::run(&facts, options.engine, args.json).into())
         }
-        // The engine comes from the Settings entry, the same source a Check
-        // uses (spec section 7).
         Command::Setup(args) => {
-            let defaults = CheckOptions::default();
-            let stored = StoredSettings::load();
             let setup = match Setup::from_env() {
                 Ok(setup) => setup,
                 Err(message) => return Some(SetupEnvelope::error(message).into()),
@@ -172,20 +158,9 @@ fn run() -> Option<Output> {
             let envelope = if args.remove {
                 setup.remove()
             } else {
-                // The Local LLM's weights are no longer part of `setup`
-                // (HUF-240); `model_name` stays until the model-download step
-                // that reads it is removed too.
-                setup.install(stored.engine.unwrap_or(defaults.engine), "")
+                setup.install()
             };
             Some(envelope.into())
-        }
-        // `model` reads no stdin either: the verb names the model, and the
-        // Settings entry says only which one the engine is currently using.
-        Command::Model(args) => {
-            let defaults = CheckOptions::default();
-            let stored = StoredSettings::load();
-            let openai_model = stored.openai_model.unwrap_or(defaults.openai_model);
-            Some(model::run(&args.verb, &openai_model).into())
         }
         // `engine` reads no stdin and no Settings entry: the verb names the
         // component, and which engine a Check runs on says nothing about what

@@ -30,11 +30,8 @@ pub enum Command {
     /// Report what this machine still needs, one line per piece.
     Doctor(DoctorArgs),
 
-    /// Install the hotkeys, the menu entry, and the weights, without a password.
+    /// Install the hotkeys and the menu entry, without a password.
     Setup(SetupArgs),
-
-    /// See, fetch, and delete the Local LLM weights this machine keeps.
-    Model(ModelArgs),
 
     /// See, install, and remove the optional engine components, without sudo.
     Engine(EngineArgs),
@@ -62,30 +59,6 @@ pub enum EngineVerb {
 pub struct EngineNameArgs {
     /// The engine slug, as `grammachy engine list` prints it.
     pub slug: String,
-}
-
-#[derive(Debug, Parser)]
-pub struct ModelArgs {
-    #[command(subcommand)]
-    pub verb: ModelVerb,
-}
-
-#[derive(Debug, Subcommand)]
-pub enum ModelVerb {
-    /// One row per catalogue model, with what it has on disk.
-    List,
-
-    /// Fetch one catalogue model, resuming a part file it already has.
-    Download(ModelNameArgs),
-
-    /// Delete one catalogue model's weights file and its part file.
-    Remove(ModelNameArgs),
-}
-
-#[derive(Debug, Parser)]
-pub struct ModelNameArgs {
-    /// The catalogue name, as `grammachy model list` prints it.
-    pub name: String,
 }
 
 #[derive(Debug, Parser)]
