@@ -15,6 +15,13 @@
 //! best eligible local row by exact fix rate, then F0.5, then lower p50, above
 //! the validity floor and never with more false positives than the default
 //! engine. Cloud rows compete only for the separate cloud line.
+//!
+//! A run with `--eval-set` prints those tables twice, once per set, and only
+//! the eval set decides (`docs/spec/evals.md` section 5). The other set prints
+//! a dash in the Recommended column, because two sets that each named a winner
+//! would name two. The eval-set half quotes no sentence: the items a model
+//! missed print as ids, which is what ADR 0003 allows a committed file to
+//! carry.
 
 use crate::bench::judge::{Assessment, RowKey, AGREEMENT_GATE, MINIMUM_LABELLED};
 use crate::bench::machine::Machine;
@@ -130,6 +137,39 @@ impl ModelRow {
     }
 }
 
+/// One set's tables, the fixture or the eval set beside it.
+///
+/// Both sets carry the same item shape and the same metrics, so one renderer
+/// draws either. What differs is the heading, the line under the title, and
+/// whether the set is the one the recommendation is decided from.
+#[derive(Debug, Clone)]
+pub struct SetTables {
+    /// The name the headings carry after the first set.
+    pub name: &'static str,
+    /// The line under the title that says where the items came from.
+    pub source: String,
+    pub interference: usize,
+    pub clean: usize,
+    /// The native languages of the interference sentences, in set order.
+    pub languages: Vec<String>,
+    pub engines: Vec<EngineRow>,
+    pub models: Vec<ModelRow>,
+}
+
+impl SetTables {
+    /// The heading of one table of this set.
+    ///
+    /// The first set keeps the plain heading, so a run without `--eval-set`
+    /// prints the file it always printed.
+    fn heading(&self, table: &str, first: bool) -> String {
+        if first {
+            format!("## {table}\n\n")
+        } else {
+            format!("## {table} ({})\n\n", self.name.to_lowercase())
+        }
+    }
+}
+
 /// Everything one run of the benchmark found.
 #[derive(Debug, Clone)]
 pub struct Report {
@@ -137,10 +177,6 @@ pub struct Report {
     pub machine: Machine,
     /// The command that produced this file, so it can be run again.
     pub command: String,
-    pub interference: usize,
-    pub clean: usize,
-    /// The native languages of the interference sentences, in fixture order.
-    pub languages: Vec<String>,
     /// The engine a release is measured against (spec section 7).
     pub default_engine: String,
     pub max_cost: Option<f64>,
@@ -150,8 +186,13 @@ pub struct Report {
     /// An answer with no `usage.cost` ends the cloud rows and stays out of this
     /// sum, so the figure is a lower bound on what the run paid.
     pub cloud_spend_usd: f64,
-    pub engines: Vec<EngineRow>,
-    pub models: Vec<ModelRow>,
+    /// The fixture first, and the eval set after it when the run had one.
+    pub sets: Vec<SetTables>,
+    /// Why the eval set did not run, when `--eval-set` asked for it.
+    ///
+    /// A machine with no corpus cache is a skipped table with a reason, never
+    /// an error (ADR 0003).
+    pub eval_set_skipped: Option<String>,
     /// What `--judgements` said about this run, absent without the flag.
     pub judge: Option<Assessment>,
 }
@@ -162,15 +203,19 @@ impl Report {
         let mut out = String::new();
 
         out.push_str(&format!("# Grammachy benchmark {}\n\n", self.version));
-        out.push_str(&format!(
-            "Fixture: {} interference sentences and {} correct ones, `cli/tests/fixtures/interference-30.json`.\n",
-            self.interference, self.clean
-        ));
+        for set in &self.sets {
+            out.push_str(&format!("{}\n", set.source));
+        }
+        if self.ranks_on_eval_set() {
+            out.push_str(&format!("{}\n", crate::bench::evalset::cache::ATTRIBUTION));
+        }
         out.push_str(&format!("Machine: {}.\n", self.machine.line()));
         out.push_str(&format!("Command: `{}`.\n\n", self.command));
 
-        out.push_str(&self.engines_table());
-        out.push_str(&self.models_section());
+        for (index, set) in self.sets.iter().enumerate() {
+            out.push_str(&self.engines_table(set, index == 0));
+            out.push_str(&self.models_section(set, index == 0, index == self.ranking()));
+        }
         out.push_str(&self.skipped_section());
         out.push_str(&self.regression_rule());
         out.push_str(MEASUREMENT_NOTE);
@@ -178,11 +223,23 @@ impl Report {
         out
     }
 
-    fn engines_table(&self) -> String {
-        let mut out = String::from("## Engines\n\n");
+    /// Whether the eval set ran, which is what decides the recommendation and
+    /// puts the attribution line in the header.
+    fn ranks_on_eval_set(&self) -> bool {
+        self.sets.len() > 1
+    }
+
+    /// The set the recommendation is decided from, the eval set when it ran
+    /// (`docs/spec/evals.md` section 5).
+    fn ranking(&self) -> usize {
+        self.sets.len().saturating_sub(1)
+    }
+
+    fn engines_table(&self, set: &SetTables, first: bool) -> String {
+        let mut out = set.heading("Engines", first);
         out.push_str("| Engine | Catch rate | False positives | p50 latency | Resident memory |\n");
         out.push_str("|---|---|---|---|---|\n");
-        for row in &self.engines {
+        for row in &set.engines {
             out.push_str(&format!(
                 "| `{}` | {} |\n",
                 row.engine,
@@ -190,7 +247,7 @@ impl Report {
             ));
         }
         out.push('\n');
-        for row in &self.engines {
+        for row in &set.engines {
             out.push_str(&memory_source_line(
                 &format!("`{}`", row.engine),
                 &row.outcome,
@@ -200,16 +257,16 @@ impl Report {
         out
     }
 
-    fn models_section(&self) -> String {
-        let mut out = String::from("## Models\n\n");
-        if self.models.is_empty() {
+    fn models_section(&self, set: &SetTables, first: bool, ranking: bool) -> String {
+        let mut out = set.heading("Models", first);
+        if set.models.is_empty() {
             out.push_str(
                 "No model was named. Run `grammachy bench --engine openai --model <name>` (repeatable, plus `--cloud-model <id> --max-cost <usd>` for a cloud row) to fill these tables.\n\n",
             );
             return out;
         }
 
-        let verdicts = self.verdicts();
+        let verdicts = self.verdicts(set, ranking);
 
         out.push_str("### Quality\n\n");
         let useful_column = self.judge.is_some();
@@ -222,7 +279,7 @@ impl Report {
             "|---|{}\n",
             "---|".repeat(if useful_column { 9 } else { 8 })
         ));
-        for row in &self.models {
+        for row in &set.models {
             out.push_str(&format!(
                 "| `{}` | {} |\n",
                 row.model,
@@ -230,19 +287,21 @@ impl Report {
             ));
         }
         out.push('\n');
-        if self.holds_both_modes() {
+        if self.holds_both_modes(set) {
             out.push_str("Every Models table prints the rows in one order. A model that appears twice is its two Thinking modes, named in the Cost table below.\n\n");
         }
         if let Some(judge) = &self.judge {
-            out.push_str(&judge.lines());
-            out.push_str(&self.ranking_sentence());
-            out.push('\n');
+            if ranking {
+                out.push_str(&judge.lines());
+                out.push_str(&self.ranking_sentence(set));
+                out.push('\n');
+            }
         }
 
         out.push_str("### Cost\n\n");
         out.push_str("| Model | Thinking | p50 latency | p95 latency | Resident memory | Cost per 1,000 Checks | Weights license | Recommended |\n");
         out.push_str("|---|---|---|---|---|---|---|---|\n");
-        for (row, verdict) in self.models.iter().zip(&verdicts) {
+        for (row, verdict) in set.models.iter().zip(&verdicts) {
             out.push_str(&format!(
                 "| `{}` | {} | {} | {} | {} |\n",
                 row.model,
@@ -254,34 +313,36 @@ impl Report {
         }
         out.push('\n');
         out.push_str("Thinking is the local mode the row ran in, from `--thinking`. A cloud row prints `-`: the mode is a llama.cpp chat-template argument and never reaches a provider.\n");
-        for row in &self.models {
-            out.push_str(&memory_source_line(&self.row_label(row), &row.outcome));
+        for row in &set.models {
+            out.push_str(&memory_source_line(&self.row_label(set, row), &row.outcome));
         }
-        for row in &self.models {
+        for row in &set.models {
             if let Outcome::Measured(measurement) = &row.outcome {
                 out.push_str(&format!(
-                    "Wall time of {}: {} s for the whole fixture{}.\n",
-                    self.row_label(row),
+                    "Wall time of {}: {} s for the whole set{}.\n",
+                    self.row_label(set, row),
                     measurement.wall_ms / 1_000,
                     row.server_use.wall_time_note()
                 ));
             }
         }
         if let Some(cap) = self.max_cost {
-            out.push_str(&format!(
-                "Cloud spend of this run: {:.4} USD of the {cap} USD cap, summed over the answers that reported a cost.\n",
-                self.cloud_spend_usd
-            ));
-            out.push_str(
-                "An answer that reported no cost stays out of that sum, so the figure is a lower bound.\n",
-            );
+            if ranking {
+                out.push_str(&format!(
+                    "Cloud spend of this run: {:.4} USD of the {cap} USD cap, summed over the answers that reported a cost.\n",
+                    self.cloud_spend_usd
+                ));
+                out.push_str(
+                    "An answer that reported no cost stays out of that sum, so the figure is a lower bound.\n",
+                );
+            }
         }
         out.push('\n');
 
         out.push_str("### Throughput\n\n");
         out.push_str("| Model | Time to first token (p50) | Output tokens per second | Output tokens per Check (p50) | Output tokens per Issue |\n");
         out.push_str("|---|---|---|---|---|\n");
-        for row in &self.models {
+        for row in &set.models {
             out.push_str(&format!(
                 "| `{}` | {} |\n",
                 row.model,
@@ -292,22 +353,23 @@ impl Report {
         out.push_str("Output tokens per Issue is the output tokens of the row over the Issues the same Checks answered, so it prices one Issue rather than one Check.\n\n");
 
         out.push_str("### Recall by native language\n\n");
-        out.push_str(&format!("| Model | {} |\n", self.languages.join(" | ")));
-        out.push_str(&format!("|---|{}\n", "---|".repeat(self.languages.len())));
-        for row in &self.models {
+        out.push_str(&format!("| Model | {} |\n", set.languages.join(" | ")));
+        out.push_str(&format!("|---|{}\n", "---|".repeat(set.languages.len())));
+        for row in &set.models {
             let cells: Vec<String> = match row.outcome.tally() {
-                Some(tally) => self
+                Some(tally) => set
                     .languages
                     .iter()
                     .map(|language| tally.language_cell(language))
                     .collect(),
-                None => vec![SKIPPED.to_string(); self.languages.len()],
+                None => vec![SKIPPED.to_string(); set.languages.len()],
             };
             out.push_str(&format!("| `{}` | {} |\n", row.model, cells.join(" | ")));
         }
         out.push('\n');
 
-        out.push_str(&self.recommendation_lines(&verdicts));
+        out.push_str(&missed_items(set));
+        out.push_str(&self.recommendation_lines(set, &verdicts, ranking));
         out
     }
 
@@ -316,8 +378,8 @@ impl Report {
     /// `--thinking both` prints one model twice, and the Model column of every
     /// table is the bare name (evals spec section 4.2), so a line that names a
     /// row on its own has to say which of the two it means.
-    fn row_label(&self, row: &ModelRow) -> String {
-        let shared = self
+    fn row_label(&self, set: &SetTables, row: &ModelRow) -> String {
+        let shared = set
             .models
             .iter()
             .filter(|other| other.model == row.model)
@@ -377,11 +439,11 @@ impl Report {
     /// but the row has no tally, prints `skipped` in every column, and can
     /// never be recommended. Letting it drop the swap would decide the
     /// recommendation on a row the report did not measure.
-    fn unjudged_rows(&self) -> Vec<String> {
+    fn unjudged_rows(&self, set: &SetTables) -> Vec<String> {
         let Some(judge) = self.judge.as_ref() else {
             return Vec::new();
         };
-        self.models
+        set.models
             .iter()
             .filter(|row| row.outcome.tally().is_some())
             .filter(|row| {
@@ -389,16 +451,16 @@ impl Report {
                     .row(&row.key())
                     .is_some_and(|graded| graded.hits > 0 && graded.judged == 0)
             })
-            .map(|row| self.row_label(row))
+            .map(|row| self.row_label(set, row))
             .collect()
     }
 
     /// How many measured Models rows the judgements file graded a hit of.
-    fn judged_rows(&self) -> usize {
+    fn judged_rows(&self, set: &SetTables) -> usize {
         let Some(judge) = self.judge.as_ref() else {
             return 0;
         };
-        self.models
+        set.models
             .iter()
             .filter(|row| row.outcome.tally().is_some())
             .filter(|row| {
@@ -417,8 +479,8 @@ impl Report {
     /// vacuously true for a run whose every Models row was skipped: the
     /// Engines rows still feed the judge, so the gate can pass, and the file
     /// would name a ranking measure that ranked nothing at all.
-    fn judge_covers_measured_rows(&self) -> bool {
-        self.unjudged_rows().is_empty() && self.judged_rows() > 0
+    fn judge_covers_measured_rows(&self, set: &SetTables) -> bool {
+        self.unjudged_rows(set).is_empty() && self.judged_rows(set) > 0
     }
 
     /// What one row is ranked on, in percent of its interference sentences.
@@ -427,7 +489,7 @@ impl Report {
     /// and the file covers the measured rows. Then it is exact fix plus the
     /// non-exact hits the judge called useful, because both are answers the
     /// writer can accept and keep.
-    fn rank_score(&self, row: &ModelRow) -> f64 {
+    fn rank_score(&self, set: &SetTables, row: &ModelRow) -> f64 {
         let Some(tally) = row.outcome.tally() else {
             return 0.0;
         };
@@ -435,7 +497,7 @@ impl Report {
         let Some(judge) = self
             .judge
             .as_ref()
-            .filter(|judge| judge.ranks() && self.judge_covers_measured_rows())
+            .filter(|judge| judge.ranks() && self.judge_covers_measured_rows(set))
         else {
             return exact;
         };
@@ -452,16 +514,16 @@ impl Report {
     /// this is the only claim the file makes about the ranking. It reads the
     /// same two conditions `rank_score` and `ranking_measure` do, which is what
     /// keeps the three paragraphs from disagreeing.
-    fn ranking_sentence(&self) -> String {
+    fn ranking_sentence(&self, set: &SetTables) -> String {
         let Some(judge) = self.judge.as_ref() else {
             return String::new();
         };
-        let mut out = if judge.ranks() && self.judge_covers_measured_rows() {
+        let mut out = if judge.ranks() && self.judge_covers_measured_rows(set) {
             String::from("The Useful fix column counts in the ranking.\n")
         } else {
-            self.no_ranking_sentence(judge)
+            self.no_ranking_sentence(judge, set)
         };
-        if self.has_unjudged_mode() {
+        if self.has_unjudged_mode(set) {
             out.push_str(
                 "A thinking-off row is never judged, so no Useful fix count reaches its ranking.\n",
             );
@@ -470,17 +532,17 @@ impl Report {
     }
 
     /// Why the Useful fix column stays out of the ranking of this run.
-    fn no_ranking_sentence(&self, judge: &Assessment) -> String {
+    fn no_ranking_sentence(&self, judge: &Assessment, set: &SetTables) -> String {
         let reason = if judge.labelled == 0 {
             "no hand label covers a hit of this run".to_string()
         } else if judge.labelled < MINIMUM_LABELLED {
             format!("this run matched under the {MINIMUM_LABELLED} hand labels the gate needs")
         } else if !judge.ranks() {
             format!("the judge is under the {AGREEMENT_GATE:.0}% gate")
-        } else if !self.unjudged_rows().is_empty() {
+        } else if !self.unjudged_rows(set).is_empty() {
             format!(
                 "the judgements file covers no non-exact hit of {}",
-                self.unjudged_rows().join(", ")
+                self.unjudged_rows(set).join(", ")
             )
         } else {
             "the judgements file covers no measured model row".to_string()
@@ -488,33 +550,39 @@ impl Report {
         format!("The Useful fix column does not count in the ranking, because {reason}.\n")
     }
 
-    /// Whether the run measured a row the judge leaves out of its sample.
+    /// Whether the set measured a row the judge leaves out of its sample.
     ///
     /// Under the swapped measure such a row competes on exact fix while a
     /// graded row adds its useful hits, so the file says so rather than
     /// letting the reader assume the two rows were ranked alike.
-    fn has_unjudged_mode(&self) -> bool {
-        self.models
+    fn has_unjudged_mode(&self, set: &SetTables) -> bool {
+        set.models
             .iter()
             .any(|row| row.outcome.tally().is_some() && row.out_of_the_judged_sample())
     }
 
-    /// Whether the run holds both modes of at least one local model.
-    fn holds_both_modes(&self) -> bool {
-        self.models.iter().any(|row| {
-            self.models
+    /// Whether the set holds both modes of at least one local model.
+    fn holds_both_modes(&self, set: &SetTables) -> bool {
+        set.models.iter().any(|row| {
+            set.models
                 .iter()
                 .any(|other| other.model == row.model && other.thinking != row.thinking)
         })
     }
 
-    /// The Recommended cell of every row, in row order.
-    fn verdicts(&self) -> Vec<String> {
-        let default_fp = self.default_engine_false_positives();
-        let local_winner = self.winner(false, default_fp);
-        let cloud_winner = self.winner(true, default_fp);
+    /// The Recommended cell of every row of one set, in row order.
+    ///
+    /// Only the ranking set decides. The other set prints a dash, because two
+    /// sets that each named a winner would name two.
+    fn verdicts(&self, set: &SetTables, ranking: bool) -> Vec<String> {
+        if !ranking {
+            return vec!["-".to_string(); set.models.len()];
+        }
+        let default_fp = self.default_engine_false_positives(set);
+        let local_winner = self.winner(set, false, default_fp);
+        let cloud_winner = self.winner(set, true, default_fp);
 
-        self.models
+        set.models
             .iter()
             .enumerate()
             .map(|(index, row)| {
@@ -553,36 +621,43 @@ impl Report {
     }
 
     /// The index of the best eligible row of one kind, local or cloud.
-    fn winner(&self, cloud: bool, default_fp: Option<usize>) -> Option<usize> {
-        self.models
+    fn winner(&self, set: &SetTables, cloud: bool, default_fp: Option<usize>) -> Option<usize> {
+        set.models
             .iter()
             .enumerate()
             .filter(|(_, row)| row.is_cloud() == cloud)
             .filter(|(_, row)| self.objection(row, default_fp).is_none())
             .filter_map(|(index, row)| row.outcome.tally().map(|tally| (index, row, tally)))
             .max_by(|(_, a_row, a), (_, b_row, b)| {
-                self.rank_score(a_row)
-                    .total_cmp(&self.rank_score(b_row))
+                self.rank_score(set, a_row)
+                    .total_cmp(&self.rank_score(set, b_row))
                     .then(a.f05_percent().total_cmp(&b.f05_percent()))
                     .then(b.p50_ms.cmp(&a.p50_ms))
             })
             .map(|(index, _, _)| index)
     }
 
-    /// The false positives of the default engine, when it was measured.
-    fn default_engine_false_positives(&self) -> Option<usize> {
-        self.engines
+    /// The false positives of the default engine on this set, when it ran.
+    fn default_engine_false_positives(&self, set: &SetTables) -> Option<usize> {
+        set.engines
             .iter()
             .find(|row| row.engine == self.default_engine)
             .and_then(|row| row.outcome.tally())
             .map(|tally| tally.false_positives)
     }
 
-    fn recommendation_lines(&self, verdicts: &[String]) -> String {
+    fn recommendation_lines(&self, set: &SetTables, verdicts: &[String], ranking: bool) -> String {
+        if !ranking {
+            return format!(
+                "The recommendation is decided from the {} tables below, not from this set (`docs/spec/evals.md` section 5).\n\n",
+                self.sets[self.ranking()].name.to_lowercase()
+            );
+        }
+
         let mut out = String::new();
-        let default_fp = self.default_engine_false_positives();
+        let default_fp = self.default_engine_false_positives(set);
         let named = |verdict: &str| -> Option<&ModelRow> {
-            self.models
+            set.models
                 .iter()
                 .zip(verdicts)
                 .find(|(_, cell)| cell.as_str() == verdict)
@@ -606,14 +681,14 @@ impl Report {
                 "Recommended cloud model, the `openrouterModel` line of the README: `{}`. Cloud is never the default engine.\n",
                 row.model
             )),
-            None if self.models.iter().any(ModelRow::is_cloud) => {
+            None if set.models.iter().any(ModelRow::is_cloud) => {
                 out.push_str("No cloud row is eligible for the cloud recommendation.\n")
             }
             None => {}
         }
         out.push_str(&format!(
             "Ranking: {}, then F0.5, then lower p50 (HUF-205). Floors: validity at least {VALIDITY_FLOOR:.0}% and no more false positives than the default engine, `{}`{}. A recommended local model must also fit the machine tier above (`docs/spec/evals.md` section 5).\n\n",
-            self.ranking_measure(),
+            self.ranking_measure(set),
             self.default_engine,
             match default_fp {
                 Some(fp) => format!(", which earned {fp}"),
@@ -624,8 +699,10 @@ impl Report {
     }
 
     /// What the ranking is measured on, named in the file.
-    fn ranking_measure(&self) -> &'static str {
-        match self.judge.as_ref().is_some_and(Assessment::ranks) && self.judge_covers_measured_rows() {
+    fn ranking_measure(&self, set: &SetTables) -> &'static str {
+        match self.judge.as_ref().is_some_and(Assessment::ranks)
+            && self.judge_covers_measured_rows(set)
+        {
             true => "exact fix rate plus the non-exact hits the judge called useful, over the interference sentences",
             false => "exact fix rate",
         }
@@ -633,14 +710,27 @@ impl Report {
 
     fn skipped_section(&self) -> String {
         let mut reasons: Vec<String> = Vec::new();
-        for row in &self.engines {
-            if let Outcome::Skipped(why) = &row.outcome {
-                reasons.push(format!("- Engine `{}`: {why}\n", row.engine));
-            }
+        if let Some(why) = &self.eval_set_skipped {
+            reasons.push(format!("- The eval set: {why}\n"));
         }
-        for row in &self.models {
-            if let Outcome::Skipped(why) = &row.outcome {
-                reasons.push(format!("- Model {}: {why}\n", self.row_label(row)));
+        for set in &self.sets {
+            let on_set = if self.sets.len() > 1 {
+                format!(" on the {}", set.name.to_lowercase())
+            } else {
+                String::new()
+            };
+            for row in &set.engines {
+                if let Outcome::Skipped(why) = &row.outcome {
+                    reasons.push(format!("- Engine `{}`{on_set}: {why}\n", row.engine));
+                }
+            }
+            for row in &set.models {
+                if let Outcome::Skipped(why) = &row.outcome {
+                    reasons.push(format!(
+                        "- Model {}{on_set}: {why}\n",
+                        self.row_label(set, row)
+                    ));
+                }
             }
         }
 
@@ -661,6 +751,34 @@ impl Report {
             self.default_engine
         )
     }
+}
+
+/// The items each model missed, as ids and nothing else.
+///
+/// ADR 0003 is why this is ids only: an eval-set sentence may not be quoted in
+/// a committed file. The sentence, its fix, and the model's own answer live in
+/// the record file of `--record`, which git ignores.
+fn missed_items(set: &SetTables) -> String {
+    let lines: Vec<String> = set
+        .models
+        .iter()
+        .filter_map(|row| {
+            let tally = row.outcome.tally()?;
+            if tally.misses.is_empty() {
+                return None;
+            }
+            Some(format!("- `{}`: {}\n", row.model, tally.misses.join(", ")))
+        })
+        .collect();
+    if lines.is_empty() {
+        return String::new();
+    }
+
+    let mut out = String::from("### Missed items\n\n");
+    out.push_str("Ids only. The sentence, the fix, and the model's own answer live in the record file of `--record`, which git ignores.\n\n");
+    out.extend(lines);
+    out.push('\n');
+    out
 }
 
 /// The sentence that names where one row's memory number came from.
@@ -842,21 +960,13 @@ mod tests {
         }
     }
 
-    fn report() -> Report {
-        Report {
-            version: "0.1.0".to_string(),
-            machine: Machine {
-                cpus: 24,
-                ram_gb: 27,
-            },
-            command: "grammachy bench".to_string(),
-            judge: None,
+    fn fixture_set() -> SetTables {
+        SetTables {
+            name: "Fixture",
+            source: "Fixture: 30 interference sentences and 10 correct ones, `cli/tests/fixtures/interference-30.json`.".to_string(),
             interference: 30,
             clean: 10,
             languages: vec!["zh".to_string(), "es".to_string()],
-            default_engine: "languagetool".to_string(),
-            max_cost: None,
-            cloud_spend_usd: 0.0,
             engines: vec![
                 EngineRow {
                     engine: "languagetool".to_string(),
@@ -874,6 +984,28 @@ mod tests {
                 Outcome::Skipped("llama.cpp is not installed.".to_string()),
             )],
         }
+    }
+
+    fn report() -> Report {
+        Report {
+            version: "0.1.0".to_string(),
+            machine: Machine {
+                cpus: 24,
+                ram_gb: 27,
+            },
+            command: "grammachy bench".to_string(),
+            judge: None,
+            default_engine: "languagetool".to_string(),
+            max_cost: None,
+            cloud_spend_usd: 0.0,
+            sets: vec![fixture_set()],
+            eval_set_skipped: None,
+        }
+    }
+
+    /// The one set of a report that has one, the set every case here reads.
+    fn only(report: &mut Report) -> &mut SetTables {
+        &mut report.sets[0]
     }
 
     #[test]
@@ -906,7 +1038,7 @@ mod tests {
     #[test]
     fn both_modes_of_one_model_are_two_rows_the_file_can_tell_apart() {
         let mut report = report();
-        report.models = vec![
+        only(&mut report).models = vec![
             thinking_model(
                 "gemma-4-e4b-it",
                 "openai",
@@ -930,7 +1062,7 @@ mod tests {
             ),
         ];
 
-        report.models[1].server_use = ServerUse::Reused;
+        only(&mut report).models[1].server_use = ServerUse::Reused;
 
         let rendered = report.render();
 
@@ -952,19 +1084,18 @@ mod tests {
         );
         assert!(
             rendered.contains(
-                "Wall time of `gemma-4-e4b-it` with thinking on: 12 s for the whole fixture.\n"
+                "Wall time of `gemma-4-e4b-it` with thinking on: 12 s for the whole set.\n"
             ),
             "a row claims no server start, because the run starts no server: {rendered}"
         );
         assert!(
             rendered.contains(
-                "Wall time of `gemma-4-e4b-it` with thinking off: 12 s for the whole fixture, on the server the earlier row of this model ran on.\n"
+                "Wall time of `gemma-4-e4b-it` with thinking off: 12 s for the whole set, on the server the earlier row of this model ran on.\n"
             ),
             "the second row of a model says which server it shared: {rendered}"
         );
         assert!(
-            rendered
-                .contains("Wall time of `google/gemini-3.7-flash`: 12 s for the whole fixture.\n"),
+            rendered.contains("Wall time of `google/gemini-3.7-flash`: 12 s for the whole set.\n"),
             "one row of a name needs no mode and a cloud row starts no server: {rendered}"
         );
         assert!(
@@ -980,7 +1111,7 @@ mod tests {
     #[test]
     fn a_thinking_off_row_says_it_is_out_of_the_judged_sample() {
         let mut report = judged_report(4);
-        report.models.push(thinking_model(
+        only(&mut report).models.push(thinking_model(
             "phi-4-mini-instruct",
             "openai",
             Some(false),
@@ -1007,7 +1138,7 @@ mod tests {
     #[test]
     fn a_thinking_off_row_is_disclosed_even_when_the_judge_does_not_rank() {
         let row = |report: &mut Report| {
-            report.models.push(thinking_model(
+            only(report).models.push(thinking_model(
                 "phi-4-mini-instruct",
                 "openai",
                 Some(false),
@@ -1079,7 +1210,7 @@ mod tests {
     #[test]
     fn a_run_with_no_model_says_how_to_fill_the_models_table() {
         let mut report = report();
-        report.models.clear();
+        only(&mut report).models.clear();
 
         let rendered = report.render();
 
@@ -1093,8 +1224,9 @@ mod tests {
     #[test]
     fn a_measured_engine_names_the_pool_its_memory_number_came_from() {
         let mut report = report();
-        report.engines[0].outcome = Outcome::Skipped("LanguageTool is not installed.".to_string());
-        report.engines[1].outcome =
+        only(&mut report).engines[0].outcome =
+            Outcome::Skipped("LanguageTool is not installed.".to_string());
+        only(&mut report).engines[1].outcome =
             on_device(tally(22, 18, 1, 40), Some(1_800_000_000), Source::Device);
 
         let rendered = report.render();
@@ -1118,7 +1250,7 @@ mod tests {
     #[test]
     fn an_engine_on_an_integrated_processor_names_the_shared_pool_instead() {
         let mut report = report();
-        report.engines[1].outcome = on_device(
+        only(&mut report).engines[1].outcome = on_device(
             tally(22, 18, 1, 40),
             Some(1_800_000_000),
             Source::DeviceShared,
@@ -1135,7 +1267,7 @@ mod tests {
     #[test]
     fn every_measured_model_names_its_own_pool_under_the_cost_table() {
         let mut report = report();
-        report.models = vec![
+        only(&mut report).models = vec![
             model(
                 "gemma-3n-e4b-it",
                 "openai",
@@ -1167,8 +1299,8 @@ mod tests {
     #[test]
     fn a_run_that_reached_everything_says_nothing_was_skipped() {
         let mut report = report();
-        report.engines[1].outcome = measured(tally(10, 5, 0, 40), None);
-        report.models.clear();
+        only(&mut report).engines[1].outcome = measured(tally(10, 5, 0, 40), None);
+        only(&mut report).models.clear();
 
         let rendered = report.render();
 
@@ -1187,7 +1319,7 @@ mod tests {
         let mut report = report();
         report.max_cost = Some(10.0);
         report.cloud_spend_usd = 0.0016;
-        report.models = vec![
+        only(&mut report).models = vec![
             model(
                 "gemma-4-e4b-it",
                 "openai",
@@ -1246,7 +1378,7 @@ mod tests {
         let mut report = report();
         report.max_cost = Some(0.05);
         report.cloud_spend_usd = 0.049;
-        report.models = vec![model(
+        only(&mut report).models = vec![model(
             "deepseek/deepseek-v4-flash-0731",
             "openrouter",
             weights::HOSTED,
@@ -1286,7 +1418,7 @@ mod tests {
             output_tokens_p50: Some(120),
             tokens_per_issue: None,
         };
-        report.models = vec![
+        only(&mut report).models = vec![
             model(
                 "gemma-4-e4b-it",
                 "openai",
@@ -1318,8 +1450,9 @@ mod tests {
     #[test]
     fn a_skipped_default_engine_drops_the_false_positive_floor_and_says_so() {
         let mut report = report();
-        report.engines[0].outcome = Outcome::Skipped("LanguageTool did not answer".to_string());
-        report.models = vec![model(
+        only(&mut report).engines[0].outcome =
+            Outcome::Skipped("LanguageTool did not answer".to_string());
+        only(&mut report).models = vec![model(
             "gemma-4-e4b-it",
             "openai",
             weights::of("gemma-4-e4b-it"),
@@ -1338,6 +1471,106 @@ mod tests {
         );
     }
 
+    /// A report of the fixture and the eval set beside it.
+    fn with_eval_set() -> Report {
+        let mut report = report();
+        only(&mut report).models = vec![model(
+            "gemma-4-e4b-it",
+            "openai",
+            weights::of("gemma-4-e4b-it"),
+            measured(tally(28, 20, 0, 40), None),
+        )];
+        let mut eval = fixture_set();
+        eval.name = "Eval set";
+        eval.source = "Eval set: 300 error sentences and 65 error-free ones.".to_string();
+        eval.models = vec![model(
+            "gemma-4-e4b-it",
+            "openai",
+            weights::of("gemma-4-e4b-it"),
+            measured(tally(29, 26, 0, 40), None),
+        )];
+        report.sets.push(eval);
+        report
+    }
+
+    #[test]
+    fn the_eval_set_prints_its_own_tables_beside_the_fixture_tables() {
+        let rendered = with_eval_set().render();
+
+        assert!(rendered.contains("\n## Engines\n"), "{rendered}");
+        assert!(rendered.contains("\n## Engines (eval set)\n"), "{rendered}");
+        assert!(rendered.contains("\n## Models\n"), "{rendered}");
+        assert!(rendered.contains("\n## Models (eval set)\n"), "{rendered}");
+    }
+
+    #[test]
+    fn the_header_carries_the_eval_set_attribution_line() {
+        let rendered = with_eval_set().render();
+
+        assert!(
+            rendered.contains("Eval set: CLC FCE (BEA-2019 v2.1), CLC FCE Dataset Licence, fetched at run time, not redistributed."),
+            "{rendered}"
+        );
+        assert!(
+            !report().render().contains("CLC FCE Dataset Licence"),
+            "a run without the eval set claims none"
+        );
+    }
+
+    #[test]
+    fn only_the_eval_set_names_a_recommendation() {
+        let rendered = with_eval_set().render();
+        let fixture_half = &rendered[..rendered.find("## Models (eval set)").expect("both sets")];
+
+        assert!(
+            fixture_half.contains("| Apache-2.0 | - |"),
+            "the fixture recommends nothing: {fixture_half}"
+        );
+        assert!(
+            fixture_half.contains("The recommendation is decided from the eval set tables below"),
+            "{fixture_half}"
+        );
+        assert!(
+            rendered.contains(
+                "Recommended local model, the Settings default and the README line: `gemma-4-e4b-it`, with thinking on."
+            ),
+            "{rendered}"
+        );
+    }
+
+    #[test]
+    fn a_missed_item_prints_as_an_id_and_nothing_else() {
+        let rendered = with_eval_set().render();
+
+        assert!(rendered.contains("### Missed items"), "{rendered}");
+        assert!(
+            rendered.contains("- `gemma-4-e4b-it`: zh-01\n"),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains(
+                "The sentence, the fix, and the model's own answer live in the record file"
+            ),
+            "{rendered}"
+        );
+    }
+
+    #[test]
+    fn an_eval_set_this_machine_cannot_load_is_a_skipped_table_with_a_reason() {
+        let mut report = report();
+        report.eval_set_skipped =
+            Some("the fce_v2.1.bea19 cache is empty and the fetch failed".to_string());
+
+        let rendered = report.render();
+
+        assert!(
+            rendered
+                .contains("- The eval set: the fce_v2.1.bea19 cache is empty and the fetch failed"),
+            "{rendered}"
+        );
+        assert!(!rendered.contains("## Models (eval set)"), "{rendered}");
+    }
+
     #[test]
     fn the_language_table_has_one_column_per_language() {
         let mut report = report();
@@ -1346,7 +1579,7 @@ mod tests {
             "zh".to_string(),
             crate::bench::metrics::LanguageRecall { pairs: 7, edits: 8 },
         );
-        report.models = vec![model(
+        only(&mut report).models = vec![model(
             "gemma-4-e4b-it",
             "openai",
             weights::of("gemma-4-e4b-it"),
@@ -1369,7 +1602,7 @@ mod tests {
 
         let mut report = report();
         // `gemma` wins on exact fix, `qwen` wins once useful fixes count.
-        report.models = vec![
+        only(&mut report).models = vec![
             model(
                 "gemma-4-e4b-it",
                 "openai",
@@ -1520,9 +1753,9 @@ mod tests {
         let mut labels = Judgements::new();
         let mut hits: Vec<Hit> = Vec::new();
 
-        report.models.clear();
+        only(&mut report).models.clear();
         for (name, exact, row_hits, useful) in rows {
-            report.models.push(model(
+            only(&mut report).models.push(model(
                 name,
                 "openai",
                 weights::of(name),
@@ -1625,7 +1858,8 @@ mod tests {
             ("phi-4-mini-instruct", 10, 5, Some(5)),
             ("deepseek/deepseek-v4-flash-0731", 0, 2, None),
         ]);
-        report.models[2].outcome = Outcome::Skipped("the cost cap ended this row.".to_string());
+        only(&mut report).models[2].outcome =
+            Outcome::Skipped("the cost cap ended this row.".to_string());
         let rendered = report.render();
 
         assert!(
@@ -1665,7 +1899,7 @@ mod tests {
         let mut labels = Judgements::new();
         let mut hits: Vec<Hit> = Vec::new();
 
-        report.models = vec![model(
+        only(&mut report).models = vec![model(
             "gemma-4-e4b-it",
             "openai",
             weights::of("gemma-4-e4b-it"),

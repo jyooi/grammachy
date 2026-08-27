@@ -105,6 +105,14 @@ pub struct BenchArgs {
     #[arg(long = "judgements", value_name = "FILE")]
     pub judgements: Option<std::path::PathBuf>,
 
+    /// Run the 365-item eval set beside the fixture and rank the models on it.
+    ///
+    /// The corpus is fetched at run time into a gitignored cache and no part
+    /// of it is committed (ADR 0003). A machine that cannot fill the cache
+    /// prints the eval tables as skipped with a reason, never an error.
+    #[arg(long = "eval-set")]
+    pub eval_set: bool,
+
     /// The thinking mode the local rows run in: `off`, `on`, or `both`.
     ///
     /// It decides the mode of every local row, so a benchmark file is the

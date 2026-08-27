@@ -79,7 +79,7 @@ use fixture::Sentence;
 use machine::Machine;
 use memory::{Reading, Source};
 use metrics::{Recorded, Tally};
-use report::{EngineRow, Measurement, ModelRow, Outcome, Report, ServerUse};
+use report::{EngineRow, Measurement, ModelRow, Outcome, Report, ServerUse, SetTables};
 
 /// The engines of the Engines table, in the order the table prints them.
 ///
@@ -110,19 +110,90 @@ pub struct Run {
 pub fn run(args: &BenchArgs, stored: &StoredSettings) -> Result<Run, String> {
     let plan = Plan::of(args)?;
     let base = base_options(stored, args.thinking);
-    let sentences = fixture::sentences();
     let spend = Mutex::new(Spend::new(args.max_cost));
 
+    let mut checks: Vec<RecordedCheck> = Vec::new();
+    let mut sets: Vec<SetTables> = Vec::new();
+
+    let (fixture_set, fixture_checks) = tables(FIXTURE, fixture::sentences(), &plan, &base, &spend);
+    sets.push(fixture_set);
+    checks.extend(fixture_checks);
+
+    // The eval set is the ranking set, so it runs last and its rows are the
+    // ones the recommendation is read from.
+    let mut eval_set_skipped = None;
+    if args.eval_set {
+        match evalset::load() {
+            Ok(sentences) => {
+                let (set, set_checks) = tables(EVAL_SET, sentences, &plan, &base, &spend);
+                sets.push(set);
+                checks.extend(set_checks);
+            }
+            Err(why) => eval_set_skipped = Some(why),
+        }
+    }
+
+    let spend = spend.into_inner().expect("the spend is not poisoned");
+    let record_failure = plan
+        .record
+        .as_ref()
+        .and_then(|path| record(path, &checks).err());
+
+    // The judgement is read from the record of this run rather than from the
+    // rows, so one folded answer is graded once however many rows wrote it.
+    let judge = plan.judgements.as_ref().map(|judgements| {
+        let hits: Vec<judge::Hit> = one_per_item(&checks)
+            .iter()
+            .filter_map(|check| check.hit())
+            .collect();
+        judge::Assessment::of(&hits, judgements, &judge::labels())
+    });
+
+    let report = Report {
+        version: env!("CARGO_PKG_VERSION").to_string(),
+        machine: Machine::here(),
+        command: command_line(args),
+        default_engine: CheckOptions::default().engine.as_str().to_string(),
+        max_cost: args.max_cost,
+        cloud_spend_usd: spend.spent_usd(),
+        sets,
+        eval_set_skipped,
+        judge,
+    }
+    .render();
+
+    Ok(Run {
+        report,
+        record_failure,
+    })
+}
+
+/// The name of the set the regression gate of spec section 13.1 is measured on.
+const FIXTURE: &str = "Fixture";
+
+/// The name of the set the recommendation is decided from.
+const EVAL_SET: &str = "Eval set";
+
+/// Run one set through every engine and every model row of the plan.
+///
+/// The cloud rows start first, so they wait on their provider while this
+/// thread runs the rows that need the machine. A run with two sets runs the
+/// sets one after the other, because both share one machine and one cost cap.
+fn tables(
+    name: &'static str,
+    sentences: Vec<Sentence>,
+    plan: &Plan,
+    base: &CheckOptions,
+    spend: &Mutex<Spend>,
+) -> (SetTables, Vec<RecordedCheck>) {
     let (engines, models) = std::thread::scope(|scope| {
-        // The cloud rows start first, so they wait on their provider while
-        // this thread runs the rows that need the machine.
         let cloud: Vec<(usize, _)> = plan
             .rows
             .iter()
             .enumerate()
             .filter(|(_, row)| row.slug.is_cloud())
             .map(|(index, row)| {
-                let (base, sentences, spend) = (&base, &sentences, &spend);
+                let sentences = &sentences;
                 let handle =
                     scope.spawn(move || model_row(row, ServerUse::Fresh, base, sentences, spend));
                 (index, handle)
@@ -131,7 +202,7 @@ pub fn run(args: &BenchArgs, stored: &StoredSettings) -> Result<Run, String> {
 
         let engines: Vec<(EngineRow, Vec<RecordedCheck>)> = ENGINES
             .iter()
-            .map(|slug| engine_row(*slug, &base, &sentences, &spend))
+            .map(|slug| engine_row(*slug, base, &sentences, spend))
             .collect();
 
         let mut models: Vec<Option<(ModelRow, Vec<RecordedCheck>)>> =
@@ -148,7 +219,7 @@ pub fn run(args: &BenchArgs, stored: &StoredSettings) -> Result<Run, String> {
                 restart_model_server();
                 serving = Some(row.model.as_str());
             }
-            models[index] = Some(model_row(row, server_use, &base, &sentences, &spend));
+            models[index] = Some(model_row(row, server_use, base, &sentences, spend));
         }
         for (index, handle) in cloud {
             models[index] = Some(handle.join().expect("a benchmark row does not panic"));
@@ -169,46 +240,33 @@ pub fn run(args: &BenchArgs, stored: &StoredSettings) -> Result<Run, String> {
         .chain(models.iter().map(|(_, checks)| checks))
         .flat_map(|checks| checks.iter().cloned())
         .collect();
-    let engines: Vec<EngineRow> = engines.into_iter().map(|(row, _)| row).collect();
-    let models: Vec<ModelRow> = models.into_iter().map(|(row, _)| row).collect();
-
-    let spend = spend.into_inner().expect("the spend is not poisoned");
-    let record_failure = plan
-        .record
-        .as_ref()
-        .and_then(|path| record(path, &checks).err());
-
-    // The judgement is read from the record of this run rather than from the
-    // rows, so one folded answer is graded once however many rows wrote it.
-    let judge = plan.judgements.as_ref().map(|judgements| {
-        let hits: Vec<judge::Hit> = one_per_item(&checks)
-            .iter()
-            .filter_map(|check| check.hit())
-            .collect();
-        judge::Assessment::of(&hits, judgements, &judge::labels())
-    });
 
     let (interference, clean) = counts(&sentences);
-    let report = Report {
-        version: env!("CARGO_PKG_VERSION").to_string(),
-        machine: Machine::here(),
-        command: command_line(args),
+    let set = SetTables {
+        name,
+        source: source_line(name, interference, clean),
         interference,
         clean,
         languages: languages(&sentences),
-        default_engine: CheckOptions::default().engine.as_str().to_string(),
-        max_cost: args.max_cost,
-        cloud_spend_usd: spend.spent_usd(),
-        engines,
-        models,
-        judge,
-    }
-    .render();
+        engines: engines.into_iter().map(|(row, _)| row).collect(),
+        models: models.into_iter().map(|(row, _)| row).collect(),
+    };
+    (set, checks)
+}
 
-    Ok(Run {
-        report,
-        record_failure,
-    })
+/// The line under the title that says where one set's items came from.
+///
+/// The eval-set line names no corpus file, because no committed file holds it:
+/// the selection is the sidecar and the sentences are fetched (ADR 0003).
+fn source_line(name: &str, interference: usize, clean: usize) -> String {
+    if name == EVAL_SET {
+        return format!(
+            "Eval set: {interference} error sentences and {clean} error-free ones, the selection of `cli/tests/fixtures/eval-set.sidecar.json` over the fetched corpus plus the fixture."
+        );
+    }
+    format!(
+        "Fixture: {interference} interference sentences and {clean} correct ones, `cli/tests/fixtures/interference-30.json`."
+    )
 }
 
 /// One Models row: a model, on an engine, in one thinking mode.
@@ -451,9 +509,7 @@ impl Spend {
 /// `usage.cost` leaves the spend unmeasurable, so the row ends there rather
 /// than billing on blind.
 fn unpriced(id: &str) -> String {
-    format!(
-        "the answer for fixture sentence {id} carried no usage.cost, so this run cannot measure its spend"
-    )
+    format!("the answer for item {id} carried no usage.cost, so this run cannot measure its spend")
 }
 
 /// One Check as `--record` writes it.
@@ -598,6 +654,9 @@ fn command_line(args: &BenchArgs) -> String {
     }
     if let Some(cap) = args.max_cost {
         line.push_str(&format!(" --max-cost {cap}"));
+    }
+    if args.eval_set {
+        line.push_str(" --eval-set");
     }
     // Always named, because it always decides what the local rows measured.
     line.push_str(&format!(" --thinking {}", args.thinking.as_str()));
@@ -882,7 +941,7 @@ fn reason(id: &str, failure: EngineFailure) -> String {
         | EngineFailure::Failed(message)
         | EngineFailure::BadArguments(message) => message,
     };
-    format!("{message} (at fixture sentence {id})")
+    format!("{message} (at item {id})")
 }
 
 /// Write every Check of the run to the record file the plan opened.
@@ -989,6 +1048,7 @@ mod tests {
             max_cost: None,
             record: None,
             judgements: None,
+            eval_set: false,
             thinking: BenchThinking::On,
         }
     }
@@ -1234,7 +1294,7 @@ mod tests {
         };
         assert_eq!(
             why,
-            "the answer for fixture sentence zh-01 carried no usage.cost, so this run cannot measure its spend"
+            "the answer for item zh-01 carried no usage.cost, so this run cannot measure its spend"
         );
         assert_eq!(spend.exhausted.as_deref(), Some(why.as_str()));
         assert!((spend.spent_usd() - 0.03).abs() < 1e-9);
@@ -1319,7 +1379,7 @@ mod tests {
 
         assert_eq!(
             skipped,
-            "No LanguageTool answered on 127.0.0.1:8081 (at fixture sentence zh-01)"
+            "No LanguageTool answered on 127.0.0.1:8081 (at item zh-01)"
         );
     }
 

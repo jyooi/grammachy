@@ -154,7 +154,10 @@ fn documents(
 /// Tokenising only moves whitespace about, so two texts that differ in nothing
 /// else are the same string here.
 fn spaceless(text: &str) -> String {
-    normalise(text).chars().filter(|c| !c.is_whitespace()).collect()
+    normalise(text)
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .collect()
 }
 
 /// The punctuation normalisation the release's own converter applied.
@@ -204,7 +207,9 @@ fn parse_m2(text: &str) -> Vec<Sentence> {
         let Some(annotation) = line.strip_prefix("A ") else {
             continue;
         };
-        let Some(block) = out.last_mut() else { continue };
+        let Some(block) = out.last_mut() else {
+            continue;
+        };
         let fields: Vec<&str> = annotation.split("|||").collect();
         if fields.len() < 6 || fields[5] != "0" || fields[1] == "noop" {
             continue;
@@ -263,7 +268,10 @@ mod tests {
         assert_eq!(blocks[0].edits.len(), 1);
         assert_eq!(blocks[0].edits[0].code, "R:VERB:TENSE");
         assert_eq!(blocks[0].edits[0].correction, "went");
-        assert!(blocks[1].edits.is_empty(), "a noop sentence carries no edit");
+        assert!(
+            blocks[1].edits.is_empty(),
+            "a noop sentence carries no edit"
+        );
         assert_eq!(
             blocks[2].edits.len(),
             1,
@@ -308,14 +316,16 @@ mod tests {
         }];
         let mut document = 0;
 
-        let error =
-            documents("train", &m2, &essays, &mut document, &mut Vec::new()).unwrap_err();
+        let error = documents("train", &m2, &essays, &mut document, &mut Vec::new()).unwrap_err();
 
         assert!(error.contains("does not line up"), "{error}");
     }
 
     #[test]
     fn the_curly_punctuation_of_the_json_matches_the_straight_punctuation_of_the_m2() {
-        assert_eq!(spaceless("it \u{2019}s \u{201c}fine\u{201d}"), "it's\"fine\"");
+        assert_eq!(
+            spaceless("it \u{2019}s \u{201c}fine\u{201d}"),
+            "it's\"fine\""
+        );
     }
 }

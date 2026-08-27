@@ -73,7 +73,9 @@ pub struct Cache {
 impl Cache {
     /// The M2 file of one split, the alignment the items are built from.
     pub fn m2(&self, split: &str) -> PathBuf {
-        self.root.join("m2").join(format!("fce.{split}.gold.bea19.m2"))
+        self.root
+            .join("m2")
+            .join(format!("fce.{split}.gold.bea19.m2"))
     }
 
     /// The JSON file of one split, which carries the writer's first language.
@@ -132,7 +134,11 @@ pub fn ensure() -> Result<Cache, String> {
 ///
 /// `may_fetch` is the seam rather than the variable, so a case proves the
 /// forbidden path without writing the environment of the whole test binary.
-pub fn ensure_in(directory: &Path, download: &Downloader, may_fetch: bool) -> Result<Cache, String> {
+pub fn ensure_in(
+    directory: &Path,
+    download: &Downloader,
+    may_fetch: bool,
+) -> Result<Cache, String> {
     let cache = Cache {
         root: directory.join(ROOT),
     };

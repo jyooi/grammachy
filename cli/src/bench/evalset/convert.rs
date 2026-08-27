@@ -265,7 +265,12 @@ fn separated(
 
 /// Whether the quote token at this place opened rather than closed.
 fn opened_before(tokens: &[String], place: usize) -> bool {
-    tokens[..place].iter().filter(|token| *token == "\"").count() % 2 == 0
+    tokens[..place]
+        .iter()
+        .filter(|token| *token == "\"")
+        .count()
+        % 2
+        == 0
 }
 
 #[cfg(test)]
@@ -300,7 +305,10 @@ mod tests {
 
         let (text, spans) = detokenise(&tokens);
 
-        assert_eq!(text, "I don't like the show's ending, \"Over the Rainbow\".");
+        assert_eq!(
+            text,
+            "I don't like the show's ending, \"Over the Rainbow\"."
+        );
         assert_eq!(spans.len(), tokens.len());
         for (token, (start, end)) in tokens.iter().zip(&spans) {
             assert_eq!(
@@ -342,7 +350,10 @@ mod tests {
         assert_eq!(item.edits[0].text, "cinema");
         assert_eq!(item.edits[0].fix, "the cinema");
         assert_eq!(item.expected_text, "I went to the cinema with my friends.");
-        assert!(item.edits[0].start < item.edits[0].end, "no zero-width span");
+        assert!(
+            item.edits[0].start < item.edits[0].end,
+            "no zero-width span"
+        );
     }
 
     #[test]
@@ -399,7 +410,10 @@ mod tests {
             item(&block(
                 "zh",
                 long,
-                vec![edit(1, 2, "R:VERB", "went"), edit(4, 5, "R:NOUN", "schools")]
+                vec![
+                    edit(1, 2, "R:VERB", "went"),
+                    edit(4, 5, "R:NOUN", "schools")
+                ]
             ))
             .is_none(),
             "two edits in one sentence"

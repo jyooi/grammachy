@@ -57,7 +57,12 @@ pub fn draw(blocks: &[Block]) -> Vec<Drawn> {
 
     let mut drawn: Vec<Drawn> = Vec::new();
     for language in LANGUAGES {
-        for (place, item) in errors.remove(language).unwrap_or_default().iter().enumerate() {
+        for (place, item) in errors
+            .remove(language)
+            .unwrap_or_default()
+            .iter()
+            .enumerate()
+        {
             drawn.push(Drawn {
                 id: format!("fce-{language}-{:02}", place + 1),
                 item: (*item).clone(),
@@ -189,8 +194,28 @@ mod tests {
 
         assert_eq!(drawn.len(), 12, "six errors and six controls");
         let ids: Vec<&str> = drawn.iter().map(|item| item.id.as_str()).collect();
-        assert_eq!(&ids[..6], ["fce-zh-01", "fce-es-01", "fce-fr-01", "fce-de-01", "fce-pt-01", "fce-ja-01"]);
-        assert_eq!(&ids[6..], ["fce-ok-01", "fce-ok-02", "fce-ok-03", "fce-ok-04", "fce-ok-05", "fce-ok-06"]);
+        assert_eq!(
+            &ids[..6],
+            [
+                "fce-zh-01",
+                "fce-es-01",
+                "fce-fr-01",
+                "fce-de-01",
+                "fce-pt-01",
+                "fce-ja-01"
+            ]
+        );
+        assert_eq!(
+            &ids[6..],
+            [
+                "fce-ok-01",
+                "fce-ok-02",
+                "fce-ok-03",
+                "fce-ok-04",
+                "fce-ok-05",
+                "fce-ok-06"
+            ]
+        );
 
         let documents: HashSet<usize> = drawn.iter().map(|item| item.item.document).collect();
         assert_eq!(documents.len(), drawn.len(), "no essay is drawn twice");

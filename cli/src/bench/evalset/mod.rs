@@ -62,9 +62,18 @@ fn rebuild(
 ) -> Result<Sentence, String> {
     let block = index
         .get(&(entry.document, entry.sentence))
-        .ok_or_else(|| format!("the cached corpus has no sentence for {} of {release}", entry.id))?;
-    let item = convert::item(block)
-        .ok_or_else(|| format!("the cached corpus no longer yields {} of {release}", entry.id))?;
+        .ok_or_else(|| {
+            format!(
+                "the cached corpus has no sentence for {} of {release}",
+                entry.id
+            )
+        })?;
+    let item = convert::item(block).ok_or_else(|| {
+        format!(
+            "the cached corpus no longer yields {} of {release}",
+            entry.id
+        )
+    })?;
 
     if item.edits.len() != entry.edits.len()
         || item
@@ -184,7 +193,10 @@ mod tests {
         )
         .unwrap_err();
 
-        assert!(error.contains("elsewhere than the sidecar records"), "{error}");
+        assert!(
+            error.contains("elsewhere than the sidecar records"),
+            "{error}"
+        );
     }
 
     #[test]
