@@ -45,12 +45,15 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   A named mismatch stops the unit through the `Stopper` value and lets the start path load the right weights.
   The stop runs only when `unit::served_address` says the unit serves the base URL, because that URL may name an Ollama or an LM Studio on another port and no disagreement about weights may take down a server the run was not asked about.
   Every port the guard cannot reload is one `bad_arguments` naming both models, and `Unreloadable` gives each its own remedy: the start is forbidden, the unit does not serve the address, the stop did not run, the port still holds the wrong weights, or this adapter started that unit itself.
-  A transient unit that is not running is not loaded either, so `systemctl --user stop` on it fails, which is what a hand-run server on the base URL looks like.
+  A hand-run server, an Ollama, and an LM Studio all end on the address rule, because the unit holds no address for their port.
+  A transient unit is collected the moment it ends, so one that ends between the address question and the stop is no longer loaded and the stop fails on it.
   A server that names no model is checked as before, because `openaiBaseUrl` accepts any OpenAI-compatible server.
   `served::from_models` reads the whole `data` list and prefers an entry that matches, and `Openai::probe` prefers a route that matches, because Ollama and LM Studio list every model and `llama-server --alias` renames what `/v1/models` reports while `/props` stays truthful.
   `served::file_name` cuts the directory off every value that leaves the adapter, because a llama.cpp `--model` path holds a home directory and one bench run is a committed file.
   Only a named answer settles the question: a silent port and a port that answers HTTP 503 while it reads its weights both leave it open.
   So `Openai::confirm_started` asks again after the start path has a server up, and `local::Started` decides what a mismatch earns there: a unit this adapter built is refused, and one an earlier session left is reloaded and the Check re-run, which is the HUF-236 recovery.
+  That second question takes no short cut on a settled answer, because reaching it means the server left the port and something brought it back, which is the one event a settled answer cannot survive.
+  A row whose server holds the port for its whole life never reaches it, so the guard still costs one probe there.
   Only a settled answer is cached, and one adapter is built per bench row and per `check` run, so a 365-item row pays a small constant number of probes.
   `Engine::served_model` carries it to `Measurement::served`, which is the "Weights served for" line under both bench tables.
   Every stub of `cli/tests/bench.rs` and `cli/tests/openai_stub.rs` therefore has to route on the request line: a probe is not a Check and must not reach the counters.

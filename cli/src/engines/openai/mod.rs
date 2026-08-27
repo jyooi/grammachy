@@ -166,7 +166,9 @@ enum Unreloadable {
     StartForbidden,
     /// The unit does not serve this address, so no stop of it would free it.
     NotTheUnit,
-    /// The stop did not run, and this is what it said.
+    /// The stop did not run, and this is what it said. A stop may fail for its
+    /// own reasons, and a transient unit that ends between the address question
+    /// and the stop is gone by the time the stop asks for it.
     StopFailed(String),
     /// The stop ran, and the port still serves the wrong weights.
     StillServing,
@@ -515,6 +517,12 @@ impl Openai {
     ///
     /// The answer comes back as whether the Check in hand still stands. A
     /// reload dropped the weights it was measured against, so it does not.
+    ///
+    /// A settled verdict earns no short cut here. Settled means that asking
+    /// again would give the same answer, and reaching this path means the
+    /// server left the port and something brought it back, which is the one
+    /// event that breaks that premise. A row whose server holds the port for
+    /// its whole life never reaches this, so it still pays one probe.
     fn confirm_started(
         &self,
         endpoint: &Endpoint,
@@ -522,9 +530,6 @@ impl Openai {
         started: Started,
     ) -> Result<bool, EngineFailure> {
         let mut guard = self.guard();
-        if guard.settled {
-            return guard.verdict.clone().unwrap_or(Ok(None)).map(|_| true);
-        }
         let on_mismatch = match started {
             Started::Fresh => Mismatch::Refuse,
             Started::AlreadyRunning => Mismatch::Reload,
@@ -538,6 +543,10 @@ impl Openai {
     /// Only a settled verdict is final. An open one is kept for the report and
     /// asked again at the one boundary that can change it, so a server that
     /// names no model still costs one probe rather than one per sentence.
+    ///
+    /// A reload that settled nothing keeps no record at all. It stopped the
+    /// server the answer described, so that answer is about a port that no
+    /// longer holds anything, and the next question has to reach the wire.
     fn store(
         &self,
         guard: &mut Guard,
@@ -547,6 +556,10 @@ impl Openai {
     ) -> Result<Confirmed, EngineFailure> {
         let outcome = self.verify_served(endpoint, options, on_mismatch);
         guard.settled = outcome.as_ref().is_ok_and(|it| it.settled) || outcome.is_err();
+        if outcome.as_ref().is_ok_and(|it| it.reloaded && !it.settled) {
+            guard.verdict = None;
+            return outcome;
+        }
         guard.verdict = Some(
             outcome
                 .as_ref()

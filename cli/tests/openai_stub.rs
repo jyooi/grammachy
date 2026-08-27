@@ -6,7 +6,7 @@
 
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock, RwLockWriteGuard};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -74,6 +74,8 @@ struct Stub {
     address: String,
     /// Every request line and header block the stub read.
     seen: Arc<std::sync::Mutex<Vec<String>>>,
+    /// Cleared by [`Stub::shut_down`], which is how a case frees the port.
+    open: Arc<AtomicBool>,
 }
 
 impl Stub {
@@ -115,6 +117,8 @@ impl Stub {
             .to_string();
         let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
         let recorder = Arc::clone(&seen);
+        let open = Arc::new(AtomicBool::new(true));
+        let answering = Arc::clone(&open);
 
         thread::spawn(move || {
             // Checks answered so far. The served-model probe stays out of the
@@ -122,6 +126,9 @@ impl Stub {
             // that is still loading answers it exactly as it answers a Check.
             let mut checks = 0usize;
             for stream in listener.incoming() {
+                if !answering.load(Ordering::SeqCst) {
+                    break;
+                }
                 let Ok(mut stream) = stream else { break };
                 let request = read_request(&mut stream);
                 let is_check = request.starts_with("POST ");
@@ -174,7 +181,24 @@ impl Stub {
             }
         });
 
-        Stub { address, seen }
+        Stub {
+            address,
+            seen,
+            open,
+        }
+    }
+
+    /// Free the port, the way `systemctl --user stop` frees it.
+    ///
+    /// The accept loop owns the listener, so dropping this value alone leaves
+    /// the port bound. One connection wakes that loop, it reads the flag, and
+    /// the listener goes out of scope with the loop. What this server read comes
+    /// back, because the case still has to say what it answered.
+    fn shut_down(self) -> Vec<String> {
+        let seen = self.requests();
+        self.open.store(false, Ordering::SeqCst);
+        let _ = TcpStream::connect(&self.address);
+        seen
     }
 
     /// A stub that answers the two probe routes differently.
@@ -222,7 +246,11 @@ impl Stub {
             }
         });
 
-        Stub { address, seen }
+        Stub {
+            address,
+            seen,
+            open: Arc::new(AtomicBool::new(true)),
+        }
     }
 
     /// A unit an earlier session left behind, still reading its weights.
@@ -282,7 +310,14 @@ impl Stub {
             }
         });
 
-        (Stub { address, seen }, stops)
+        (
+            Stub {
+                address,
+                seen,
+                open: Arc::new(AtomicBool::new(true)),
+            },
+            stops,
+        )
     }
 
     /// A stub that swaps the weights it names once the unit is stopped.
@@ -326,7 +361,14 @@ impl Stub {
             }
         });
 
-        (Stub { address, seen }, stops)
+        (
+            Stub {
+                address,
+                seen,
+                open: Arc::new(AtomicBool::new(true)),
+            },
+            stops,
+        )
     }
 
     /// A 307 whose Location is another server, so a follow would be visible.
@@ -355,7 +397,11 @@ impl Stub {
             }
         });
 
-        Stub { address, seen }
+        Stub {
+            address,
+            seen,
+            open: Arc::new(AtomicBool::new(true)),
+        }
     }
 
     fn base_url(&self) -> String {
@@ -1204,13 +1250,17 @@ fn a_server_that_finished_loading_another_model_refuses_the_check() {
     assert_eq!(adapter.served_weights(), None);
 }
 
-/// A transient unit that is not running is not loaded either, so
-/// `systemctl --user stop` on it fails. That is what a hand-run llama-server,
-/// an Ollama, or an LM Studio on the base URL looks like to the guard. The
-/// reload cannot happen, so the Check ends on the one refusal that names both
-/// models rather than on an engine error about a machine that works.
+/// The guard asks where the unit listens and then stops it, and those are two
+/// calls. A transient unit is collected the moment it ends, so one that ended
+/// between them is no longer loaded and the stop fails on it. The reload cannot
+/// happen, so the Check ends on the one refusal that names both models rather
+/// than on an engine error about a machine that works.
+///
+/// A hand-run llama-server, an Ollama, or an LM Studio never reaches this: the
+/// unit holds no address for their port, so they end on the refusal that
+/// `a_mismatch_on_another_server_stops_no_unit` covers.
 #[test]
-fn a_stop_that_cannot_run_still_names_both_models() {
+fn a_stop_that_fails_between_the_address_and_the_stop_still_names_both_models() {
     let stub = Stub::holding(Answer::Json(ANSWER), Some("granite-4.2-3b-Q4_K_M.gguf"));
     let starts = Starts::default();
     let started = Arc::clone(&starts.0);
@@ -1383,5 +1433,201 @@ fn an_aliased_server_passes_on_the_weights_file_props_names() {
         adapter.served_weights().as_deref(),
         Some("qwen3.8-4b-Q4_K_M.gguf"),
         "the row names the weights file and never the path"
+    );
+}
+
+/// A port whose stop really frees it, the way `systemctl --user stop` does.
+///
+/// The hot-swap stubs above keep answering throughout, so they never drive the
+/// guard's silent arm. This one models the production recovery: the stop leaves
+/// nothing on the port, and the start path is what puts weights back on it.
+struct Restartable {
+    port: u16,
+    /// The server on the port now. A stop takes it and frees the port.
+    running: Arc<std::sync::Mutex<Option<Stub>>>,
+    /// Every request the servers that are gone already read.
+    gone: Arc<std::sync::Mutex<Vec<String>>>,
+    stops: Arc<AtomicUsize>,
+    starts: Arc<AtomicUsize>,
+}
+
+impl Restartable {
+    /// A port already serving `first`, which a stop frees and a start fills
+    /// again with `then`.
+    fn serving(
+        first: &'static str,
+        then: &'static str,
+    ) -> (Restartable, Openai, RwLockWriteGuard<'static, ()>) {
+        let (address, ports) = silent_address();
+        let port = port_of(&address);
+        let running = Arc::new(std::sync::Mutex::new(Some(Stub::on_port(
+            port,
+            Answer::Json(ANSWER),
+            Some(first),
+        ))));
+        let gone = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let stops = Arc::new(AtomicUsize::new(0));
+        let starts = Arc::new(AtomicUsize::new(0));
+
+        let starting = Arc::clone(&running);
+        let started = Arc::clone(&starts);
+        let stopping = Arc::clone(&running);
+        let collected = Arc::clone(&gone);
+        let stopped = Arc::clone(&stops);
+        let adapter = Openai::with_server_control(
+            Config {
+                timeout: Duration::from_secs(2),
+                start_unit: true,
+                startup_budget: Duration::from_secs(5),
+            },
+            Box::new(move |_model: &str, _endpoint: &Endpoint| {
+                started.fetch_add(1, Ordering::SeqCst);
+                let mut slot = starting.lock().expect("the port slot is readable");
+                if slot.is_none() {
+                    *slot = Some(Stub::on_port(port, Answer::Json(ANSWER), Some(then)));
+                }
+                Ok(Started::Fresh)
+            }),
+            Box::new(move |_unit: &str| {
+                stopped.fetch_add(1, Ordering::SeqCst);
+                let mut slot = stopping.lock().expect("the port slot is readable");
+                if let Some(stub) = slot.take() {
+                    collected
+                        .lock()
+                        .expect("the log is readable")
+                        .extend(stub.shut_down());
+                }
+                Ok(())
+            }),
+            unit_at(&address),
+        );
+
+        (
+            Restartable {
+                port,
+                running,
+                gone,
+                stops,
+                starts,
+            },
+            adapter,
+            ports,
+        )
+    }
+
+    fn base_url(&self) -> String {
+        format!("http://127.0.0.1:{}", self.port)
+    }
+
+    /// The Checks the servers that are gone answered before they went.
+    fn checks_of_gone_servers(&self) -> Vec<String> {
+        self.gone
+            .lock()
+            .expect("the log is readable")
+            .iter()
+            .filter(|request| request.starts_with("POST "))
+            .cloned()
+            .collect()
+    }
+
+    /// The Checks the server on the port now has answered.
+    fn checks_now(&self) -> Vec<String> {
+        let slot = self.running.lock().expect("the port slot is readable");
+        slot.as_ref().map(|stub| stub.checks()).unwrap_or_default()
+    }
+
+    /// Take the server off the port, the way a restart by hand does.
+    fn goes_away(&self) {
+        let stub = self
+            .running
+            .lock()
+            .expect("the port slot is readable")
+            .take()
+            .expect("a server is on the port");
+        self.gone
+            .lock()
+            .expect("the log is readable")
+            .extend(stub.shut_down());
+    }
+}
+
+/// The production HUF-236 recovery. A real `systemctl --user stop` frees the
+/// port, so the guard sees silence rather than one model id swapped for another
+/// on a live server. The start path then puts the requested weights there, and
+/// no Check ever reaches the weights the run did not ask for.
+#[test]
+fn a_reload_that_frees_the_port_is_followed_by_a_start_and_a_fresh_check() {
+    let (port, adapter, _ports) =
+        Restartable::serving("granite-4.2-3b-Q4_K_M.gguf", "qwen3.8-4b-Q4_K_M.gguf");
+
+    let issues = adapter
+        .check(TEXT, &options(&port.base_url()))
+        .expect("the started server answers");
+
+    assert_eq!(issues.len(), 1);
+    assert_eq!(
+        port.stops.load(Ordering::SeqCst),
+        1,
+        "the wrong weights are stopped once"
+    );
+    assert_eq!(
+        port.starts.load(Ordering::SeqCst),
+        1,
+        "the freed port is what the start path fills"
+    );
+    assert_eq!(
+        adapter.served_weights().as_deref(),
+        Some("qwen3.8-4b-Q4_K_M.gguf"),
+        "the row names the weights the start path loaded"
+    );
+    assert!(
+        port.checks_of_gone_servers().is_empty(),
+        "no Check reached the weights the run did not ask for: {:?}",
+        port.checks_of_gone_servers()
+    );
+    assert_eq!(
+        port.checks_now().len(),
+        1,
+        "the one Check ran against the weights the start path loaded"
+    );
+}
+
+/// The guard's own cache must not re-open the failure it exists to close. A row
+/// probes once and matches, then its server goes away and the start path brings
+/// one back on other weights - a restart by hand, a crash, or another
+/// `grammachy check` reloading the same unit. Those later items must not be
+/// measured, and the row must not name the first model over their numbers.
+#[test]
+fn a_server_that_comes_back_on_other_weights_mid_row_measures_no_more_items() {
+    let (port, adapter, _ports) =
+        Restartable::serving("qwen3.8-4b-Q4_K_M.gguf", "granite-4.2-3b-Q4_K_M.gguf");
+    let options = options(&port.base_url());
+
+    let issues = adapter
+        .check(TEXT, &options)
+        .expect("the row starts on the weights it asked for");
+    assert_eq!(issues.len(), 1);
+    assert_eq!(
+        adapter.served_weights().as_deref(),
+        Some("qwen3.8-4b-Q4_K_M.gguf")
+    );
+
+    port.goes_away();
+
+    let failure = adapter
+        .check(TEXT, &options)
+        .expect_err("the weights that came back are not the ones this row asked for");
+
+    match failure {
+        EngineFailure::BadArguments(message) => {
+            assert!(message.contains("granite-4.2-3b-Q4_K_M.gguf"), "{message}");
+            assert!(message.contains(REQUESTED), "{message}");
+        }
+        other => panic!("expected bad_arguments, got {other:?}"),
+    }
+    assert_ne!(
+        adapter.served_weights().as_deref(),
+        Some("qwen3.8-4b-Q4_K_M.gguf"),
+        "the row never names the first model over the other weights' numbers"
     );
 }
