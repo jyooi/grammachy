@@ -643,6 +643,80 @@ mod tests {
     }
 
     #[test]
+    fn a_measured_engine_names_the_pool_its_memory_number_came_from() {
+        let mut report = report();
+        report.engines[0].outcome = Outcome::Skipped("LanguageTool is not installed.".to_string());
+        report.engines[1].outcome =
+            on_device(tally(22, 18, 1, 40), Some(1_800_000_000), Source::Device);
+
+        let rendered = report.render();
+
+        assert!(
+            rendered.contains("| `openai` | 22 of 30 (73.3%) | 1 of 10 | 20 ms | 1.8 GB |"),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains(
+                "Resident memory of `openai` is the device memory its server process holds, read from the DRM fdinfo of that process rather than from its RSS.\n"
+            ),
+            "the row names the pool it was measured in: {rendered}"
+        );
+        assert!(
+            !rendered.contains("Resident memory of `languagetool`"),
+            "a skipped row measured nothing, so it names no source: {rendered}"
+        );
+    }
+
+    #[test]
+    fn an_engine_on_an_integrated_processor_names_the_shared_pool_instead() {
+        let mut report = report();
+        report.engines[1].outcome = on_device(
+            tally(22, 18, 1, 40),
+            Some(1_800_000_000),
+            Source::DeviceShared,
+        );
+
+        let rendered = report.render();
+
+        assert!(
+            rendered.contains("Resident memory of `openai` is the system memory its server process maps onto an integrated graphics processor, read from the DRM fdinfo of that process rather than from its RSS.\n"),
+            "{rendered}"
+        );
+    }
+
+    #[test]
+    fn every_measured_model_names_its_own_pool_under_the_cost_table() {
+        let mut report = report();
+        report.models = vec![
+            model(
+                "gemma-3n-e4b-it",
+                "openai",
+                weights::of("gemma-3n-e4b-it"),
+                on_device(tally(24, 20, 0, 40), Some(1_800_000_000), Source::Device),
+            ),
+            model(
+                "qwen2.5-3b-instruct",
+                "openai",
+                weights::of("qwen2.5-3b-instruct"),
+                Outcome::Skipped("llama.cpp is not installed.".to_string()),
+            ),
+        ];
+
+        let rendered = report.render();
+
+        assert!(
+            rendered.contains(
+                "Resident memory of `gemma-3n-e4b-it` is the device memory its server process holds, read from the DRM fdinfo of that process rather than from its RSS.\n"
+            ),
+            "a measured model names its pool under the Cost table: {rendered}"
+        );
+        assert!(
+            !rendered.contains("Resident memory of `qwen2.5-3b-instruct`"),
+            "a skipped model measured nothing, so it names no source: {rendered}"
+        );
+    }
+
+    #[test]
     fn a_run_that_reached_everything_says_nothing_was_skipped() {
         let mut report = report();
         report.engines[1].outcome = measured(tally(10, 5, 0, 40), None);

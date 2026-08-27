@@ -36,8 +36,16 @@ pub const UNKNOWN: &str = "not measured";
 ///
 /// `amdgpu` writes `drm-resident-vram`, and newer kernels number the region as
 /// `drm-resident-vram0`. The Intel and Xe drivers name the same region
-/// `drm-resident-local<n>` on a card with memory of its own.
-const CARD_KEYS: [&str; 2] = ["drm-resident-vram", "drm-resident-local"];
+/// `drm-resident-local<n>` on a card with memory of its own. A driver that
+/// names no region of its own reports through the generic helper of the
+/// kernel, which calls the card's memory `drm-resident-memory`. `nouveau` is
+/// the driver of that kind this project supports. The proprietary NVIDIA
+/// driver is another matter, because it may expose no DRM fdinfo at all.
+const CARD_KEYS: [&str; 3] = [
+    "drm-resident-vram",
+    "drm-resident-local",
+    "drm-resident-memory",
+];
 
 /// The fdinfo keys that report the system memory one DRM client maps.
 ///
@@ -371,6 +379,25 @@ mod tests {
         assert_eq!(
             device_reading(&two_files),
             Some(Reading::new(Some(1_800_000 * 1_024), Source::DeviceShared))
+        );
+    }
+
+    #[test]
+    fn a_driver_on_the_generic_helper_still_reports_its_card_memory() {
+        // `nouveau` names no region of its own, so the kernel writes the
+        // generic `memory` region for it rather than an `amdgpu` or Xe name.
+        let nouveau = "pos:\t0\n\
+                       drm-driver:\tnouveau\n\
+                       drm-client-id:\t42\n\
+                       drm-pdev:\t0000:01:00.0\n\
+                       drm-total-memory:\t1835008 KiB\n\
+                       drm-shared-memory:\t0\n\
+                       drm-resident-memory:\t1835008 KiB\n";
+
+        assert_eq!(
+            device_reading(&[nouveau.to_string()]),
+            Some(Reading::new(Some(1_835_008 * 1_024), Source::Device)),
+            "a nouveau row reads the card rather than falling back to RSS"
         );
     }
 
