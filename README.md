@@ -58,11 +58,11 @@ You may pick it in Settings, and the rules never make it the default.
 The recommended cloud model is the best `openrouter` row with no cost ceiling.
 Beside it, a benchmark file names a value cloud model when one exists: the cheapest row within 10 points of exact fix of the recommended one.
 That keeps the cost trade-off visible.
-A run where no cheaper row is inside that window names no value line and says so.
+A run that names no value line says why, so a reader can tell "nothing was cheaper" from "nothing was priced".
 
 ## Install
 
-Clone into the Omarchy plugin directory, build the companion binary, and write the hotkeys.
+Clone into the Omarchy plugin directory, build the companion binary, write the hotkeys, and enable the plugin.
 
 ```bash
 git clone <repo-url> ~/.config/omarchy/plugins/io.github.jyooi.grammachy
@@ -70,9 +70,12 @@ cd ~/.config/omarchy/plugins/io.github.jyooi.grammachy/cli
 cargo build --release
 mkdir -p ../bin && cp target/release/grammachy ../bin/grammachy
 ../bin/grammachy setup
+omarchy-shell shell rescanPlugins
+omarchy plugin enable io.github.jyooi.grammachy
 ```
 
 `grammachy setup` writes the two hotkeys and the menu entry, then reloads Hyprland.
+`omarchy plugin enable` turns on the bar button and the overlay.
 `grammachy doctor` reports what each engine still needs and names the exact command that installs it.
 Doctor installs nothing: pacman steps stay manual.
 

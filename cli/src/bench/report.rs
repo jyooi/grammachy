@@ -1771,6 +1771,93 @@ mod tests {
         );
     }
 
+    /// Spec section 5: two rows level on exact fix rate are separated by F0.5.
+    ///
+    /// Both rows fix the same 25 sentences, so the first measure ties. One of
+    /// them pairs more Issues with an expected edit, which is the higher F0.5,
+    /// and that row takes the line.
+    #[test]
+    fn a_tie_on_exact_fix_is_broken_by_the_higher_f05() {
+        let mut report = report();
+        // The winner is listed first, so a run that ignored F0.5 and kept the
+        // last row of the tie would name the other one.
+        only(&mut report).models = vec![
+            sized_model(
+                "qwen3.8-4b",
+                Some(2_783_446_304),
+                measured(tally(29, 25, 0, 40), Some(2_200_000_000)),
+            ),
+            sized_model(
+                "granite-4.2-3b",
+                Some(2_244_012_160),
+                measured(tally(22, 25, 0, 40), Some(2_200_000_000)),
+            ),
+        ];
+
+        let rendered = report.render();
+
+        assert!(
+            rendered.contains("| `granite-4.2-3b` | 22 of 30 (73.3%) | 22 of 30 (73.3%) | 22 of 30 (73.3%) | 73.3% | 25 of 30 (83.3%) |"),
+            "both rows fix 25 of 30: {rendered}"
+        );
+        assert!(
+            rendered.contains("| `qwen3.8-4b` | 29 of 30 (96.7%) | 29 of 30 (96.7%) | 29 of 30 (96.7%) | 96.7% | 25 of 30 (83.3%) |"),
+            "both rows fix 25 of 30: {rendered}"
+        );
+        assert!(
+            rendered.contains(
+                "Recommended local model, the Settings default and the README line: `qwen3.8-4b`, with thinking on."
+            ),
+            "the higher F0.5 wins the tie: {rendered}"
+        );
+        assert!(
+            rendered.contains("| `granite-4.2-3b` | on | 20 ms | 50 ms | 2.2 GB | 0.00 (local) | Apache-2.0 | eligible |"),
+            "the loser is eligible and not refused: {rendered}"
+        );
+    }
+
+    /// Spec section 5: two rows level on exact fix rate and on F0.5 are
+    /// separated by the lower p50 latency.
+    #[test]
+    fn a_tie_on_exact_fix_and_f05_is_broken_by_the_lower_p50() {
+        let mut slower = tally(29, 25, 0, 40);
+        slower.p50_ms = 900;
+        let mut faster = tally(29, 25, 0, 40);
+        faster.p50_ms = 300;
+
+        let mut report = report();
+        // The winner is listed first, for the reason the F0.5 case gives.
+        only(&mut report).models = vec![
+            sized_model(
+                "granite-4.2-3b",
+                Some(2_244_012_160),
+                measured(faster, Some(2_200_000_000)),
+            ),
+            sized_model(
+                "qwen3.8-4b",
+                Some(2_783_446_304),
+                measured(slower, Some(2_200_000_000)),
+            ),
+        ];
+
+        let rendered = report.render();
+
+        assert!(
+            rendered.contains("| `qwen3.8-4b` | on | 900 ms | 50 ms | 2.2 GB | 0.00 (local) | Apache-2.0 | eligible |"),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains("| `granite-4.2-3b` | on | 300 ms | 50 ms | 2.2 GB | 0.00 (local) | Apache-2.0 | recommended |"),
+            "the lower p50 wins the tie: {rendered}"
+        );
+        assert!(
+            rendered.contains(
+                "Recommended local model, the Settings default and the README line: `granite-4.2-3b`, with thinking on."
+            ),
+            "{rendered}"
+        );
+    }
+
     /// A local name the run could size neither on disk nor from the catalogue
     /// is a row nobody showed to be under the ceiling.
     #[test]
