@@ -874,22 +874,31 @@ fn thinking_both_prints_two_rows_for_one_local_model() {
         run.stdout
     );
 
-    // This run may start no unit, so neither row paid for a server start and
-    // neither wall time may claim one.
+    // The run never starts the server itself, so no wall time claims a start.
+    // The second row of the model does say which server it shared.
     let wall: Vec<&str> = run
         .stdout
         .lines()
         .filter(|line| line.starts_with("Wall time of `qwen2.5-7b-instruct`"))
         .collect();
     assert_eq!(wall.len(), 2, "one wall time per row: {}", run.stdout);
-    for (line, mode) in wall.iter().zip(["on", "off"]) {
-        let head = format!("Wall time of `qwen2.5-7b-instruct` with thinking {mode}: ");
-        assert!(line.starts_with(&head), "{wall:?}");
-        assert!(
-            line.ends_with(" s for the whole fixture."),
-            "no row of a run that starts no server may claim a start: {wall:?}"
-        );
-    }
+    assert!(
+        wall[0].starts_with("Wall time of `qwen2.5-7b-instruct` with thinking on: ")
+            && wall[0].ends_with(" s for the whole fixture."),
+        "the first row of a model claims no server start: {wall:?}"
+    );
+    assert!(
+        wall[1].starts_with("Wall time of `qwen2.5-7b-instruct` with thinking off: ")
+            && wall[1].ends_with(
+                " s for the whole fixture, on the server the earlier row of this model ran on."
+            ),
+        "the second row of a model names the server it shared: {wall:?}"
+    );
+    assert!(
+        !run.stdout.contains("server start included"),
+        "no row may claim a start the run did not make: {}",
+        run.stdout
+    );
     assert!(
         run.stdout.contains(
             "Recommended local model, the Settings default and the README line: `qwen2.5-7b-instruct`, with thinking"

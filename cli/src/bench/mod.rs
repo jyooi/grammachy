@@ -45,7 +45,8 @@
 //! runs each local model twice so one file holds both modes. The flag rather
 //! than the stored `localThinking` is what the rows carry, so a benchmark file
 //! is reproducible from the Command line it prints. The Engines table has no
-//! Thinking column, so its `openai` row runs once, in the product default.
+//! Thinking column, so its `openai` row runs once, in the mode the flag names.
+//! Only `both` leaves that row on the product default.
 //!
 //! `--max-cost` is read under one lock before each cloud Check, so a run may
 //! pass the cap by at most one Check for each cloud row in flight. The report
@@ -77,7 +78,7 @@ use fixture::Sentence;
 use machine::Machine;
 use memory::{Reading, Source};
 use metrics::{Recorded, Tally};
-use report::{EngineRow, Measurement, ModelRow, Outcome, Report, ServerStart};
+use report::{EngineRow, Measurement, ModelRow, Outcome, Report, ServerUse};
 
 /// The engines of the Engines table, in the order the table prints them.
 ///
@@ -122,7 +123,7 @@ pub fn run(args: &BenchArgs, stored: &StoredSettings) -> Result<Run, String> {
             .map(|(index, row)| {
                 let (base, sentences, spend) = (&base, &sentences, &spend);
                 let handle =
-                    scope.spawn(move || model_row(row, ServerStart::None, base, sentences, spend));
+                    scope.spawn(move || model_row(row, ServerUse::Fresh, base, sentences, spend));
                 (index, handle)
             })
             .collect();
@@ -137,17 +138,16 @@ pub fn run(args: &BenchArgs, stored: &StoredSettings) -> Result<Run, String> {
         // The model the llama.cpp unit currently serves, so two rows that
         // differ only by thinking mode share one server start.
         let mut serving: Option<&str> = None;
-        let starts_unit = openai::Config::from_env().start_unit;
         for (index, row) in plan.rows.iter().enumerate() {
             if row.slug.is_cloud() {
                 continue;
             }
-            let start = server_start(serving, &row.model, starts_unit);
-            if start == ServerStart::Paid {
+            let server_use = server_use(serving, &row.model);
+            if server_use == ServerUse::Fresh {
                 restart_model_server();
                 serving = Some(row.model.as_str());
             }
-            models[index] = Some(model_row(row, start, &base, &sentences, &spend));
+            models[index] = Some(model_row(row, server_use, &base, &sentences, &spend));
         }
         for (index, handle) in cloud {
             models[index] = Some(handle.join().expect("a benchmark row does not panic"));
@@ -627,12 +627,12 @@ fn engine_row(
 ///
 /// The caller owns the llama.cpp server, because two rows of one model differ
 /// only by a request field and must not pay for two server starts.
-/// `start` is the caller's answer for what this row paid for that start,
-/// which is what the report's wall time sentence reads rather than inferring
-/// the restart rule again.
+/// `server_use` is the caller's answer for whether an earlier row of this
+/// model already ran, which is what the report's wall time sentence reads
+/// rather than inferring the restart rule again.
 fn model_row(
     row: &Row,
-    start: ServerStart,
+    server_use: ServerUse,
     base: &CheckOptions,
     sentences: &[Sentence],
     spend: &Mutex<Spend>,
@@ -649,7 +649,7 @@ fn model_row(
             model: row.model.clone(),
             engine: row.slug.as_str().to_string(),
             thinking: row.thinking,
-            server_start: start,
+            server_use,
             weights,
             outcome,
         },
@@ -948,26 +948,29 @@ fn memory_reading(slug: EngineSlug, before: Option<u64>) -> Reading {
     }
 }
 
-/// What one local row pays for the llama.cpp server it measures on.
+/// Whether one local row shares the server an earlier row of its model ran on.
 ///
-/// A run that may not start a unit pays for nothing, so no row of it may claim
-/// a start. That is the seam every test sets, and it is also a developer who
-/// points the run at a server they started themselves.
-fn server_start(serving: Option<&str>, model: &str, starts_unit: bool) -> ServerStart {
-    if !starts_unit {
-        ServerStart::None
-    } else if serving == Some(model) {
-        ServerStart::Reused
+/// The run leaves the server up between the two rows of one model, so the
+/// second of them measures on whatever the first measured on. That is a fact
+/// about the run and holds however the server got there.
+fn server_use(serving: Option<&str>, model: &str) -> ServerUse {
+    if serving == Some(model) {
+        ServerUse::Reused
     } else {
-        ServerStart::Paid
+        ServerUse::Fresh
     }
 }
 
-/// Stop the llama.cpp unit so the next model row starts its own server.
+/// Stop the llama.cpp unit so the next model row gets a server of its own.
 ///
-/// The caller reaches this only for a row that pays for a start, so no test
-/// ever reaches systemd: `server_start` answers `None` under the seam.
+/// This is skipped whenever unit starts are forbidden, which is the seam every
+/// test sets, so no test ever reaches systemd. The stop frees no port that a
+/// hand-run server holds, which is why no row claims a start it may not have
+/// paid for.
 fn restart_model_server() {
+    if !openai::Config::from_env().start_unit {
+        return;
+    }
     let _ = Command::new("systemctl")
         .args(["--user", "stop", openai::unit::UNIT_NAME])
         .status();
@@ -989,24 +992,13 @@ mod tests {
         }
     }
 
-    /// Evals spec section 4.1: only the row that stops the unit carries the
-    /// weight load, and a run that starts no unit carries none at all.
+    /// Evals spec section 4.1: the run leaves the server up between the two
+    /// rows of one model, and restarts it for every other row.
     #[test]
-    fn only_a_row_that_stops_the_unit_paid_for_a_server_start() {
-        assert_eq!(server_start(None, "gemma", true), ServerStart::Paid);
-        assert_eq!(
-            server_start(Some("gemma"), "gemma", true),
-            ServerStart::Reused
-        );
-        assert_eq!(server_start(Some("qwen"), "gemma", true), ServerStart::Paid);
-
-        for serving in [None, Some("gemma"), Some("qwen")] {
-            assert_eq!(
-                server_start(serving, "gemma", false),
-                ServerStart::None,
-                "a run forbidden to start a unit pays for no start, serving {serving:?}"
-            );
-        }
+    fn only_a_later_row_of_the_same_model_reuses_a_server() {
+        assert_eq!(server_use(Some("gemma"), "gemma"), ServerUse::Reused);
+        assert_eq!(server_use(None, "gemma"), ServerUse::Fresh);
+        assert_eq!(server_use(Some("qwen"), "gemma"), ServerUse::Fresh);
     }
 
     /// One planned row, the way the tests name them.

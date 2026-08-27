@@ -112,8 +112,9 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   `--thinking off|on|both` owns the mode of every local row, and the default is the product default `on`.
   The flag, not the stored `localThinking`, is what a row's request carries, so a benchmark file is the output of the Command line it prints.
   `both` expands each local model into two rows, kept next to each other so the two share one llama.cpp server start.
-  `bench::server_start` is the one rule for what a row pays, and the run loop carries its `ServerStart` onto the row.
-  A run forbidden to start a unit answers `None`, so no row of it claims a server start in the report.
+  The bench never starts that server: the `openai` adapter starts it, and only when a request finds the port silent.
+  So no wall time claims a server start, because a hand-run server on the port means no start happened.
+  `bench::server_use` is the one rule for what a row may say, and the run loop carries its `ServerUse` onto the row.
   Only the Cost table names a mode, so the prose under the tables names the mode too when a run holds both.
   The Engines table keeps its four columns, so its `openai` row runs once, in the mode `--thinking` names.
   Only `both` leaves that row on the product default, because the flag names two modes and the table holds one.

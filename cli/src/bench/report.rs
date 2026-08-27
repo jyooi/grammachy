@@ -35,7 +35,7 @@ pub struct Measurement {
     pub tally: Tally,
     /// Resident memory, and where the run read it.
     pub memory: Reading,
-    /// How long the whole row took, including any server start it paid for.
+    /// How long the whole row took, every Check of the fixture included.
     pub wall_ms: u64,
 }
 
@@ -63,28 +63,26 @@ pub struct EngineRow {
     pub outcome: Outcome,
 }
 
-/// What one Models row paid for the llama.cpp server behind its numbers.
+/// Whether one Models row shares the server an earlier row of its model ran on.
 ///
-/// Two rows of one model share one start, so only the first of them carries
-/// the weight load in its wall time. A run that starts no unit at all pays
-/// for neither, so neither row may claim a start.
+/// The run stops the llama.cpp unit between two models and never starts one:
+/// the `openai` adapter starts it, and only when a request finds the port
+/// silent. A row therefore cannot know what a start cost it, and the wall time
+/// sentence claims no start. It says only what the run did between the rows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ServerStart {
-    /// This row stopped the unit, so its wall time carries the weight load.
-    Paid,
-    /// An earlier row of this model paid for the start this row measured on.
+pub enum ServerUse {
+    /// The first row of its model, or a cloud row, which shares nothing.
+    Fresh,
+    /// An earlier row of this model already ran, and the run left its server up.
     Reused,
-    /// No start happened, because this is a cloud row or unit starts are off.
-    None,
 }
 
-impl ServerStart {
+impl ServerUse {
     /// What the wall time sentence adds about the server behind the row.
     fn wall_time_note(self) -> &'static str {
         match self {
-            ServerStart::Paid => ", server start included",
-            ServerStart::Reused => ", on the server an earlier row of this model started",
-            ServerStart::None => "",
+            ServerUse::Fresh => "",
+            ServerUse::Reused => ", on the server the earlier row of this model ran on",
         }
     }
 }
@@ -97,8 +95,8 @@ pub struct ModelRow {
     pub engine: String,
     /// The local thinking mode the row ran in, `None` for a cloud row.
     pub thinking: Option<bool>,
-    /// What this row paid for the llama.cpp server it measured on.
-    pub server_start: ServerStart,
+    /// Whether this row shares the server an earlier row of its model ran on.
+    pub server_use: ServerUse,
     pub weights: Weights,
     pub outcome: Outcome,
 }
@@ -265,7 +263,7 @@ impl Report {
                     "Wall time of {}: {} s for the whole fixture{}.\n",
                     self.row_label(row),
                     measurement.wall_ms / 1_000,
-                    row.server_start.wall_time_note()
+                    row.server_use.wall_time_note()
                 ));
             }
         }
@@ -826,11 +824,7 @@ mod tests {
             model: name.to_string(),
             engine: engine.to_string(),
             thinking,
-            server_start: if engine == "openai" {
-                ServerStart::Paid
-            } else {
-                ServerStart::None
-            },
+            server_use: ServerUse::Fresh,
             weights,
             outcome,
         }
@@ -936,7 +930,7 @@ mod tests {
             ),
         ];
 
-        report.models[1].server_start = ServerStart::Reused;
+        report.models[1].server_use = ServerUse::Reused;
 
         let rendered = report.render();
 
@@ -958,15 +952,15 @@ mod tests {
         );
         assert!(
             rendered.contains(
-                "Wall time of `gemma-4-e4b-it` with thinking on: 12 s for the whole fixture, server start included.\n"
+                "Wall time of `gemma-4-e4b-it` with thinking on: 12 s for the whole fixture.\n"
             ),
-            "the row that started the server says so: {rendered}"
+            "a row claims no server start, because the run starts no server: {rendered}"
         );
         assert!(
             rendered.contains(
-                "Wall time of `gemma-4-e4b-it` with thinking off: 12 s for the whole fixture, on the server an earlier row of this model started.\n"
+                "Wall time of `gemma-4-e4b-it` with thinking off: 12 s for the whole fixture, on the server the earlier row of this model ran on.\n"
             ),
-            "the row that reused the server never claims the start: {rendered}"
+            "the second row of a model says which server it shared: {rendered}"
         );
         assert!(
             rendered
