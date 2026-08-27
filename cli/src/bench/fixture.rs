@@ -8,7 +8,7 @@
 //! (`docs/spec/evals.md` section 1), so the two counts below are read from the
 //! file rather than fixed here.
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::args::NativeLanguage;
 
@@ -33,7 +33,7 @@ pub struct Sentence {
 }
 
 /// One mistake of an item and the replacement that corrects it.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct Edit {
     pub start: usize,
     pub end: usize,

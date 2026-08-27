@@ -150,13 +150,7 @@ impl Tally {
             }
 
             tally.interference += 1;
-            let touched = sentence.issues.iter().any(|issue| {
-                sentence
-                    .edits
-                    .iter()
-                    .any(|edit| span_of(issue).overlaps(*edit))
-            });
-            if touched {
+            if is_caught(&sentence.issues, &sentence.edits) {
                 tally.caught += 1;
             } else {
                 tally.misses.push(sentence.id.clone());
@@ -420,15 +414,26 @@ fn words_between(text: &str, from: usize, to: usize) -> usize {
 
 /// Apply every Fix of the Check and compare with the expected text.
 pub fn is_exact(text: &str, issues: &[Issue], expected: &str) -> bool {
-    let Some(corrected) = apply(text, issues) else {
+    let Some(corrected) = corrected(text, issues) else {
         return false;
     };
     collapse(&corrected) == collapse(expected)
 }
 
+/// Whether at least one Issue overlaps a span the item expects, the "caught"
+/// rule of spec section 3.
+pub fn is_caught(issues: &[Issue], edits: &[Span]) -> bool {
+    issues
+        .iter()
+        .any(|issue| edits.iter().any(|edit| span_of(issue).overlaps(*edit)))
+}
+
 /// The Corrected text of the product: every Fix applied, later spans first so
 /// earlier offsets stay valid. `None` when a span does not index the text.
-fn apply(text: &str, issues: &[Issue]) -> Option<String> {
+///
+/// This is the sentence the writer gets after Accept, so it is both the second
+/// half of the judgement key of spec section 4.4 and what the judge grades.
+pub fn corrected(text: &str, issues: &[Issue]) -> Option<String> {
     let mut sorted: Vec<&Issue> = issues.iter().collect();
     sorted.sort_by_key(|issue| (issue.start, issue.end));
     let mut corrected = text.to_string();

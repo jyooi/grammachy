@@ -120,8 +120,9 @@ Wall time per row and the run's cloud spend print under the tables.
 ### 4.3 Record file
 
 `--record <dir>` writes `checks.json`: one entry per (engine, model, thinking, item id) with validity, latency, cost, token counts, server timings, and the normalised Issues.
-The directory is gitignored.
-It is the only place model output text and eval-set text ever land.
+Every entry also carries the item and the sentence after Accept, because that pair is the whole input of the judge.
+The directory is gitignored, and so is the `judgements.json` the judge writes beside the record.
+Those two files are the only place model output text and eval-set text ever land.
 
 ### 4.4 Judge
 
@@ -133,6 +134,8 @@ Decision and gate: [HUF-210](https://linear.app/huffman/issue/HUF-210).
 - Output `judgements.json`, keyed by (item id, result text), value `{ useful, reason }`.
 - Hand labels live in `cli/tests/fixtures/judge-labels.json` in the same key shape, labelled by one criterion: is the sentence after Accept grammatically correct wording.
 - Gate: the judge column counts in the ranking only when it agrees with the hand labels on at least 80% of the labelled items of that run.
+  The gate also needs a sample of at least 5 matched labels, because a result text must match a label verbatim.
+  A run under that sample leaves the judge unproven, so the file names the count and keeps the raw ranking.
   Below the gate the column still prints and the file says it is excluded.
   The pilot measured 15 of 17 (88%, kappa 0.76).
 - Caveat on record: a Claude judge grading Claude rows is untested because the shortlist has no Claude rows.
@@ -143,6 +146,10 @@ Two lines, re-decided from the eval-set tables on every tag ([HUF-205](https://l
 
 - Ranking: exact fix rate on the eval set; ties by F0.5, then lower p50.
   When the judge gate passes, exact fix rate is replaced by exact fix plus useful non-exact fixes over interference sentences.
+  The swap also needs the judgements file to cover every measured row that produced a non-exact hit.
+  One uncovered row would compete on a smaller measure than a graded one, so the whole table keeps the raw ranking.
+  It also needs one measured row the file grades a hit of, so a table of skipped rows never claims a measure that ranked nothing.
+  The file states the gate result and the ranking result in two sentences, and the second one names why the column does not rank.
 - Floors: a row with more false positives than the default engine, or validity under 95%, is never recommended.
 - Recommended local model, the Settings default and the README line: the best local row that is Apache-2.0 or MIT and fits the 8 GB tier by measured resident memory.
   Any thinking mode may win; the README names the mode the row ran under.
