@@ -4,12 +4,14 @@
 //! pure function of [`Facts`] and every test runs against facts it wrote
 //! itself. [`Facts::collect`] is the one place that touches the real machine.
 
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::args::CheckOptions;
 use crate::engines::languagetool;
 use crate::engines::openai::{self, endpoint};
+use crate::engines::openrouter;
 
 /// Where `/sys` exposes the graphics devices of this machine.
 const DRM_CLASS: &str = "/sys/class/drm";
@@ -43,6 +45,57 @@ pub enum UnitState {
     Stopped,
     /// `systemctl --user` could not be asked, so the CLI cannot start the unit.
     Unknown,
+}
+
+/// What the OpenRouter key file is, spec section 4.
+///
+/// The key text never lands here: `doctor` records the state of the file and
+/// nothing of its contents, so no report and no log can leak the key.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum KeyState {
+    /// HOME is not set, so the key file has no path at all.
+    NoHome,
+    /// The path is free: no key is stored.
+    Missing(PathBuf),
+    /// The file exists, but a group or another user can read it.
+    Loose { path: PathBuf, mode: u32 },
+    /// The file exists and holds no key.
+    Empty(PathBuf),
+    /// A key is stored, and no group or other user can read it.
+    Ready { path: PathBuf, mode: u32 },
+}
+
+impl KeyState {
+    /// The path the state is about, when one exists.
+    pub fn path(&self) -> Option<&Path> {
+        match self {
+            KeyState::NoHome => None,
+            KeyState::Missing(path)
+            | KeyState::Loose { path, .. }
+            | KeyState::Empty(path)
+            | KeyState::Ready { path, .. } => Some(path),
+        }
+    }
+}
+
+/// Read one key file. Only [`Facts::collect`] calls this.
+fn key_state(path: Option<PathBuf>) -> KeyState {
+    let Some(path) = path else {
+        return KeyState::NoHome;
+    };
+    let Ok(metadata) = std::fs::metadata(&path) else {
+        return KeyState::Missing(path);
+    };
+    let mode = metadata.permissions().mode() & 0o777;
+    // Anything a group or another user can reach is a key this machine no
+    // longer keeps to itself, so it fails the check even when it works.
+    if mode & 0o077 != 0 {
+        return KeyState::Loose { path, mode };
+    }
+    match std::fs::read_to_string(&path) {
+        Ok(text) if !text.trim().is_empty() => KeyState::Ready { path, mode },
+        _ => KeyState::Empty(path),
+    }
 }
 
 /// One graphics device, as `/sys/class/drm` records it.
@@ -165,6 +218,10 @@ pub struct Facts {
     pub openai_endpoint: Result<String, String>,
     pub languagetool_unit: UnitState,
     pub llama_unit: UnitState,
+    /// The state of the OpenRouter key file, never its contents.
+    pub openrouter_key: KeyState,
+    /// The model id the `openrouter` engine asks for.
+    pub openrouter_model: String,
     /// The graphics devices, which decide the tier.
     pub cards: Vec<DrmCard>,
     /// The backend library file names under [`GGML_BACKENDS`], such as
@@ -234,6 +291,8 @@ impl Facts {
                 .map(|endpoint| endpoint.address()),
             languagetool_unit: unit_state(languagetool::unit::UNIT_NAME),
             llama_unit: unit_state(openai::unit::UNIT_NAME),
+            openrouter_key: key_state(openrouter::Config::from_env().key_file),
+            openrouter_model: options.openrouter_model.clone(),
             cards: drm_cards(Path::new(DRM_CLASS)),
             ggml_backends: ggml_backends(Path::new(GGML_BACKENDS)),
         }

@@ -181,6 +181,101 @@ test("every engine setting reaches its card by its display name", () => {
   }
 })
 
+// Spec section 8 and HUF-229: the cloud engine runs on nothing this machine
+// installs, so its card never asks for a `doctor` line. The CLI message under
+// the body carries the reason word instead.
+test("the cloud engine card carries the message and asks for no diagnosis", () => {
+  const model = card(ENGINE_UNAVAILABLE, {
+    engineLabel: "Cloud LLM",
+    engineSlug: "openrouter",
+    message: "OpenRouter credits are used up. Add credits on openrouter.ai, then retry. (reason: no_credit)"
+  })
+
+  assert.equal(model.title, "Cloud LLM could not run the check")
+  assert.equal(model.body, "openrouter.ai refused the Check.")
+  assert.equal(model.needsDiagnosis, false)
+  assert.ok(model.message.includes("no_credit"))
+  assert.deepEqual(model.buttons, languageToolCard(ENGINE_UNAVAILABLE).buttons)
+  assert.equal(model.primary, languageToolCard(ENGINE_UNAVAILABLE).primary)
+})
+
+// HUF-229 AC4: five reasons reach one code, and only `unreachable` means
+// openrouter.ai answered nothing. The card says which one it was, because a
+// body that claims the wrong one contradicts the message printed under it.
+test("the cloud card says what each reason word actually means", () => {
+  // The messages are the ones `cli/src/engines/openrouter/mod.rs` prints.
+  const cases = [
+    {
+      message: "Cloud LLM has no key. Store one: printf '%s' \"$KEY\" | grammachy setup --openrouter-key. (reason: no_key)",
+      body: "No key is stored for openrouter.ai.",
+      meta: "no cloud key"
+    },
+    {
+      message: "Cloud LLM is not reachable. Grammachy could not reach openrouter.ai. (reason: unreachable)",
+      body: "Grammachy could not reach openrouter.ai.",
+      meta: "cloud engine not reachable"
+    },
+    {
+      message: "OpenRouter rejected the key. Store a new one: printf '%s' \"$KEY\" | grammachy setup --openrouter-key. (reason: rejected_key)",
+      body: "openrouter.ai refused the key.",
+      meta: "cloud key refused"
+    },
+    {
+      message: "OpenRouter credits are used up. Add credits on openrouter.ai, then retry. (reason: no_credit)",
+      body: "openrouter.ai refused the Check.",
+      meta: "cloud engine out of credit"
+    },
+    {
+      message: "OpenRouter is rate limited. Wait a moment, then retry. (reason: rate_limited)",
+      body: "openrouter.ai refused the Check.",
+      meta: "cloud engine rate limited"
+    }
+  ]
+
+  for (const one of cases) {
+    const model = card(ENGINE_UNAVAILABLE, {
+      engineLabel: "Cloud LLM",
+      engineSlug: "openrouter",
+      message: one.message
+    })
+
+    assert.equal(model.body, one.body, one.message)
+    assert.equal(model.meta, one.meta, one.message)
+    assert.equal(model.message, one.message)
+    assert.equal(model.needsDiagnosis, false, one.message)
+  }
+})
+
+// A message the shell cannot read a reason out of still needs a body that is
+// true of all five, because the card is what the reader acts on.
+test("a cloud message with no reason word says only what is certain", () => {
+  for (const message of ["", "something new went wrong", "(reason: )"]) {
+    const model = card(ENGINE_UNAVAILABLE, {
+      engineLabel: "Cloud LLM",
+      engineSlug: "openrouter",
+      message: message
+    })
+
+    assert.equal(model.body, "The Check did not run.", message)
+    assert.equal(model.meta, "cloud engine failed", message)
+  }
+})
+
+// Every other engine still gets the `doctor` line, which is what tells the two
+// branches apart.
+test("only the cloud engine skips the doctor line", () => {
+  for (const slug of Object.keys(TIMEOUT_SECONDS)) {
+    const model = card(ENGINE_UNAVAILABLE, { engineLabel: "Engine", engineSlug: slug })
+    assert.equal(model.needsDiagnosis, slug !== "openrouter", slug)
+  }
+})
+
+test("the cloud engine waits thirty seconds", () => {
+  assert.equal(timeoutSeconds("openrouter"), 30)
+  assert.equal(card(ENGINE_TIMEOUT, { engineSlug: "openrouter" }).body,
+    "No answer within 30 s. A first start can take a moment.")
+})
+
 test("every card carries a title, a body, a meta line, and buttons", () => {
   for (const code of CODES) {
     if (code === TEXT_TOO_LONG) continue

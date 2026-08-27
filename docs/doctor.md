@@ -2,7 +2,7 @@
 
 The install check of spec sections 4, 8, 10, and 12.
 It checks the binary, LanguageTool, llama.cpp, the model file, and the two transient units.
-It also checks the Java runtime, the llama.cpp compute backend, and the local LLM endpoint.
+It also checks the Java runtime, the llama.cpp compute backend, the local LLM endpoint, and the OpenRouter key file.
 It prints one line per piece.
 A missing package carries the exact command that installs it.
 
@@ -43,6 +43,7 @@ Grammachy doctor
   missing  llama.cpp backend   llama.cpp is missing the ggml-cpu and ggml-vulkan backends. It needs ggml-cpu to answer at all. Run: sudo pacman -S ggml-cpu ggml-vulkan
   missing  Model weights       No weights for gemma-4-e4b-it in /home/u/.local/share/grammachy/models. Run: grammachy model download gemma-4-e4b-it
   ok       Local LLM endpoint  127.0.0.1:8080
+  missing  OpenRouter key      No OpenRouter key: /home/u/.config/grammachy/openrouter-key does not exist. Run: printf '%s' "$KEY" | grammachy setup --openrouter-key
   ok       LanguageTool unit   grammachy-languagetool is not running. The next Check starts it.
   ok       llama.cpp unit      grammachy-llama is not running. The next Check starts it.
 
@@ -95,12 +96,16 @@ Fields:
 
 Check fields:
 
-- `id`: stable across releases, never shown to a user. The ids are `binary`, `languagetool`, `java`, `llama.cpp`, `backend`, `model`, `endpoint`, `unit:languagetool`, and `unit:llama`.
+- `id`: stable across releases, never shown to a user. The ids are `binary`, `languagetool`, `java`, `llama.cpp`, `backend`, `model`, `endpoint`, `key`, `unit:languagetool`, and `unit:llama`.
 - `name`: the display name.
 - `ok`: whether the piece is in place.
 - `detail`: one sentence saying what was found, or what is missing.
 - `remedy`: the exact command that fixes it. The key is absent when there is nothing to run. An `ok` check carries one only as advice, as the backend check does for `ggml-vulkan`.
 - `engines`: the slugs that need this piece. `harper` needs only `binary`, because it runs in process.
+
+The `key` check reads the state of the OpenRouter key file and never its contents.
+A file another user can read fails the check, and the remedy is a `chmod 600`.
+No report line can carry the key itself.
 
 ## The engine diagnosis
 
@@ -109,11 +114,11 @@ Check fields:
 | `languagetool` | `binary`, `languagetool`, `java`, `unit:languagetool` |
 | `openai` | `binary`, `llama.cpp`, `backend`, `model`, `endpoint`, `unit:llama` |
 | `harper` | `binary` |
-| `openrouter` | none that `doctor` reads yet |
+| `openrouter` | `binary`, `key` |
 
 The first missing piece in that order is the diagnosis.
 When nothing is missing, the diagnosis says the engine can run.
-`doctor` cannot read the cloud key yet, so `openrouter` always reports `ready: false` and names the key file.
+For `openrouter` the ready line names the model and says that Checks send text to openrouter.ai.
 For `languagetool` and `openai` it also names the address its unit answers on.
 
 ## Hardware tiers

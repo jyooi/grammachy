@@ -218,8 +218,8 @@ fn a_missing_key_file_sends_nothing() {
         "{failure:?}"
     );
     assert!(
-        matches!(&failure, EngineFailure::Unavailable(message) if message.contains("~/.config/grammachy/openrouter-key")),
-        "the card tells the user the file to write: {failure:?}"
+        matches!(&failure, EngineFailure::Unavailable(message) if message.contains("grammachy setup --openrouter-key")),
+        "the card names the command that stores a key: {failure:?}"
     );
     assert!(stub.requests().is_empty(), "nothing was sent");
 }
@@ -262,10 +262,14 @@ fn http_statuses_map_onto_the_agreed_reasons() {
             matches!(&failure, EngineFailure::Unavailable(message) if message.contains(reason)),
             "{line}: {failure:?}"
         );
-        assert!(
-            matches!(&failure, EngineFailure::Unavailable(message) if !message.contains("grammachy setup")),
-            "the remedy never names a setup flag the binary does not take: {failure:?}"
+        // A key remedy names the one command that stores a key; the other
+        // reasons name no setup flag at all.
+        let names_setup = matches!(
+            &failure,
+            EngineFailure::Unavailable(message)
+                if message.contains("grammachy setup --openrouter-key")
         );
+        assert_eq!(names_setup, reason == "rejected_key", "{line}: {failure:?}");
     }
 
     let stub = Stub::serving(Reply::Status("404 Not Found"));

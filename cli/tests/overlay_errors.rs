@@ -9,7 +9,7 @@
 //! No test here starts an engine, a server, or a unit: it reads the two files
 //! the shell ships and compares them with the constants beside it.
 
-use grammachy::engines::{harper, languagetool, openai};
+use grammachy::engines::{harper, languagetool, openai, openrouter};
 
 fn read(relative: &str) -> String {
     let path = format!("{}/../{relative}", env!("CARGO_MANIFEST_DIR"));
@@ -83,6 +83,10 @@ fn the_overlay_timeouts_equal_the_adapter_timeouts() {
     assert_eq!(
         timeout_seconds(&source, "harper"),
         harper::SHIPPED_TIMEOUT_SECS
+    );
+    assert_eq!(
+        timeout_seconds(&source, "openrouter"),
+        openrouter::DEFAULT_TIMEOUT.as_secs()
     );
 }
 

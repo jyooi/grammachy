@@ -60,12 +60,59 @@ var BUTTON_LABELS = {
 var TIMEOUT_SECONDS = {
   languagetool: 10,
   openai: 90,
-  harper: 10
+  harper: 10,
+  openrouter: 30
 }
 
 // What an engine with no entry above would wait. Every slug the Settings layer
 // hands over is one of the three keys, so this only guards a hand-edited file.
 var FALLBACK_TIMEOUT_SECONDS = 10
+
+// The cloud engine reaches `engine_unavailable` five ways, and only one of them
+// means openrouter.ai answered nothing (HUF-229 AC4). The CLI names which one
+// it was in a trailing `(reason: <word>)`, so the card reads that word and says
+// what actually happened rather than guessing at the worst case.
+var CLOUD_REASONS = {
+  no_key: {
+    meta: "no cloud key",
+    body: "No key is stored for openrouter.ai."
+  },
+  unreachable: {
+    meta: "cloud engine not reachable",
+    body: "Grammachy could not reach openrouter.ai."
+  },
+  rejected_key: {
+    meta: "cloud key refused",
+    body: "openrouter.ai refused the key."
+  },
+  no_credit: {
+    meta: "cloud engine out of credit",
+    body: "openrouter.ai refused the Check."
+  },
+  rate_limited: {
+    meta: "cloud engine rate limited",
+    body: "openrouter.ai refused the Check."
+  }
+}
+
+// What a cloud message with no readable reason word shows, which has to be true
+// of every one of the five.
+var CLOUD_FALLBACK = {
+  meta: "cloud engine failed",
+  body: "The Check did not run."
+}
+
+// The reason word of one CLI message, or `""` when it carries none.
+function reasonWord(message) {
+  var match = /\(reason:\s*([a-z_]+)\)/.exec(String(message))
+  return match ? match[1] : ""
+}
+
+// The meta line and body one cloud failure shows.
+function cloudLines(message) {
+  var reason = CLOUD_REASONS[reasonWord(message)]
+  return reason ? reason : CLOUD_FALLBACK
+}
 
 function isPlainObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value)
@@ -159,6 +206,17 @@ function card(code, options) {
   }
 
   if (settled === ENGINE_UNAVAILABLE) {
+    // The cloud engine runs on no piece of this machine, so `doctor` has
+    // nothing to add: the CLI message under the body is the whole diagnosis.
+    if (String(context.engineSlug) === "openrouter") {
+      var lines = cloudLines(message)
+      model.title = engine + " could not run the check"
+      model.meta = lines.meta
+      model.body = lines.body
+      model.buttons = [CLOSE, RETRY, SETTINGS]
+      model.primary = RETRY
+      return model
+    }
     model.title = engine + " is not running"
     model.meta = "engine not reachable"
     model.body = "Grammachy could not reach it on this machine."

@@ -10,7 +10,7 @@ use std::process::Command;
 use serde_json::Value;
 
 use grammachy::args::EngineSlug;
-use grammachy::doctor::facts::{DrmCard, UnitState};
+use grammachy::doctor::facts::{DrmCard, KeyState, UnitState};
 use grammachy::doctor::{self, Facts, Report};
 
 /// A machine where every piece is in place and both units are stopped.
@@ -28,6 +28,11 @@ fn ready() -> Facts {
             "/home/u/.local/share/grammachy/models/gemma-4-e4b-it-Q4_K_M.gguf",
         )),
         openai_endpoint: Ok("127.0.0.1:8080".to_string()),
+        openrouter_key: KeyState::Ready {
+            path: key_path(),
+            mode: 0o600,
+        },
+        openrouter_model: "deepseek/deepseek-v4-flash".to_string(),
         languagetool_unit: UnitState::Stopped,
         llama_unit: UnitState::Stopped,
         cards: vec![DrmCard {
@@ -39,6 +44,11 @@ fn ready() -> Facts {
             "libggml-vulkan.so".to_string(),
         ],
     }
+}
+
+/// The key file path every cloud test talks about.
+fn key_path() -> PathBuf {
+    PathBuf::from("/home/u/.config/grammachy/openrouter-key")
 }
 
 fn text_of(facts: &Facts, engine: EngineSlug) -> String {
@@ -588,6 +598,7 @@ fn the_envelope_carries_the_contract_version_and_the_tier() {
             "backend",
             "model",
             "endpoint",
+            "key",
             "unit:languagetool",
             "unit:llama",
         ]
@@ -643,11 +654,26 @@ fn the_binary_prints_a_report_and_a_json_envelope() {
     assert_eq!(value["ready"], true, "{harper}");
 }
 
-/// The cloud engine needs one piece, the key file, and no check reads it yet.
-/// So `doctor` must never answer that it is ready on evidence it never took.
+/// Spec section 4: the cloud engine needs the key file, and `doctor` reads it.
 #[test]
-fn the_cloud_engine_is_never_reported_ready_while_no_check_reads_its_key() {
+fn a_stored_key_makes_the_cloud_engine_ready() {
     let facts = ready();
+
+    let report = Report::new(&facts, EngineSlug::Openrouter);
+
+    assert!(report.ready, "{report:?}");
+    assert_eq!(report.exit_code(), 0);
+    assert_eq!(
+        report.diagnosis,
+        "The key is in place and the model is deepseek/deepseek-v4-flash. \
+Checks send text to openrouter.ai."
+    );
+}
+
+#[test]
+fn a_missing_key_names_the_command_that_stores_one() {
+    let mut facts = ready();
+    facts.openrouter_key = KeyState::Missing(key_path());
 
     let report = Report::new(&facts, EngineSlug::Openrouter);
 
@@ -656,14 +682,104 @@ fn the_cloud_engine_is_never_reported_ready_while_no_check_reads_its_key() {
     assert!(
         report
             .diagnosis
-            .contains("~/.config/grammachy/openrouter-key"),
-        "the diagnosis names the file the user must write: {}",
+            .contains("grammachy setup --openrouter-key"),
+        "the diagnosis names the command: {}",
+        report.diagnosis
+    );
+    assert!(
+        report.diagnosis.contains("openrouter-key"),
+        "the diagnosis names the file: {}",
         report.diagnosis
     );
     assert!(
         Report::new(&facts, EngineSlug::Harper).ready,
-        "the same machine is still ready for an engine doctor does read"
+        "a missing cloud key never fails another engine"
     );
+}
+
+#[test]
+fn an_empty_key_file_is_not_a_key() {
+    let mut facts = ready();
+    facts.openrouter_key = KeyState::Empty(key_path());
+
+    let report = Report::new(&facts, EngineSlug::Openrouter);
+
+    assert!(!report.ready, "{report:?}");
+    assert!(
+        report.diagnosis.contains("is empty"),
+        "{}",
+        report.diagnosis
+    );
+}
+
+/// The report never states a mode it did not read: 0400 and 0700 are private
+/// too, so the passing line names what the file actually is.
+#[test]
+fn the_key_check_names_the_mode_it_read() {
+    for mode in [0o600, 0o400, 0o700] {
+        let mut facts = ready();
+        facts.openrouter_key = KeyState::Ready {
+            path: key_path(),
+            mode,
+        };
+
+        let report = Report::new(&facts, EngineSlug::Openrouter);
+        let key = report
+            .checks
+            .iter()
+            .find(|check| check.id == "key")
+            .expect("the report carries the key check");
+
+        assert!(key.ok, "{key:?}");
+        assert!(key.detail.contains(&format!("0{mode:o}")), "{key:?}");
+    }
+}
+
+/// A key another user can read is a key this machine no longer keeps.
+#[test]
+fn a_loose_key_file_fails_the_check_and_asks_for_chmod() {
+    let mut facts = ready();
+    facts.openrouter_key = KeyState::Loose {
+        path: key_path(),
+        mode: 0o644,
+    };
+
+    let report = Report::new(&facts, EngineSlug::Openrouter);
+
+    assert!(!report.ready, "{report:?}");
+    assert!(report.diagnosis.contains("0644"), "{}", report.diagnosis);
+    assert!(
+        report
+            .diagnosis
+            .contains("chmod 600 /home/u/.config/grammachy/openrouter-key"),
+        "{}",
+        report.diagnosis
+    );
+}
+
+/// The report says the state of the key file and never a byte of the key.
+#[test]
+fn no_report_line_can_carry_the_key_itself() {
+    for state in [
+        KeyState::Ready {
+            path: key_path(),
+            mode: 0o600,
+        },
+        KeyState::Missing(key_path()),
+        KeyState::Empty(key_path()),
+        KeyState::Loose {
+            path: key_path(),
+            mode: 0o604,
+        },
+        KeyState::NoHome,
+    ] {
+        let mut facts = ready();
+        facts.openrouter_key = state;
+
+        let report = Report::new(&facts, EngineSlug::Openrouter);
+
+        assert!(!report.to_json().contains("sk-or-"), "{}", report.to_json());
+    }
 }
 
 fn run_binary(args: &[&str]) -> String {

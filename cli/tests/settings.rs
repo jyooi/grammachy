@@ -40,6 +40,7 @@ fn all_flags() -> CheckArgs {
         target: Some(TargetEnglish::EnUs),
         engine: Some(EngineSlug::Harper),
         thinking: Some(Thinking::Off),
+        openrouter_model: Some("vendor/flagged".to_string()),
     }
 }
 
@@ -49,6 +50,7 @@ fn no_flags() -> CheckArgs {
         target: None,
         engine: None,
         thinking: None,
+        openrouter_model: None,
     }
 }
 
