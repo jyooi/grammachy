@@ -81,7 +81,7 @@ pub struct DoctorArgs {
 
 #[derive(Debug, Parser)]
 pub struct SetupArgs {
-    /// Take the hotkeys and the menu entry out again, keeping the weights.
+    /// Take the hotkeys and the menu entry out again.
     #[arg(long)]
     pub remove: bool,
 }
