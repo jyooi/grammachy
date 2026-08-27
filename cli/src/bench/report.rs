@@ -63,6 +63,32 @@ pub struct EngineRow {
     pub outcome: Outcome,
 }
 
+/// What one Models row paid for the llama.cpp server behind its numbers.
+///
+/// Two rows of one model share one start, so only the first of them carries
+/// the weight load in its wall time. A run that starts no unit at all pays
+/// for neither, so neither row may claim a start.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ServerStart {
+    /// This row stopped the unit, so its wall time carries the weight load.
+    Paid,
+    /// An earlier row of this model paid for the start this row measured on.
+    Reused,
+    /// No start happened, because this is a cloud row or unit starts are off.
+    None,
+}
+
+impl ServerStart {
+    /// What the wall time sentence adds about the server behind the row.
+    fn wall_time_note(self) -> &'static str {
+        match self {
+            ServerStart::Paid => ", server start included",
+            ServerStart::Reused => ", on the server an earlier row of this model started",
+            ServerStart::None => "",
+        }
+    }
+}
+
 /// One row of the Models tables.
 #[derive(Debug, Clone)]
 pub struct ModelRow {
@@ -71,11 +97,8 @@ pub struct ModelRow {
     pub engine: String,
     /// The local thinking mode the row ran in, `None` for a cloud row.
     pub thinking: Option<bool>,
-    /// Whether this row is the one that paid for the llama.cpp server start.
-    ///
-    /// Two rows of one model share one start, so only the first of them
-    /// carries the weight load in its wall time.
-    pub started_server: bool,
+    /// What this row paid for the llama.cpp server it measured on.
+    pub server_start: ServerStart,
     pub weights: Weights,
     pub outcome: Outcome,
 }
@@ -210,7 +233,7 @@ impl Report {
         }
         out.push('\n');
         if self.holds_both_modes() {
-            out.push_str("Every Models table prints the rows in one order, so a model that appears twice is its two Thinking modes, named in the Cost table below.\n\n");
+            out.push_str("Every Models table prints the rows in one order. A model that appears twice is its two Thinking modes, named in the Cost table below.\n\n");
         }
         if let Some(judge) = &self.judge {
             out.push_str(&judge.lines());
@@ -242,13 +265,7 @@ impl Report {
                     "Wall time of {}: {} s for the whole fixture{}.\n",
                     self.row_label(row),
                     measurement.wall_ms / 1_000,
-                    if row.started_server {
-                        ", server start included"
-                    } else if row.is_cloud() {
-                        ""
-                    } else {
-                        ", on the server an earlier row of this model started"
-                    }
+                    row.server_start.wall_time_note()
                 ));
             }
         }
@@ -441,15 +458,21 @@ impl Report {
         let Some(judge) = self.judge.as_ref() else {
             return String::new();
         };
-        if judge.ranks() && self.judge_covers_measured_rows() {
-            let mut out = String::from("The Useful fix column counts in the ranking.\n");
-            if self.has_unjudged_mode() {
-                out.push_str(
-                    "A thinking-off row is never judged, so it ranks on exact fix alone.\n",
-                );
-            }
-            return out;
+        let mut out = if judge.ranks() && self.judge_covers_measured_rows() {
+            String::from("The Useful fix column counts in the ranking.\n")
+        } else {
+            self.no_ranking_sentence(judge)
+        };
+        if self.has_unjudged_mode() {
+            out.push_str(
+                "A thinking-off row is never judged, so no Useful fix count reaches its ranking.\n",
+            );
         }
+        out
+    }
+
+    /// Why the Useful fix column stays out of the ranking of this run.
+    fn no_ranking_sentence(&self, judge: &Assessment) -> String {
         let reason = if judge.labelled == 0 {
             "no hand label covers a hit of this run".to_string()
         } else if judge.labelled < MINIMUM_LABELLED {
@@ -741,7 +764,7 @@ const MEASUREMENT_NOTE: &str = "\
 - p50 and p95 latency: nearest rank over the valid Checks of the fixture, correct sentences included, measured in process around one Check.
 - Cost per 1,000 Checks: the sum of `usage.cost` over the row divided by the number of Checks that reported a cost, times 1,000. A cloud answer that reports no cost ends its row as skipped, because the run cannot then measure what it spends. A cloud row where no Check answered prints `n/a`. Local rows cost nothing per Check.
 - Every sentence is checked with the Native language the fixture records for it, which is what the shell passes on a real Check.
-- Thinking: the mode `--thinking` gave the local rows. `both` runs every local model twice, once in each mode, and the Engines table's `openai` row runs once, in the product default. A cloud row prints `-`.
+- Thinking: the mode `--thinking` gave the local rows. `both` runs every local model twice, once in each mode. The Engines table's `openai` row runs once, in the mode the flag names, and under `both` in the product default. A cloud row prints `-`.
 ";
 
 #[cfg(test)]
@@ -803,7 +826,11 @@ mod tests {
             model: name.to_string(),
             engine: engine.to_string(),
             thinking,
-            started_server: engine == "openai",
+            server_start: if engine == "openai" {
+                ServerStart::Paid
+            } else {
+                ServerStart::None
+            },
             weights,
             outcome,
         }
@@ -909,7 +936,7 @@ mod tests {
             ),
         ];
 
-        report.models[1].started_server = false;
+        report.models[1].server_start = ServerStart::Reused;
 
         let rendered = report.render();
 
@@ -926,7 +953,7 @@ mod tests {
             "a cloud row names no mode: {rendered}"
         );
         assert!(
-            rendered.contains("a model that appears twice is its two Thinking modes"),
+            rendered.contains("A model that appears twice is its two Thinking modes"),
             "the Quality table says why one name is on two rows: {rendered}"
         );
         assert!(
@@ -974,9 +1001,54 @@ mod tests {
             "{rendered}"
         );
         assert!(
-            rendered
-                .contains("A thinking-off row is never judged, so it ranks on exact fix alone.\n"),
+            rendered.contains(
+                "A thinking-off row is never judged, so no Useful fix count reaches its ranking.\n"
+            ),
             "the file says the two rows were not ranked alike: {rendered}"
+        );
+    }
+
+    /// The disclosure belongs to the row, not to the swap: a run whose judge is
+    /// under the gate still prints a Useful fix column that skips one row.
+    #[test]
+    fn a_thinking_off_row_is_disclosed_even_when_the_judge_does_not_rank() {
+        let row = |report: &mut Report| {
+            report.models.push(thinking_model(
+                "phi-4-mini-instruct",
+                "openai",
+                Some(false),
+                weights::of("phi-4-mini-instruct"),
+                measured(tally(20, 12, 0, 40), Some(3_000_000_000)),
+            ));
+        };
+        let disclosure =
+            "A thinking-off row is never judged, so no Useful fix count reaches its ranking.\n";
+
+        let mut under_the_gate = judged_report(0);
+        row(&mut under_the_gate);
+        let rendered = under_the_gate.render();
+
+        assert!(
+            rendered.contains("The Useful fix column does not count in the ranking, because"),
+            "this run's judge does not rank: {rendered}"
+        );
+        assert!(
+            rendered.contains(disclosure),
+            "the disclosure prints whether or not the swap is active: {rendered}"
+        );
+
+        let mut every_row_judged = judged_report(4);
+        let rendered = every_row_judged.render();
+
+        assert!(
+            !rendered.contains(disclosure),
+            "a run with no thinking-off row discloses nothing: {rendered}"
+        );
+        row(&mut every_row_judged);
+
+        assert!(
+            every_row_judged.render().contains(disclosure),
+            "the swapped measure discloses the row too"
         );
     }
 

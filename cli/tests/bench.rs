@@ -873,6 +873,23 @@ fn thinking_both_prints_two_rows_for_one_local_model() {
         "the prose under the table says which row it means: {}",
         run.stdout
     );
+
+    // This run may start no unit, so neither row paid for a server start and
+    // neither wall time may claim one.
+    let wall: Vec<&str> = run
+        .stdout
+        .lines()
+        .filter(|line| line.starts_with("Wall time of `qwen2.5-7b-instruct`"))
+        .collect();
+    assert_eq!(wall.len(), 2, "one wall time per row: {}", run.stdout);
+    for (line, mode) in wall.iter().zip(["on", "off"]) {
+        let head = format!("Wall time of `qwen2.5-7b-instruct` with thinking {mode}: ");
+        assert!(line.starts_with(&head), "{wall:?}");
+        assert!(
+            line.ends_with(" s for the whole fixture."),
+            "no row of a run that starts no server may claim a start: {wall:?}"
+        );
+    }
     assert!(
         run.stdout.contains(
             "Recommended local model, the Settings default and the README line: `qwen2.5-7b-instruct`, with thinking"

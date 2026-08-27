@@ -77,7 +77,7 @@ use fixture::Sentence;
 use machine::Machine;
 use memory::{Reading, Source};
 use metrics::{Recorded, Tally};
-use report::{EngineRow, Measurement, ModelRow, Outcome, Report};
+use report::{EngineRow, Measurement, ModelRow, Outcome, Report, ServerStart};
 
 /// The engines of the Engines table, in the order the table prints them.
 ///
@@ -121,7 +121,8 @@ pub fn run(args: &BenchArgs, stored: &StoredSettings) -> Result<Run, String> {
             .filter(|(_, row)| row.slug.is_cloud())
             .map(|(index, row)| {
                 let (base, sentences, spend) = (&base, &sentences, &spend);
-                let handle = scope.spawn(move || model_row(row, false, base, sentences, spend));
+                let handle =
+                    scope.spawn(move || model_row(row, ServerStart::None, base, sentences, spend));
                 (index, handle)
             })
             .collect();
@@ -136,16 +137,17 @@ pub fn run(args: &BenchArgs, stored: &StoredSettings) -> Result<Run, String> {
         // The model the llama.cpp unit currently serves, so two rows that
         // differ only by thinking mode share one server start.
         let mut serving: Option<&str> = None;
+        let starts_unit = openai::Config::from_env().start_unit;
         for (index, row) in plan.rows.iter().enumerate() {
             if row.slug.is_cloud() {
                 continue;
             }
-            let started_server = serving != Some(row.model.as_str());
-            if started_server {
+            let start = server_start(serving, &row.model, starts_unit);
+            if start == ServerStart::Paid {
                 restart_model_server();
                 serving = Some(row.model.as_str());
             }
-            models[index] = Some(model_row(row, started_server, &base, &sentences, &spend));
+            models[index] = Some(model_row(row, start, &base, &sentences, &spend));
         }
         for (index, handle) in cloud {
             models[index] = Some(handle.join().expect("a benchmark row does not panic"));
@@ -625,12 +627,12 @@ fn engine_row(
 ///
 /// The caller owns the llama.cpp server, because two rows of one model differ
 /// only by a request field and must not pay for two server starts.
-/// `started_server` is the caller's answer for whether this row is the one
-/// that paid for that start, which is what the report's wall time sentence
-/// reads rather than inferring the restart rule again.
+/// `start` is the caller's answer for what this row paid for that start,
+/// which is what the report's wall time sentence reads rather than inferring
+/// the restart rule again.
 fn model_row(
     row: &Row,
-    started_server: bool,
+    start: ServerStart,
     base: &CheckOptions,
     sentences: &[Sentence],
     spend: &Mutex<Spend>,
@@ -647,7 +649,7 @@ fn model_row(
             model: row.model.clone(),
             engine: row.slug.as_str().to_string(),
             thinking: row.thinking,
-            started_server,
+            server_start: start,
             weights,
             outcome,
         },
@@ -946,14 +948,26 @@ fn memory_reading(slug: EngineSlug, before: Option<u64>) -> Reading {
     }
 }
 
+/// What one local row pays for the llama.cpp server it measures on.
+///
+/// A run that may not start a unit pays for nothing, so no row of it may claim
+/// a start. That is the seam every test sets, and it is also a developer who
+/// points the run at a server they started themselves.
+fn server_start(serving: Option<&str>, model: &str, starts_unit: bool) -> ServerStart {
+    if !starts_unit {
+        ServerStart::None
+    } else if serving == Some(model) {
+        ServerStart::Reused
+    } else {
+        ServerStart::Paid
+    }
+}
+
 /// Stop the llama.cpp unit so the next model row starts its own server.
 ///
-/// This is skipped whenever unit starts are forbidden, which is the seam every
-/// test sets, so no test ever reaches systemd.
+/// The caller reaches this only for a row that pays for a start, so no test
+/// ever reaches systemd: `server_start` answers `None` under the seam.
 fn restart_model_server() {
-    if !openai::Config::from_env().start_unit {
-        return;
-    }
     let _ = Command::new("systemctl")
         .args(["--user", "stop", openai::unit::UNIT_NAME])
         .status();
@@ -972,6 +986,26 @@ mod tests {
             record: None,
             judgements: None,
             thinking: BenchThinking::On,
+        }
+    }
+
+    /// Evals spec section 4.1: only the row that stops the unit carries the
+    /// weight load, and a run that starts no unit carries none at all.
+    #[test]
+    fn only_a_row_that_stops_the_unit_paid_for_a_server_start() {
+        assert_eq!(server_start(None, "gemma", true), ServerStart::Paid);
+        assert_eq!(
+            server_start(Some("gemma"), "gemma", true),
+            ServerStart::Reused
+        );
+        assert_eq!(server_start(Some("qwen"), "gemma", true), ServerStart::Paid);
+
+        for serving in [None, Some("gemma"), Some("qwen")] {
+            assert_eq!(
+                server_start(serving, "gemma", false),
+                ServerStart::None,
+                "a run forbidden to start a unit pays for no start, serving {serving:?}"
+            );
         }
     }
 

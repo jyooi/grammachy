@@ -112,9 +112,11 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   `--thinking off|on|both` owns the mode of every local row, and the default is the product default `on`.
   The flag, not the stored `localThinking`, is what a row's request carries, so a benchmark file is the output of the Command line it prints.
   `both` expands each local model into two rows, kept next to each other so the two share one llama.cpp server start.
-  The run loop owns that restart and records `ModelRow::started_server`, so only the row that paid for the load claims it in the report.
+  `bench::server_start` is the one rule for what a row pays, and the run loop carries its `ServerStart` onto the row.
+  A run forbidden to start a unit answers `None`, so no row of it claims a server start in the report.
   Only the Cost table names a mode, so the prose under the tables names the mode too when a run holds both.
-  The Engines table keeps its four columns, so its `openai` row runs once, in the product default.
+  The Engines table keeps its four columns, so its `openai` row runs once, in the mode `--thinking` names.
+  Only `both` leaves that row on the product default, because the flag names two modes and the table holds one.
   `--record <dir>` writes `checks.json`, one entry per engine, model, thinking mode, and item.
   Every entry carries the item beside the answer, because that pair is the whole input of the judge.
   `Plan::of` proves the directory holds that file before the first row, so a directory the run cannot write never discards a report it already paid for.
