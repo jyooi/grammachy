@@ -104,11 +104,15 @@ function consume(box, text, address) {
   box.last = Capture.kept(text, address)
 }
 
-// `Overlay.releasePrimary`: the primary selection goes. A Replace still to
-// type holds it back, because the source window keeps the highlight it is
-// about to paste over.
+// `Overlay.releasePrimary`: the one place that runs `wl-copy --primary
+// --clear`. Only a run that took a Selection releases one, and it releases at
+// most once, whichever exit it takes. A Replace still to type holds it back,
+// because the source window keeps the highlight it is about to paste over, so
+// the claim outlives the close that armed the wait.
 function release(box, run) {
+  if (!run.captured) return run
   if (box.replacePending) return run
+  run.captured = false
   box.primary = ""
   run.released += 1
   return run
@@ -118,8 +122,7 @@ function release(box, run) {
 // recorded and the primary selection it came from goes. A run that captured
 // nothing owns no selection, so it records none and takes none away.
 function closePopup(box, run) {
-  if (!run.captured) return run
-  consume(box, run.capturedText, run.address)
+  if (run.captured) consume(box, run.capturedText, run.address)
   return release(box, run)
 }
 
@@ -141,14 +144,16 @@ function showCompose(previous) {
 }
 
 // `Overlay.applyCorrected` with auto-replace on: the popup closes, the source
-// window is asked for, and only then is the keystroke typed.
+// window is asked for, and only then is the keystroke typed. The step after
+// that keystroke is `pasteKeystroke.onExited`, which ends the wait and calls
+// the one release, so this models that call and not a second close.
 function replace(box, run) {
   box.replacePending = true
   closePopup(box, run)
   // The paste lands on the highlight the source window still holds.
   run.pasted = box.primary
   box.replacePending = false
-  return closePopup(box, run)
+  return release(box, run)
 }
 
 // One SUPER + G, driven the way `Overlay.startQuick` drives it: the source
@@ -226,13 +231,10 @@ function clearCapture(box, run) {
   run.issues = null
   run.focusIndex = 0
   run.applied = false
-  // Clear ends the run, so a run that took a Selection releases it the same
-  // way a close does. A run that took none owns none, so it takes none away,
-  // and the close after it releases no second time.
-  if (run.captured) {
-    release(box, run)
-    run.captured = false
-  }
+  // Clear ends the run, so it calls the one release the close calls. That is
+  // what makes a run that took nothing take nothing away, and what makes the
+  // close after a Clear release no second time.
+  release(box, run)
   return nothingNew(run)
 }
 
@@ -300,6 +302,50 @@ test("a Replace types over the selection before the release takes it", () => {
     "the highlight was still there when the keystroke landed")
   assert.equal(run.released, 1)
   assert.equal(box.primary, "", "and it goes once the keystroke is out")
+})
+
+// Spec section 3: Replace is the one exit that outlives the close, so its
+// release is the one most likely to drift from the rule. It holds the same one.
+test("a Replace on a run that captured releases exactly once", () => {
+  const binary = stub("replace-once")
+  const box = machine({ primary: "Their going to the park." })
+
+  const run = summon(binary, box)
+  assert.equal(run.captured, true)
+
+  const replaced = replace(box, run)
+  assert.equal(replaced.released, 1, "the keystroke ends the wait and the selection goes")
+  assert.equal(box.primary, "")
+
+  closePopup(box, replaced)
+  assert.equal(replaced.released, 1, "the close after the paste releases no second time")
+})
+
+// The harm: the reader highlights the kept words again in the same window, so
+// that summon takes nothing and the highlight on screen is still theirs.
+// `Check last text again` reaches a result on that summon, and a Replace from
+// there must not drop a selection this run never took.
+test("a Replace after a stale summon releases a selection it never took", () => {
+  const binary = stub("replace-stale")
+  const box = machine({ primary: "Their going to the park." })
+
+  // One run captures, checks, and closes, which fills the kept record.
+  closePopup(box, summon(binary, box))
+
+  // The reader highlights the same words in the same window again.
+  box.primary = "Their going to the park."
+  const stale = summon(binary, box)
+  assert.equal(stale.phase, "empty")
+  assert.equal(stale.captured, false, "a stale summon takes nothing")
+
+  const again = checkLastAgain(binary, box, stale)
+  assert.equal(again.phase, "result")
+  assert.equal(again.captured, false, "and the kept text is no capture either")
+
+  const replaced = replace(box, again)
+  assert.equal(replaced.released, 0, "Replace takes no selection this run never held")
+  assert.equal(box.primary, "Their going to the park.",
+    "the highlight the reader still owns is there")
 })
 
 // Spec sections 2 and 3: SUPER + SHIFT + G opens Compose and captures nothing.

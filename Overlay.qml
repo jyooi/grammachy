@@ -407,11 +407,10 @@ Item {
     // selection it came from is released. A run that captured nothing owns no
     // selection, so it takes none away and records none. `resetRun` leaves
     // `capturedText` in place while it drops the source window, so the text
-    // alone cannot answer this.
-    if (root.runCaptured) {
+    // alone cannot answer this. The release holds the same rule of its own.
+    if (root.runCaptured)
       root.consumeCapture(root.capturedText, Anchor.windowAddress(root.sourceWindow))
-      root.releasePrimary()
-    }
+    root.releasePrimary()
     root.opened = false
   }
 
@@ -618,11 +617,19 @@ Item {
   // time would take the Selection away from under the Apply the reader is
   // still deciding on.
   //
+  // Only a run that took a Selection releases one, and it releases at most
+  // once, whichever exit it takes. Both rules live here rather than at each
+  // exit, so no call site can hold a different one: the close, the Clear, and
+  // the keystroke that ends a Replace all call this plainly.
+  //
   // Replace is the one path that outlives the close: it closes the popup, asks
   // for the source window, and only then types. `replacePending` is what makes
-  // the release wait for that keystroke.
+  // the release wait for that keystroke, so the claim has to outlive the close
+  // that armed the wait. That is why the wait answers before the claim goes.
   function releasePrimary() {
+    if (!root.runCaptured) return
     if (root.replacePending) return
+    root.runCaptured = false
     clearPrimary.running = true
   }
 
@@ -688,10 +695,7 @@ Item {
       root.restoreBorrowedClipboard()
     root.borrowedClipboard = ""
     root.clipboardBorrowed = false
-    if (root.runCaptured) {
-      root.releasePrimary()
-      root.runCaptured = false
-    }
+    root.releasePrimary()
     root.showNothingNew()
     Qt.callLater(root.restoreFocus)
   }

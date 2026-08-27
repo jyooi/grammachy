@@ -144,32 +144,79 @@ fn the_primary_selection_is_released_when_the_popup_closes() {
     );
 }
 
-/// Spec section 3: Clear is the other exit of a run, so it holds the same
-/// invariant the close does. `checkLastAgain` reaches a result on a summon that
-/// captured nothing, and the reader owns the highlight that summon found stale,
-/// so a Clear there must take no selection away.
+/// Spec section 3: only a run that took a Selection releases one, and it
+/// releases at most once, whichever exit it takes. A run has four exits - the
+/// close, the Clear, the keystroke that ends a Replace, and a source window
+/// that is gone - so the rule lives in the one function all of them call rather
+/// than at each of them.
 #[test]
-fn clear_releases_only_what_this_run_captured_and_only_once() {
+fn one_function_owns_the_release_and_every_exit_calls_it_plainly() {
     let source = read("Overlay.qml");
-    let clear = function_body(&source, "clearCapture");
+    let release = function_body(&source, "releasePrimary");
 
-    let asked = clear
-        .find("if (root.runCaptured)")
-        .expect("Clear asks whether this run captured");
-    let released = clear
-        .find("root.releasePrimary()")
-        .expect("Clear releases the selection the run took");
-    let dropped = clear
+    let claimed = release
+        .find("if (!root.runCaptured) return")
+        .expect("the release asks whether this run captured");
+    let waiting = release
+        .find("if (root.replacePending) return")
+        .expect("a Replace still to type holds the release back");
+    let dropped = release
         .find("root.runCaptured = false")
-        .expect("Clear drops the claim once it has released");
+        .expect("the release drops the claim, so no run releases twice");
+    let ran = release
+        .find("clearPrimary.running = true")
+        .expect("and then it runs the clear");
     assert!(
-        asked < released && asked < dropped,
-        "the release and the drop both sit behind that one question: {clear}"
+        claimed < dropped && waiting < dropped,
+        "the claim goes only once both questions are answered: {release}"
     );
     assert!(
-        released < dropped,
-        "the claim goes only once the release is out, so the close after a Clear \
-         releases no second time: {clear}"
+        dropped < ran,
+        "and it goes before the clear runs, so no second exit repeats it: {release}"
+    );
+
+    // The wait has to answer before the drop. A Replace closes the popup first
+    // and types afterwards, so the claim must outlive that close.
+    assert!(
+        waiting < dropped,
+        "a Replace keeps its claim through the close that armed the wait: {release}"
+    );
+
+    // One caller of the command, so no exit can go around the rule above.
+    assert_eq!(
+        source.matches("clearPrimary.running = true").count(),
+        1,
+        "`releasePrimary` is the one thing that runs the clear"
+    );
+
+    // Every exit calls it plainly. A call site that carried its own copy of the
+    // guard would be a second rule to keep in step.
+    assert_eq!(
+        source.matches("root.releasePrimary()").count(),
+        3,
+        "the close, the Clear, and the paste keystroke are the three exits"
+    );
+    for exit in ["close", "clearCapture"] {
+        let body = function_body(&source, exit);
+        assert!(
+            !body.contains("root.runCaptured = false"),
+            "{exit} keeps no copy of the drop: {body}"
+        );
+    }
+
+    // The paste keystroke is the exit that outlives the close, and it is the
+    // one most likely to drift, so it is named here.
+    let typed = source
+        .find("id: pasteKeystroke")
+        .expect("the overlay types with wtype");
+    let exited = block_after(&source[typed..], "onExited", "the wtype exit handler");
+    assert!(
+        exited.contains("root.replacePending = false") && exited.contains("root.releasePrimary()"),
+        "the keystroke ends the wait and then calls the one release: {exited}"
+    );
+    assert!(
+        !exited.contains("root.runCaptured"),
+        "and it keeps no copy of the guard either: {exited}"
     );
 
     // `checkLastAgain` runs the kept text inside the summon that is open, so it
@@ -209,8 +256,10 @@ fn a_run_that_captured_nothing_records_nothing_and_releases_nothing() {
         "and a summon that found nothing new took none either"
     );
 
-    // Both steps of the close sit behind that one question, so a surface that
-    // captured nothing takes nothing away.
+    // The record sits behind that one question, so a surface that captured
+    // nothing records nothing. The release asks the same question of its own,
+    // which `one_function_owns_the_release_and_every_exit_calls_it_plainly`
+    // holds, so the close calls it plainly.
     let close = function_body(&source, "close");
     let asked = close
         .find("if (root.runCaptured)")
@@ -222,8 +271,8 @@ fn a_run_that_captured_nothing_records_nothing_and_releases_nothing() {
         .find("root.releasePrimary()")
         .expect("the close releases the selection");
     assert!(
-        asked < recorded && asked < released,
-        "the record and the release both sit behind it: {close}"
+        asked < recorded && recorded < released,
+        "the record sits behind that question, and the release follows it: {close}"
     );
 }
 
