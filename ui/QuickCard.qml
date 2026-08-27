@@ -47,6 +47,9 @@ BorderSurface {
   // Apply has run on the Corrected text as it stands.
   property bool applied: false
   property bool autoReplace: false
+  // This run took a Selection from a source window, spec section 3. A run that
+  // took none has none to replace, so Apply on it is copy-only.
+  property bool runCaptured: false
   property string noticeTitle: ""
   property string noticeBody: ""
   // The hero line a notice shows, because "check did not finish" is not true
@@ -136,6 +139,10 @@ BorderSurface {
   // Nothing new to check, spec sections 3 and 6.
   readonly property bool isNothingNew: root.phase === "empty"
   readonly property bool hasLastCapture: root.lastCapturedText.length > 0
+  // Spec section 6: Replace only works while the Selection is still
+  // highlighted in the source window. After `Check last text again` there is
+  // no live Selection, so the label, the tooltip, and Apply all say copy.
+  readonly property bool replaces: root.autoReplace && root.runCaptured
   readonly property var focusedIssue: root.hasIssues && root.focusIndex >= 0 && root.focusIndex < root.issueCount
     ? root.issues[root.focusIndex] : null
 
@@ -176,7 +183,7 @@ BorderSurface {
   }
 
   function applyLabel() {
-    if (root.autoReplace) return root.applied ? "Replaced" : "Replace selection"
+    if (root.replaces) return root.applied ? "Replaced" : "Replace selection"
     return root.applied ? "Copied" : "Copy corrected text"
   }
 
@@ -648,7 +655,7 @@ BorderSurface {
           enabled: root.acceptedCount > 0 && !root.applied
           opacity: enabled ? 1.0 : 0.4
           text: root.applyLabel()
-          tooltipText: root.autoReplace ? "Ctrl + Enter, or Ctrl + C to copy only" : "Ctrl + Enter"
+          tooltipText: root.replaces ? "Ctrl + Enter, or Ctrl + C to copy only" : "Ctrl + Enter"
           bordered: true
           foreground: root.applied ? Color.popups.text : Color.accent
           fontFamily: Style.font.family

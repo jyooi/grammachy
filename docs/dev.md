@@ -121,7 +121,7 @@ Run the whole key map of spec section 6 on the same card:
 | Up, Down | Move the focus over every Issue, wrapping at both ends |
 | A | Accept every open Issue |
 | Ctrl + C | Copy the Corrected text |
-| Ctrl + Enter | Apply: copy, or replace when auto-replace is on |
+| Ctrl + Enter | Apply: copy, or replace when auto-replace is on and this run took a Selection |
 | Ctrl + L | Clear the capture and the review, popup open. It works on every quick card that shows the `Clear` button |
 | Esc | Close the popup |
 
@@ -140,6 +140,8 @@ Finish the item on the placement, which is the half two windows are here for (sp
 - **The same selection twice.** Run the item once and press Esc, then press SUPER + G again without highlighting anything new.
   The popup opens on the nothing-new state and runs no Check (spec section 3).
   Press `Check last text again` and the same text is checked with no new capture.
+  That result is copy-only: with auto-replace on, the Apply button still reads `Copy corrected text`, and Ctrl + Enter types nowhere.
+  The run took no Selection, so there is no highlight left to paste over (spec section 6).
 - **The highlight survives the check.** Run the item again and watch the source terminal while the card is up.
   The highlight is still there, because the primary selection is released only when the popup closes.
   Turn auto-replace on and press Ctrl + Enter: the paste lands over that highlight rather than beside it.

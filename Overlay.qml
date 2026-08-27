@@ -1552,7 +1552,12 @@ Item {
     if (!root.canApply()) return
     // Spec section 9: auto-replace never applies in Compose, because the Draft
     // came from this card rather than from a window still holding a Selection.
-    root.runCopy(root.surface === "quick" && root.autoReplace)
+    //
+    // Spec section 6: Replace only works while the Selection is still
+    // highlighted in the source window. A run that took no Selection holds
+    // none, so `Check last text again` is copy-only whatever the setting says.
+    // `runCaptured` is the same fact the release rests on.
+    root.runCopy(root.surface === "quick" && root.autoReplace && root.runCaptured)
   }
 
   function runCopy(pasteAfter) {
@@ -2203,6 +2208,7 @@ Item {
         elapsedMs: root.elapsedMs
         applied: root.applied
         autoReplace: root.autoReplace
+        runCaptured: root.runCaptured
         noticeTitle: root.noticeTitle
         noticeBody: root.noticeBody
         noticeMeta: root.noticeMeta

@@ -227,6 +227,47 @@ fn one_function_owns_the_release_and_every_exit_calls_it_plainly() {
     );
 }
 
+/// Spec section 6: Replace only works while the Selection is still highlighted
+/// in the source window. `checkLastAgain` reaches a result on a run that took
+/// nothing, and the popup has already released the primary selection, so Apply
+/// there is copy-only. The label the card prints is the one thing that happens,
+/// so the card and the key read the same fact the release rests on.
+#[test]
+fn apply_replaces_only_on_a_run_that_holds_a_selection() {
+    let source = read("Overlay.qml");
+    let apply = function_body(&source, "applyCorrected");
+
+    assert!(
+        apply.contains("root.surface === \"quick\" && root.autoReplace && root.runCaptured"),
+        "all three have to hold before Apply types anywhere: {apply}"
+    );
+    assert!(
+        !function_body(&source, "checkLastAgain").contains("root.runCaptured = true"),
+        "the kept text claims no Selection, which is what makes it copy-only"
+    );
+    assert!(
+        source.contains("runCaptured: root.runCaptured"),
+        "the quick card is told the same fact, so the button agrees with the key"
+    );
+
+    // The card decides the label and the tooltip from one property, so the two
+    // can never disagree with each other or with Apply.
+    let card = read("ui/QuickCard.qml");
+    assert!(
+        card.contains("readonly property bool replaces: root.autoReplace && root.runCaptured"),
+        "one property of the card says whether Apply replaces"
+    );
+    let label = function_body(&card, "applyLabel");
+    assert!(
+        label.contains("root.replaces") && !label.contains("root.autoReplace"),
+        "the label follows that property rather than the setting alone: {label}"
+    );
+    assert!(
+        card.contains(r#"tooltipText: root.replaces ? "Ctrl + Enter, or Ctrl + C to copy only""#),
+        "and so does the tooltip"
+    );
+}
+
 /// Spec sections 2 and 3: Compose captures nothing, so a Compose that closes
 /// owns no primary selection to release and no capture to record. `resetRun`
 /// drops the source window and leaves the text of the run before it in place,

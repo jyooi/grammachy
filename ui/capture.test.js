@@ -80,7 +80,10 @@ function machine(values) {
     // whether a run captured or reused the kept text.
     reads: 0,
     // A Replace has closed the popup and has still to type.
-    replacePending: false
+    replacePending: false,
+    // What `wtype` put into a window, and which window took it. An Apply that
+    // holds no Selection must leave this empty.
+    typed: []
   }
 }
 
@@ -143,17 +146,40 @@ function showCompose(previous) {
   }
 }
 
-// `Overlay.applyCorrected` with auto-replace on: the popup closes, the source
-// window is asked for, and only then is the keystroke typed. The step after
-// that keystroke is `pasteKeystroke.onExited`, which ends the wait and calls
-// the one release, so this models that call and not a second close.
+// The Corrected text one Apply hands back. The stub answers no Issues, so the
+// text itself is only a marker: what these tests claim is where it went.
+const CORRECTED = "They are going to the park."
+
+// The Replace half of Apply: the popup closes, the source window is asked for,
+// and only then is the keystroke typed. The step after that keystroke is
+// `pasteKeystroke.onExited`, which ends the wait and calls the one release, so
+// this models that call and not a second close.
 function replace(box, run) {
   box.replacePending = true
   closePopup(box, run)
   // The paste lands on the highlight the source window still holds.
   run.pasted = box.primary
+  box.typed.push({ text: box.clipboard, window: box.address })
   box.replacePending = false
   return release(box, run)
+}
+
+// `ui/QuickCard.replaces`: Apply types only on the quick surface, with
+// auto-replace on, and on a run that took a Selection. Spec section 6 says
+// Replace works only while the Selection is still highlighted in the source
+// window, and a run that took none holds no highlight to paste over.
+function replaces(run, autoReplace) {
+  return run.surface === "quick" && autoReplace === true && run.captured === true
+}
+
+// `Overlay.applyCorrected` and `ui/QuickCard.applyLabel` read that one fact,
+// so the label the card prints is the one thing that happens. The copy is the
+// half every run does.
+function applyCorrected(box, run, autoReplace) {
+  box.clipboard = CORRECTED
+  run.applyLabel = replaces(run, autoReplace) ? "Replace selection" : "Copy corrected text"
+  if (!replaces(run, autoReplace)) return closePopup(box, run)
+  return replace(box, run)
 }
 
 // One SUPER + G, driven the way `Overlay.startQuick` drives it: the source
@@ -346,6 +372,60 @@ test("a Replace after a stale summon releases a selection it never took", () => 
   assert.equal(replaced.released, 0, "Replace takes no selection this run never held")
   assert.equal(box.primary, "Their going to the park.",
     "the highlight the reader still owns is there")
+})
+
+// The harm: after `Check last text again` no window holds the Selection, and
+// the source window this summon probed may be a different one. A Replace from
+// there would type the Corrected text into whatever has the keyboard.
+test("Apply after Check last text again copies and types nothing", () => {
+  const binary = stub("apply-kept")
+  const box = machine({ primary: "Their going to the park." })
+
+  // One run in the terminal captures, checks, and closes.
+  closePopup(box, summon(binary, box))
+
+  // The reader moves to another window and summons with nothing highlighted.
+  box.address = "0xbbb"
+  box.primary = ""
+  const empty = summon(binary, box)
+  assert.equal(empty.phase, "empty")
+  assert.equal(empty.captured, false, "that summon took nothing")
+
+  const again = checkLastAgain(binary, box, empty)
+  assert.equal(again.phase, "result")
+
+  // Auto-replace is on, and Apply still copies.
+  const applied = applyCorrected(box, again, true)
+  assert.equal(applied.applyLabel, "Copy corrected text",
+    "the card says copy, because this run holds no Selection")
+  assert.deepEqual(box.typed, [], "and nothing was typed into the window that has the keyboard")
+  assert.equal(box.clipboard, CORRECTED, "the Corrected text is on the clipboard")
+})
+
+// The Replace path is unchanged on a run that did take a Selection.
+test("Apply on a run that captured still replaces when auto-replace is on", () => {
+  const binary = stub("apply-captured")
+  const box = machine({ primary: "Their going to the park." })
+
+  const run = summon(binary, box)
+  assert.equal(run.captured, true)
+
+  const applied = applyCorrected(box, run, true)
+  assert.equal(applied.applyLabel, "Replace selection")
+  assert.deepEqual(box.typed, [{ text: CORRECTED, window: "0xaaa" }],
+    "the Corrected text went into the window the Selection came from")
+  assert.equal(applied.released, 1)
+})
+
+// Auto-replace off is copy on every run, which this change does not touch.
+test("Apply with auto-replace off copies on a run that captured", () => {
+  const binary = stub("apply-copy")
+  const box = machine({ primary: "Their going to the park." })
+
+  const applied = applyCorrected(box, summon(binary, box), false)
+  assert.equal(applied.applyLabel, "Copy corrected text")
+  assert.deepEqual(box.typed, [])
+  assert.equal(box.clipboard, CORRECTED)
 })
 
 // Spec sections 2 and 3: SUPER + SHIFT + G opens Compose and captures nothing.
