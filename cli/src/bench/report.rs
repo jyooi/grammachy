@@ -177,6 +177,7 @@ impl Report {
         out.push('\n');
         if let Some(judge) = &self.judge {
             out.push_str(&judge.lines());
+            out.push_str(&self.unjudged_rows_line());
             out.push('\n');
         }
 
@@ -291,6 +292,11 @@ impl Report {
     /// Exact fix rate, unless the judge cleared the gate of spec section 4.4.
     /// Then it is exact fix plus the non-exact hits the judge called useful,
     /// because both are answers the writer can accept and keep.
+    ///
+    /// A row the judgements file graded not one hit of keeps the raw exact fix
+    /// rate. Reading its unjudged hits as useless would rank it below a graded
+    /// row on judgement coverage rather than on quality, and a judgements file
+    /// comes from an earlier run whose answers this row need not have repeated.
     fn rank_score(&self, row: &ModelRow) -> f64 {
         let Some(tally) = row.outcome.tally() else {
             return 0.0;
@@ -302,11 +308,44 @@ impl Report {
         if tally.interference == 0 {
             return exact;
         }
-        let useful = judge
-            .row(&row.engine, &row.model)
-            .unwrap_or_default()
-            .useful;
-        100.0 * (tally.exact + useful) as f64 / tally.interference as f64
+        match judge.row(&row.engine, &row.model) {
+            Some(graded) if graded.judged > 0 => {
+                100.0 * (tally.exact + graded.useful) as f64 / tally.interference as f64
+            }
+            _ => exact,
+        }
+    }
+
+    /// The models the judgements file graded not one hit of, named under the
+    /// Quality table so the ranking never treats a coverage gap as quality.
+    ///
+    /// The sentence is worth printing only when the judge ranks, because every
+    /// row is on exact fix rate otherwise.
+    fn unjudged_rows_line(&self) -> String {
+        let Some(judge) = self.judge.as_ref().filter(|judge| judge.ranks()) else {
+            return String::new();
+        };
+        let unjudged: Vec<String> = self
+            .models
+            .iter()
+            .filter(|row| {
+                judge
+                    .row(&row.engine, &row.model)
+                    .is_some_and(|graded| graded.judged == 0)
+            })
+            .map(|row| format!("`{}`", row.model))
+            .collect();
+        if unjudged.is_empty() {
+            return String::new();
+        }
+        format!(
+            "The judgements file grades no hit of {}, so {} ranked on exact fix rate alone.\n",
+            unjudged.join(", "),
+            match unjudged.len() {
+                1 => "that model is",
+                _ => "those models are",
+            }
+        )
     }
 
     /// The Recommended cell of every row, in row order.
@@ -1114,6 +1153,86 @@ mod tests {
         );
         assert!(
             rendered.contains("Ranking: exact fix rate, then F0.5"),
+            "{rendered}"
+        );
+    }
+
+    /// A judgements file comes from an earlier run, so a row of this run may
+    /// have answered in words that file never graded. Those hits are unknown
+    /// rather than useless, so the row keeps its own exact fix rate and the
+    /// file says which rows that happened to.
+    #[test]
+    fn a_row_the_file_grades_no_hit_of_keeps_its_exact_fix_rate() {
+        use crate::bench::judge::{Assessment, Hit, Judgement, Judgements};
+
+        let mut report = report();
+        report.models = vec![
+            model(
+                "gemma-4-e4b-it",
+                "openai",
+                weights::of("gemma-4-e4b-it"),
+                measured(tally(30, 16, 0, 40), None),
+            ),
+            model(
+                "phi-4-mini-instruct",
+                "openai",
+                weights::of("phi-4-mini-instruct"),
+                measured(tally(30, 10, 0, 40), None),
+            ),
+        ];
+
+        let entry = |useful: bool| Judgement {
+            useful,
+            reason: "a recorded reason".to_string(),
+        };
+        let mut judgements = Judgements::new();
+        let mut labels = Judgements::new();
+        let mut hits: Vec<Hit> = Vec::new();
+        // Five hits of `phi`, all graded useful and all agreed with, so the
+        // gate is measured on the sample it needs and the column ranks.
+        for index in 0..5 {
+            let id = format!("zh-0{index}");
+            let result = format!("answer {index}");
+            judgements
+                .entry(id.clone())
+                .or_default()
+                .insert(result.clone(), entry(true));
+            labels
+                .entry(id.clone())
+                .or_default()
+                .insert(result.clone(), entry(true));
+            hits.push(Hit {
+                row: ("openai".to_string(), "phi-4-mini-instruct".to_string()),
+                id,
+                result,
+            });
+        }
+        // Four hits of `gemma` the file carries no judgement of at all.
+        for index in 0..4 {
+            hits.push(Hit {
+                row: ("openai".to_string(), "gemma-4-e4b-it".to_string()),
+                id: format!("es-0{index}"),
+                result: format!("an ungraded answer {index}"),
+            });
+        }
+
+        report.judge = Some(Assessment::of(&hits, &judgements, &labels));
+        let rendered = report.render();
+
+        assert!(
+            rendered.contains("counts in the ranking."),
+            "the gate must pass for the swap to matter: {rendered}"
+        );
+        assert!(rendered.contains("| not judged (4 hits) |"), "{rendered}");
+        assert!(
+            rendered.contains(
+                "The judgements file grades no hit of `gemma-4-e4b-it`, so that model is ranked on exact fix rate alone.\n"
+            ),
+            "{rendered}"
+        );
+        // 16 exact of 30 beats 10 exact plus 5 useful of 30.
+        assert!(
+            rendered.contains("Recommended local model, the Settings default and the README line: `gemma-4-e4b-it`."),
             "{rendered}"
         );
     }

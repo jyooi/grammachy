@@ -194,6 +194,10 @@ def read_answer(stdout: str) -> tuple[bool, str, float | None]:
     kind rather than at the first character. The model's own text is the JSON
     object the prompt asked for, found by its braces, because a model may still
     wrap its object in a sentence.
+
+    `useful` must be a JSON boolean. A model asked for `true or false` may write
+    the string `"false"`, which is truthy, so a coercion would record the
+    opposite label and hand it to the gate with no error at all.
     """
     starts = [at for at in (stdout.find("["), stdout.find("{")) if at >= 0]
     if not starts:
@@ -203,13 +207,27 @@ def read_answer(stdout: str) -> tuple[bool, str, float | None]:
         envelope = [entry for entry in envelope if entry.get("type") == "result"][-1]
     text = envelope.get("result", "")
     answer = json.loads(text[text.index("{") : text.rindex("}") + 1])
-    return bool(answer["useful"]), str(answer.get("reason", "")), envelope.get(
-        "total_cost_usd"
-    )
+    useful = answer["useful"]
+    if not isinstance(useful, bool):
+        raise ValueError(f"useful is not a boolean: {useful!r}")
+    return useful, str(answer.get("reason", "")), envelope.get("total_cost_usd")
+
+
+def call_context(finished: subprocess.CompletedProcess | None) -> str:
+    """What a failed `claude` call left behind, for the summary `main` prints.
+
+    A bad model name, an expired login, and a rate limit all reach the parser as
+    an empty stdout, so the exit code and the tail of stderr are the only way to
+    tell them apart without running the whole grading again.
+    """
+    if finished is None:
+        return ""
+    return f" (exit {finished.returncode}, stderr: {finished.stderr.strip()[:200]!r})"
 
 
 def judge(item: dict, model: str) -> dict:
     """Grade one folded item, or carry the reason it could not be graded."""
+    finished = None
     try:
         finished = subprocess.run(
             command(model, prompt_for(item)),
@@ -220,7 +238,8 @@ def judge(item: dict, model: str) -> dict:
         useful, reason, cost = read_answer(finished.stdout)
         return {"item": item, "useful": useful, "reason": reason, "cost_usd": cost}
     except Exception as failure:  # noqa: BLE001 - one bad call must not end the run
-        return {"item": item, "error": f"{type(failure).__name__}: {failure}"[:300]}
+        error = f"{type(failure).__name__}: {failure}"[:300] + call_context(finished)
+        return {"item": item, "error": error}
 
 
 def main() -> int:

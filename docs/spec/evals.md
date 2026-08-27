@@ -133,6 +133,8 @@ Decision and gate: [HUF-210](https://linear.app/huffman/issue/HUF-210).
 - Output `judgements.json`, keyed by (item id, result text), value `{ useful, reason }`.
 - Hand labels live in `cli/tests/fixtures/judge-labels.json` in the same key shape, labelled by one criterion: is the sentence after Accept grammatically correct wording.
 - Gate: the judge column counts in the ranking only when it agrees with the hand labels on at least 80% of the labelled items of that run.
+  The gate also needs a sample of at least 5 matched labels, because a result text must match a label verbatim.
+  A run under that sample leaves the judge unproven, so the file names the count and keeps the raw ranking.
   Below the gate the column still prints and the file says it is excluded.
   The pilot measured 15 of 17 (88%, kappa 0.76).
 - Caveat on record: a Claude judge grading Claude rows is untested because the shortlist has no Claude rows.

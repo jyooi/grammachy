@@ -17,8 +17,10 @@
 //!   answers of two models onto one judgement.
 //! - The **gate** is spec section 4.4: the column counts in the ranking only
 //!   when the judge agrees with the committed hand labels on at least 80% of
-//!   the labelled items of that run. Below the gate, or with no label matched,
-//!   the column still prints and the file says it is excluded.
+//!   the labelled items of that run, over a sample of at least
+//!   [`MINIMUM_LABELLED`] of them. Below the gate, under that sample, or with
+//!   no label matched, the column still prints and the file says it is
+//!   excluded.
 //!
 //! The hand labels are compiled in from `tests/fixtures/judge-labels.json`, so
 //! a released binary needs no repository checkout, the same rule the fixture
@@ -31,6 +33,15 @@ use serde::Deserialize;
 
 /// The agreement a run needs before the Useful fix column may rank, in percent.
 pub const AGREEMENT_GATE: f64 = 80.0;
+
+/// The smallest labelled sample the agreement gate may be measured on.
+///
+/// A result text has to match a hand label verbatim, so a run matches only a
+/// few of the 17 committed labels. One matched label at 100% agreement is not
+/// evidence that the judge is sound, and the ranking swap it would unlock
+/// decides the recommendation, so a run under this sample keeps the raw
+/// ranking.
+pub const MINIMUM_LABELLED: usize = 5;
 
 /// The committed hand labels, the truth the judge is measured against.
 const LABELS: &str = include_str!(concat!(
@@ -191,9 +202,14 @@ impl Assessment {
     }
 
     /// Whether the Useful fix column may count in the ranking.
+    ///
+    /// The gate is both a rate and a sample: a judge measured on fewer than
+    /// [`MINIMUM_LABELLED`] labels is unproven whatever its agreement.
     pub fn ranks(&self) -> bool {
-        self.agreement_percent()
-            .is_some_and(|percent| percent >= AGREEMENT_GATE)
+        self.labelled >= MINIMUM_LABELLED
+            && self
+                .agreement_percent()
+                .is_some_and(|percent| percent >= AGREEMENT_GATE)
     }
 
     /// The sentences the benchmark file carries under the Quality table.
@@ -204,6 +220,13 @@ impl Assessment {
             self.judged, self.hits
         ));
         match self.agreement_percent() {
+            Some(_) if self.labelled < MINIMUM_LABELLED => out.push_str(&format!(
+                "This run matched {}, under the {MINIMUM_LABELLED} the {AGREEMENT_GATE:.0}% gate needs, so the judge is unproven here.\nThe report keeps the raw ranking of exact fix rate.\n",
+                match self.labelled {
+                    1 => "1 hand label".to_string(),
+                    labelled => format!("{labelled} hand labels"),
+                }
+            )),
             Some(percent) if self.ranks() => out.push_str(&format!(
                 "The judge agreed with the hand labels on {} of {} ({percent:.1}%), at or above the {AGREEMENT_GATE:.0}% gate, so the Useful fix column counts in the ranking.\n",
                 self.agreed, self.labelled
@@ -308,26 +331,32 @@ mod tests {
         assert_eq!(assessment.row("openrouter", "deepseek").unwrap().hits, 1);
     }
 
-    #[test]
-    fn a_judge_that_agrees_with_four_of_five_labels_clears_the_gate() {
-        let entries: Vec<(String, String, bool)> = (0..5)
-            .map(|n| (format!("zh-0{n}"), format!("answer {n}"), true))
+    /// A run of `labels` hand labels where the first `agree` of them agree.
+    fn run_of(labels: usize, agree: usize) -> Assessment {
+        let entries: Vec<(String, String)> = (0..labels)
+            .map(|n| (format!("zh-0{n}"), format!("answer {n}")))
             .collect();
-        let borrowed: Vec<(&str, &str, bool)> = entries
+        let judged: Vec<(&str, &str, bool)> = entries
             .iter()
-            .map(|(id, result, useful)| (id.as_str(), result.as_str(), *useful))
+            .map(|(id, result)| (id.as_str(), result.as_str(), true))
             .collect();
-        let hits: Vec<Hit> = borrowed
+        let hits: Vec<Hit> = judged
             .iter()
             .map(|(id, result, _)| hit("openai", "gemma", id, result))
             .collect();
-        let judgements = file(&borrowed);
-        // One label disagrees, so agreement is four of five.
-        let mut flipped = borrowed.clone();
-        flipped[0].2 = false;
-        let labels = file(&flipped);
+        // A label the judge disagrees with is the flipped answer.
+        let labelled: Vec<(&str, &str, bool)> = judged
+            .iter()
+            .enumerate()
+            .map(|(index, (id, result, _))| (*id, *result, index < agree))
+            .collect();
 
-        let assessment = Assessment::of(&hits, &judgements, &labels);
+        Assessment::of(&hits, &file(&judged), &file(&labelled))
+    }
+
+    #[test]
+    fn a_judge_that_agrees_with_four_of_five_labels_clears_the_gate() {
+        let assessment = run_of(5, 4);
 
         assert_eq!((assessment.agreed, assessment.labelled), (4, 5));
         assert_eq!(assessment.agreement_percent(), Some(80.0));
@@ -336,22 +365,38 @@ mod tests {
 
     #[test]
     fn a_judge_that_agrees_with_three_of_five_labels_is_under_the_gate() {
-        let hits = [
-            hit("openai", "gemma", "a", "one"),
-            hit("openai", "gemma", "b", "two"),
-        ];
-        let judgements = file(&[("a", "one", true), ("b", "two", true)]);
-        let labels = file(&[("a", "one", true), ("b", "two", false)]);
+        let assessment = run_of(5, 3);
 
-        let assessment = Assessment::of(&hits, &judgements, &labels);
-
-        assert_eq!(assessment.agreement_percent(), Some(50.0));
+        assert_eq!(assessment.agreement_percent(), Some(60.0));
         assert!(!assessment.ranks());
         assert!(
             assessment.lines().contains("under the 80% gate"),
             "{}",
             assessment.lines()
         );
+    }
+
+    /// A gate measured on a handful of labels proves nothing, so it never
+    /// unlocks the ranking swap however well the judge did on them.
+    #[test]
+    fn a_judge_that_matched_four_labels_is_unproven_however_well_it_agreed() {
+        let assessment = run_of(4, 4);
+
+        assert_eq!(assessment.agreement_percent(), Some(100.0));
+        assert!(!assessment.ranks(), "four labels is under the sample");
+        assert!(
+            assessment.lines().contains(
+                "This run matched 4 hand labels, under the 5 the 80% gate needs, so the judge is unproven here.\nThe report keeps the raw ranking of exact fix rate.\n"
+            ),
+            "{}",
+            assessment.lines()
+        );
+    }
+
+    #[test]
+    fn five_labels_are_the_smallest_sample_the_gate_is_measured_on() {
+        assert!(run_of(5, 5).ranks());
+        assert!(!run_of(4, 4).ranks());
     }
 
     #[test]
