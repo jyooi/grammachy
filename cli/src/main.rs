@@ -154,17 +154,14 @@ fn run() -> Option<Output> {
                     native: None,
                     target: None,
                     engine: args.engine,
-                    thinking: None,
-                    openrouter_model: None,
                 },
                 &StoredSettings::load(),
             );
             let facts = doctor::Facts::collect(&options);
             Some(doctor::run(&facts, options.engine, args.json).into())
         }
-        // Setup reads stdin only for `--openrouter-key`: otherwise the engine
-        // and the model name come from the Settings entry, the same source a
-        // Check uses (spec section 7).
+        // The engine comes from the Settings entry, the same source a Check
+        // uses (spec section 7).
         Command::Setup(args) => {
             let defaults = CheckOptions::default();
             let stored = StoredSettings::load();
@@ -172,20 +169,13 @@ fn run() -> Option<Output> {
                 Ok(setup) => setup,
                 Err(message) => return Some(SetupEnvelope::error(message).into()),
             };
-            let envelope = if args.openrouter_key {
-                // The key comes on stdin and never on the command line, so no
-                // process list ever holds it (spec section 10).
-                match read_stdin() {
-                    Ok(text) => setup.write_key(&text),
-                    Err(message) => SetupEnvelope::error(message),
-                }
-            } else if args.remove {
+            let envelope = if args.remove {
                 setup.remove()
             } else {
-                setup.install(
-                    stored.engine.unwrap_or(defaults.engine),
-                    &stored.openai_model.unwrap_or(defaults.openai_model),
-                )
+                // The Local LLM's weights are no longer part of `setup`
+                // (HUF-240); `model_name` stays until the model-download step
+                // that reads it is removed too.
+                setup.install(stored.engine.unwrap_or(defaults.engine), "")
             };
             Some(envelope.into())
         }
@@ -212,8 +202,6 @@ fn engine_of(flag: Option<EngineSlug>) -> EngineSlug {
             native: None,
             target: None,
             engine: flag,
-            thinking: None,
-            openrouter_model: None,
         },
         &StoredSettings::load(),
     )

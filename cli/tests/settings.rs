@@ -5,13 +5,8 @@
 //! documents live in strings, and the one test that goes through the file
 //! layer writes a temporary file and points the binary at it.
 
-use grammachy::args::{
-    CheckArgs, CheckOptions, EngineSlug, NativeLanguage, TargetEnglish, Thinking,
-};
-use grammachy::settings::{
-    StoredSettings, DEFAULT_LOCAL_THINKING, DEFAULT_OPENAI_BASE_URL, DEFAULT_OPENAI_MODEL,
-    DEFAULT_OPENROUTER_MODEL, OPENROUTER_MODEL_PLACEHOLDER,
-};
+use grammachy::args::{CheckArgs, CheckOptions, EngineSlug, NativeLanguage, TargetEnglish};
+use grammachy::settings::StoredSettings;
 
 /// A `shell.json` whose bar layout carries the plugin entry.
 fn document(entry_body: &str) -> String {
@@ -40,8 +35,6 @@ fn all_flags() -> CheckArgs {
         native: Some(NativeLanguage::Fr),
         target: Some(TargetEnglish::EnUs),
         engine: Some(EngineSlug::Harper),
-        thinking: Some(Thinking::Off),
-        openrouter_model: Some("vendor/flagged".to_string()),
     }
 }
 
@@ -50,8 +43,6 @@ fn no_flags() -> CheckArgs {
         native: None,
         target: None,
         engine: None,
-        thinking: None,
-        openrouter_model: None,
     }
 }
 
@@ -64,12 +55,6 @@ fn defaults_apply_with_no_flags_and_no_file() {
     // Spec section 4, HUF-237: `harper` is the one engine compiled into the
     // binary, so a fresh install checks with it and downloads nothing.
     assert_eq!(options.engine, EngineSlug::Harper);
-    assert_eq!(options.openai_base_url, DEFAULT_OPENAI_BASE_URL);
-    assert_eq!(options.openai_model, DEFAULT_OPENAI_MODEL);
-    assert_eq!(options.openai_api_key, "");
-    // Spec section 4: thinking is on by default for the local engine.
-    assert!(options.local_thinking);
-    assert_eq!(options.local_thinking, DEFAULT_LOCAL_THINKING);
     assert_eq!(options, CheckOptions::default());
 }
 
@@ -78,80 +63,26 @@ fn the_file_wins_over_the_defaults_for_every_key() {
     let entry = stored(
         r#""nativeLanguage": "ja",
            "targetEnglish": "en-US",
-           "engine": "openai",
-           "openaiBaseUrl": "http://localhost:9090",
-           "openaiModel": "some-other-model",
-           "openaiApiKey": "sk-local",
-           "localThinking": false"#,
+           "engine": "languagetool""#,
     );
 
     let options = CheckOptions::resolve(&no_flags(), &entry);
 
-    assert!(!options.local_thinking);
     assert_eq!(options.native, NativeLanguage::Ja);
     assert_eq!(options.target, TargetEnglish::EnUs);
-    assert_eq!(options.engine, EngineSlug::Openai);
-    assert_eq!(options.openai_base_url, "http://localhost:9090");
-    assert_eq!(options.openai_model, "some-other-model");
-    assert_eq!(options.openai_api_key, "sk-local");
+    assert_eq!(options.engine, EngineSlug::Languagetool);
 }
 
 #[test]
 fn a_flag_wins_over_the_file_for_every_flagged_key() {
-    let entry = stored(
-        r#""nativeLanguage": "ja", "targetEnglish": "en-US", "engine": "openai",
-           "localThinking": true"#,
-    );
+    let entry =
+        stored(r#""nativeLanguage": "ja", "targetEnglish": "en-US", "engine": "languagetool""#);
 
     let options = CheckOptions::resolve(&all_flags(), &entry);
 
     assert_eq!(options.native, NativeLanguage::Fr);
     assert_eq!(options.target, TargetEnglish::EnUs);
     assert_eq!(options.engine, EngineSlug::Harper);
-    assert!(!options.local_thinking);
-}
-
-/// Spec section 4: `--thinking` wins over the Setting in both directions, so
-/// a stored `false` never keeps `--thinking on` from running a Check with it.
-#[test]
-fn the_thinking_flag_wins_over_the_stored_setting_in_both_directions() {
-    let cases = [
-        (r#""localThinking": false"#, Thinking::On, true),
-        (r#""localThinking": true"#, Thinking::Off, false),
-    ];
-
-    for (entry_body, flag, expected) in cases {
-        let args = CheckArgs {
-            thinking: Some(flag),
-            ..no_flags()
-        };
-        let options = CheckOptions::resolve(&args, &stored(entry_body));
-
-        assert_eq!(
-            options.local_thinking, expected,
-            "{entry_body} with {flag:?}"
-        );
-    }
-}
-
-/// A stored `false` is a value, not a missing key, so it must not read as the
-/// default the way an unknown value does.
-#[test]
-fn thinking_off_is_read_from_the_file_and_on_is_the_default() {
-    assert_eq!(
-        stored(r#""localThinking": false"#).local_thinking,
-        Some(false)
-    );
-    assert_eq!(
-        stored(r#""localThinking": true"#).local_thinking,
-        Some(true)
-    );
-    assert_eq!(stored("").local_thinking, None);
-    // Any other JSON type is unknown, which reads as the default.
-    assert_eq!(stored(r#""localThinking": "off""#).local_thinking, None);
-    assert!(
-        CheckOptions::resolve(&no_flags(), &stored(r#""localThinking": "off""#)).local_thinking
-    );
 }
 
 #[test]
@@ -160,7 +91,6 @@ fn a_flag_wins_over_the_defaults_when_the_file_is_silent() {
 
     assert_eq!(options.native, NativeLanguage::Fr);
     assert_eq!(options.engine, EngineSlug::Harper);
-    assert!(!options.local_thinking);
 }
 
 #[test]
@@ -187,10 +117,7 @@ fn an_unknown_stored_value_reads_as_the_default() {
     let entry = stored(
         r#""nativeLanguage": "kl",
            "targetEnglish": "en-GB",
-           "engine": "gpt",
-           "openaiBaseUrl": "",
-           "openaiModel": "   ",
-           "localThinking": "yes""#,
+           "engine": "gpt""#,
     );
 
     let options = CheckOptions::resolve(&no_flags(), &entry);
@@ -200,13 +127,51 @@ fn an_unknown_stored_value_reads_as_the_default() {
 
 #[test]
 fn a_stored_value_of_the_wrong_json_type_reads_as_the_default() {
-    let entry =
-        stored(r#""nativeLanguage": 7, "engine": true, "openaiModel": ["a"], "localThinking": 1"#);
+    let entry = stored(r#""nativeLanguage": 7, "engine": true"#);
 
     assert_eq!(
         CheckOptions::resolve(&no_flags(), &entry),
         CheckOptions::default()
     );
+}
+
+/// HUF-240: the `openai` and `openrouter` engines are gone. A `shell.json`
+/// written by an older build may still name either one, and that stored
+/// value must fall back to the default engine rather than erroring, the way
+/// any other unrecognized `engine` value already does.
+#[test]
+fn a_stored_engine_of_a_removed_slug_falls_back_to_the_default() {
+    for removed in ["openai", "openrouter"] {
+        let entry = stored(&format!(r#""engine": "{removed}""#));
+
+        assert_eq!(entry.engine, None, "{removed} does not parse to a slug");
+        assert_eq!(
+            CheckOptions::resolve(&no_flags(), &entry).engine,
+            EngineSlug::Harper,
+            "{removed} falls back to the default engine"
+        );
+    }
+}
+
+/// A key the spec never defined, or one this build no longer reads, must not
+/// stop the rest of the entry from resolving.
+#[test]
+fn unknown_stored_keys_are_ignored_without_error() {
+    let entry = stored(
+        r#""nativeLanguage": "fr",
+           "engine": "harper",
+           "openaiBaseUrl": "http://localhost:9090",
+           "openaiModel": "some-model",
+           "localThinking": false,
+           "someFutureKey": { "nested": true }"#,
+    );
+
+    assert_eq!(entry.native, Some(NativeLanguage::Fr));
+    assert_eq!(entry.engine, Some(EngineSlug::Harper));
+
+    let options = CheckOptions::resolve(&no_flags(), &entry);
+    assert_eq!(options.native, NativeLanguage::Fr);
+    assert_eq!(options.engine, EngineSlug::Harper);
 }
 
 #[test]
@@ -247,77 +212,4 @@ fn the_entry_is_also_read_from_the_plugins_array() {
 
     assert_eq!(entry.native, Some(NativeLanguage::Ms));
     assert_eq!(entry.engine, Some(EngineSlug::Harper));
-}
-
-#[test]
-fn an_empty_api_key_is_a_value_and_not_a_missing_key() {
-    let entry = stored(r#""openaiApiKey": """#);
-
-    assert_eq!(entry.openai_api_key.as_deref(), Some(""));
-    assert_eq!(
-        CheckOptions::resolve(&no_flags(), &entry).openai_api_key,
-        ""
-    );
-}
-
-// -------------------------------------------------- the cloud model id
-//
-// Spec section 7: `openrouterModel` has no built-in default. A blank field, a
-// blank flag, and a missing key are one answer, and the adapter turns that
-// answer into `bad_arguments`. The placeholder is what the Settings field
-// shows and is never a value.
-
-#[test]
-fn the_cloud_model_has_no_built_in_default() {
-    assert_eq!(DEFAULT_OPENROUTER_MODEL, "");
-    assert_eq!(
-        CheckOptions::resolve(&no_flags(), &StoredSettings::default()).openrouter_model,
-        ""
-    );
-    assert_ne!(OPENROUTER_MODEL_PLACEHOLDER, DEFAULT_OPENROUTER_MODEL);
-}
-
-#[test]
-fn a_blank_cloud_model_reads_the_way_a_missing_one_does() {
-    for body in [
-        r#""openrouterModel": """#,
-        r#""openrouterModel": "   ""#,
-        r#""openrouterModel": null"#,
-    ] {
-        let entry = stored(body);
-        assert_eq!(entry.openrouter_model, None, "{body}");
-        assert_eq!(
-            CheckOptions::resolve(&no_flags(), &entry).openrouter_model,
-            "",
-            "{body}"
-        );
-    }
-}
-
-#[test]
-fn a_blank_flag_falls_back_rather_than_winning_as_an_empty_id() {
-    let entry = stored(r#""openrouterModel": "vendor/stored""#);
-    let blank = CheckArgs {
-        openrouter_model: Some("  ".to_string()),
-        ..no_flags()
-    };
-
-    assert_eq!(
-        CheckOptions::resolve(&blank, &entry).openrouter_model,
-        "vendor/stored"
-    );
-    assert_eq!(
-        CheckOptions::resolve(&blank, &StoredSettings::default()).openrouter_model,
-        ""
-    );
-}
-
-#[test]
-fn the_flag_wins_over_the_stored_cloud_model() {
-    let entry = stored(r#""openrouterModel": "vendor/stored""#);
-
-    assert_eq!(
-        CheckOptions::resolve(&all_flags(), &entry).openrouter_model,
-        "vendor/flagged"
-    );
 }

@@ -8,5 +8,3 @@ pub mod harper;
 pub mod install;
 pub mod languagetool;
 pub mod local;
-pub mod openai;
-pub mod openrouter;

@@ -286,8 +286,8 @@ mod tests {
     use super::*;
     use crate::args::EngineSlug;
 
-    /// The limit of the default engine, which every case here packs to unless
-    /// it names the local engine's smaller one.
+    /// The limit every engine packs to (spec section 4): Harper and
+    /// LanguageTool share one Check size limit.
     const LIMIT: usize = EngineSlug::Languagetool.check_limit_utf16();
 
     fn text_of(text: &str, chunk: Chunk) -> String {
@@ -445,17 +445,14 @@ mod tests {
         assert_eq!(run(&at_limit, LIMIT).exit_code(), 0);
     }
 
-    /// The local engine reads 2,000 units, so the same Draft yields more, and
-    /// smaller, Chunks than on any other engine (spec section 4).
+    /// Harper and LanguageTool are the only two engines left, and both read
+    /// the same Check size limit (spec section 4), so `chunk --engine` packs
+    /// every Draft the same way regardless of which one it names.
     #[test]
-    fn the_local_engine_packs_to_its_own_smaller_limit() {
-        let local = EngineSlug::Openai.check_limit_utf16();
-        let text = "a".repeat(20_000);
-
-        let chunks = chunks_of(&text, local);
-        assert_eq!(chunks.len(), 10);
-        assert!(chunks.iter().all(|chunk| chunk.end - chunk.start <= local));
-
-        assert_eq!(chunks_of(&text, LIMIT).len(), 4);
+    fn every_remaining_engine_packs_to_the_same_limit() {
+        assert_eq!(
+            EngineSlug::Harper.check_limit_utf16(),
+            EngineSlug::Languagetool.check_limit_utf16()
+        );
     }
 }

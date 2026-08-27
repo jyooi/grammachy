@@ -19,34 +19,6 @@ use crate::args::{EngineSlug, NativeLanguage, TargetEnglish};
 /// The plugin id of `manifest.json`, which is also the entry id in `shell.json`.
 pub const PLUGIN_ID: &str = "io.github.jyooi.grammachy";
 
-/// Spec section 7 defaults for the two OpenAI text fields.
-pub const DEFAULT_OPENAI_BASE_URL: &str = "http://127.0.0.1:8080";
-
-/// The recommended local model of `docs/benchmarks/`, evals spec section 5.
-///
-/// `bench::weights` is the rule this name answers to: Apache-2.0 or MIT, a
-/// weights file at or under 4 GB, inside the 8 GB tier, and measured with
-/// thinking on. `gemma-4-e4b-it` scored well and is 4.98 GB, so it stays a
-/// reference row of the benchmark files and is never the default.
-pub const DEFAULT_OPENAI_MODEL: &str = "qwen3.8-4b";
-
-/// Spec section 7: `openrouterModel` has no built-in default.
-///
-/// The cloud engine is the one engine that sends text off this machine, so a
-/// model nobody chose is never asked for: a blank field, a blank flag, and a
-/// missing key all resolve to this, and the adapter answers `bad_arguments`.
-pub const DEFAULT_OPENROUTER_MODEL: &str = "";
-
-/// What the `openrouterModel` field shows while it is empty, the recommended
-/// cloud model of `docs/spec/evals.md` section 5.1 (HUF-206).
-///
-/// It is a placeholder and never a value: nothing reads it as a fallback.
-/// `cli/tests/overlay_cloud.rs` keeps the copy in `ui/settings.js` equal to it.
-pub const OPENROUTER_MODEL_PLACEHOLDER: &str = "google/gemini-3.7-flash";
-
-/// Spec section 4: thinking is on by default for the local engine, everywhere.
-pub const DEFAULT_LOCAL_THINKING: bool = true;
-
 /// Points the CLI at another `shell.json`, so tests never read or write the
 /// real one. Not a user-facing setting.
 pub const PATH_ENV: &str = "GRAMMACHY_SHELL_JSON";
@@ -58,11 +30,6 @@ pub struct StoredSettings {
     pub native: Option<NativeLanguage>,
     pub target: Option<TargetEnglish>,
     pub engine: Option<EngineSlug>,
-    pub openai_base_url: Option<String>,
-    pub openai_model: Option<String>,
-    pub openai_api_key: Option<String>,
-    pub openrouter_model: Option<String>,
-    pub local_thinking: Option<bool>,
 }
 
 impl StoredSettings {
@@ -96,13 +63,6 @@ impl StoredSettings {
             native: string(entry, "nativeLanguage").and_then(NativeLanguage::from_stored),
             target: string(entry, "targetEnglish").and_then(TargetEnglish::from_stored),
             engine: string(entry, "engine").and_then(EngineSlug::from_stored),
-            openai_base_url: stored_text(entry, "openaiBaseUrl"),
-            openai_model: stored_text(entry, "openaiModel"),
-            // The empty string is the default of the API key and also a
-            // meaningful stored value, so it is kept as it stands.
-            openai_api_key: string(entry, "openaiApiKey").map(str::to_string),
-            openrouter_model: stored_text(entry, "openrouterModel"),
-            local_thinking: boolean(entry, "localThinking"),
         }
     }
 }
@@ -147,24 +107,11 @@ fn string<'a>(entry: &'a Value, key: &str) -> Option<&'a str> {
     entry.get(key).and_then(Value::as_str)
 }
 
-/// A boolean value, or `None` for a missing key or any other JSON type, which
-/// then reads as the built-in default the way an unknown value does.
-fn boolean(entry: &Value, key: &str) -> Option<bool> {
-    entry.get(key).and_then(Value::as_bool)
-}
-
-/// A stored text field that carries something, so a blank field reads as the
-/// default instead of as an address or a model name that cannot work.
-fn stored_text(entry: &Value, key: &str) -> Option<String> {
-    non_empty(string(entry, key).unwrap_or_default()).map(str::to_string)
-}
-
 /// The one fallback rule every text setting shares: a value that carries
 /// something, or `None`.
 ///
-/// A blank flag, a blank field, and a missing key are the same answer, so the
-/// layer above never has to tell them apart. `CheckOptions::resolve` reads the
-/// flags through this and `stored_text` reads the file through it.
+/// `doctor::report` reads the stored `openrouterModel` through this before it
+/// names a field in a card.
 pub fn non_empty(value: &str) -> Option<&str> {
     let value = value.trim();
     (!value.is_empty()).then_some(value)

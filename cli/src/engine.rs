@@ -7,8 +7,6 @@
 use crate::args::{CheckOptions, EngineSlug};
 use crate::engines::harper::Harper;
 use crate::engines::languagetool::{self, LanguageTool};
-use crate::engines::openai::{self, Openai};
-use crate::engines::openrouter::{self, Openrouter};
 use crate::envelope::Issue;
 
 /// Why one Check did not produce Issues. Each variant maps to one error code.
@@ -17,8 +15,7 @@ pub enum EngineFailure {
     Unavailable(String),
     Timeout(String),
     Failed(String),
-    /// The Check cannot run as configured, so nothing was sent. The `openai`
-    /// base URL host rule of spec section 4 is the one case in v1.
+    /// The Check cannot run as configured, so nothing was sent.
     BadArguments(String),
 }
 
@@ -77,15 +74,13 @@ pub trait Engine {
 
     /// The weights the server behind this adapter was confirmed to hold.
     ///
-    /// `None` for every engine that serves no weights of its own, and for a
-    /// local server that names no model. Only the `openai` adapter answers it,
-    /// and only after its first Check (HUF-236).
+    /// `None` for every engine that serves no weights of its own.
     fn served_model(&self) -> Option<String> {
         None
     }
 
-    /// The Issues and the cost of one Check. A local engine has no cost, so
-    /// only a cloud adapter overrides this.
+    /// The Issues and the cost of one Check. Neither engine has a cost, so
+    /// nothing overrides this.
     fn answer(&self, text: &str, options: &CheckOptions) -> Result<Answer, EngineFailure> {
         self.check(text, options).map(|issues| Answer {
             issues,
@@ -102,7 +97,5 @@ pub fn resolve(slug: EngineSlug) -> Option<Box<dyn Engine>> {
             languagetool::Config::from_env(),
         ))),
         EngineSlug::Harper => Some(Box::new(Harper::default())),
-        EngineSlug::Openai => Some(Box::new(Openai::new(openai::Config::from_env()))),
-        EngineSlug::Openrouter => Some(Box::new(Openrouter::new(openrouter::Config::from_env()))),
     }
 }
