@@ -24,13 +24,7 @@
       "nativeLanguage": "none",
       "targetEnglish": "en-US",
       "engine": "harper",
-      "autoReplace": false,
-      "openaiBaseUrl": "http://127.0.0.1:8080",
-      "openaiModel": "qwen3.8-4b",
-      "openaiApiKey": "",
-      "localThinking": true,
-      "openrouterModel": "",
-      "cloudConsent": false
+      "autoReplace": false
     },
     "schema": [
       {
@@ -64,9 +58,7 @@
         "label": "Engine",
         "options": [
           "languagetool",
-          "openai",
-          "harper",
-          "openrouter"
+          "harper"
         ],
         "defaultValue": "harper"
       },
@@ -74,42 +66,6 @@
         "key": "autoReplace",
         "type": "boolean",
         "label": "Auto-replace the selection",
-        "defaultValue": false
-      },
-      {
-        "key": "openaiBaseUrl",
-        "type": "string",
-        "label": "Local LLM base URL",
-        "defaultValue": "http://127.0.0.1:8080"
-      },
-      {
-        "key": "openaiModel",
-        "type": "string",
-        "label": "Local LLM model",
-        "defaultValue": "qwen3.8-4b"
-      },
-      {
-        "key": "openaiApiKey",
-        "type": "string",
-        "label": "Local LLM API key",
-        "defaultValue": ""
-      },
-      {
-        "key": "localThinking",
-        "type": "boolean",
-        "label": "Local LLM thinking",
-        "defaultValue": true
-      },
-      {
-        "key": "openrouterModel",
-        "type": "string",
-        "label": "Cloud LLM model",
-        "defaultValue": ""
-      },
-      {
-        "key": "cloudConsent",
-        "type": "boolean",
-        "label": "Cloud LLM consent",
         "defaultValue": false
       }
     ]

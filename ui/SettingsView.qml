@@ -18,15 +18,6 @@ ColumnLayout {
   property string nativeLanguage: "none"
   property string engine: "harper"
   property bool autoReplace: false
-  property string openaiBaseUrl: "http://127.0.0.1:8080"
-  property string openaiModel: "qwen3.8-4b"
-  property bool localThinking: true
-  property string openrouterModel: ""
-
-  // The OpenRouter key state, read by Overlay.qml out of one `grammachy doctor
-  // --json` report. Null until that report lands. The key file itself is never
-  // read here: `docs/spec/evals.md` section 7 keeps it out of QML entirely.
-  property var cloudKey: null
 
   // The Engines list of spec section 5.4. Everything it needs arrives from
   // Overlay.qml, which is the only thing that runs `grammachy engine`.
@@ -39,92 +30,12 @@ ColumnLayout {
   property double enginesFreeBytes: 0
   property var engineNote: null
 
-  // The Models list of spec section 5.3. Everything it needs arrives from
-  // Overlay.qml, which is the only thing that runs `grammachy model`.
-  property var models: []
-  property string modelBusy: ""
-  property double modelBusyBytes: 0
-  property bool modelsBusy: false
-  property string modelConfirm: ""
-  property string modelsDirectory: ""
-  property double modelsFreeBytes: 0
-  property var modelNote: null
-
   signal settingChanged(string name, var value)
   signal engineInstallRequested(string slug)
   signal engineCancelRequested()
   signal engineRemoveRequested(string slug)
   signal engineRemoveConfirmed(string slug)
   signal engineKeepRequested()
-  signal modelDownloadRequested(string name)
-  signal modelCancelRequested()
-  signal modelUseRequested(string name)
-  signal modelRemoveRequested(string name)
-  signal modelRemoveConfirmed(string name)
-  signal modelKeepRequested()
-
-  readonly property bool showsOpenai: root.engine === "openai"
-  readonly property bool showsOpenrouter: root.engine === Settings.CLOUD_ENGINE
-
-  // Spec section 7 keeps `cloudConsent` out of this view: only the consent card
-  // writes it, so there is no control for it here.
-  readonly property string cloudKeyHint: Settings.keyHint(root.cloudKey)
-
-  // How long a text field waits after the last keystroke before it persists.
-  readonly property int commitDelayMs: 500
-
-  // `textEdited` is the only signal that means the user typed. A focus and
-  // blur with no keystroke must not write, or an unknown stored value would
-  // become the default in shell.json.
-  property bool baseUrlDirty: false
-  property bool modelDirty: false
-  property bool cloudModelDirty: false
-
-  // Keep on screen exactly what the user is typing, but never store a value
-  // the CLI would ignore: an emptied field stores the default.
-  function commit(name, field, timer) {
-    timer.stop()
-    root.settingChanged(name, Settings.normalised(name, field.text))
-  }
-
-  // The edit is over, so the field can settle on what was actually stored.
-  function commitAndSettle(name, field, timer) {
-    root.commit(name, field, timer)
-    field.text = Settings.normalised(name, field.text)
-  }
-
-  Timer {
-    id: baseUrlTimer
-    interval: root.commitDelayMs
-    onTriggered: {
-      if (!root.baseUrlDirty)
-        return
-      root.baseUrlDirty = false
-      root.commit("openaiBaseUrl", baseUrlField, baseUrlTimer)
-    }
-  }
-
-  Timer {
-    id: modelTimer
-    interval: root.commitDelayMs
-    onTriggered: {
-      if (!root.modelDirty)
-        return
-      root.modelDirty = false
-      root.commit("openaiModel", modelField, modelTimer)
-    }
-  }
-
-  Timer {
-    id: cloudModelTimer
-    interval: root.commitDelayMs
-    onTriggered: {
-      if (!root.cloudModelDirty)
-        return
-      root.cloudModelDirty = false
-      root.commit("openrouterModel", cloudModelField, cloudModelTimer)
-    }
-  }
 
   // Dropdown writes its own `value` when the user picks a row, which drops the
   // declarative binding. Re-asserting it on every change of the stored value
@@ -136,11 +47,6 @@ ColumnLayout {
   // has written its own `value` once no longer follows the binding, so the
   // value is re-asserted when the rows move as well as when the setting does.
   onEnginesChanged: engineDropdown.value = root.engine
-  // A text field the user is typing in must not be yanked from under them, so
-  // an outside write lands only while the field is idle.
-  onOpenaiBaseUrlChanged: if (!baseUrlField.activeFocus) baseUrlField.text = root.openaiBaseUrl
-  onOpenaiModelChanged: if (!modelField.activeFocus) modelField.text = root.openaiModel
-  onOpenrouterModelChanged: if (!cloudModelField.activeFocus) cloudModelField.text = root.openrouterModel
 
   spacing: Style.spacing.lg
 
@@ -216,187 +122,5 @@ ColumnLayout {
     onRemove: function(slug) { root.engineRemoveRequested(slug) }
     onConfirmRemove: function(slug) { root.engineRemoveConfirmed(slug) }
     onKeepEngine: root.engineKeepRequested()
-  }
-
-  // Spec section 7 shows the two OpenAI fields for the Local LLM engine only.
-  //
-  // A text field persists on a short pause rather than on every keystroke,
-  // because a keystroke would rewrite shell.json that many times. `textEdited`
-  // is the user's own typing only, so the re-assert above never arms the
-  // timer. Waiting for the edit to finish instead would lose what the user
-  // typed when Esc closes the popup with the caret still in the field.
-  ColumnLayout {
-    Layout.fillWidth: true
-    visible: root.showsOpenai
-    spacing: Style.spacing.labelGap
-
-    Text {
-      text: "Local LLM server"
-      color: Qt.darker(Color.popups.text, 1.4)
-      font.family: Style.font.family
-      font.pixelSize: Style.font.caption
-      font.bold: true
-    }
-
-    RowLayout {
-      Layout.fillWidth: true
-      spacing: Style.spacing.xxl
-
-      TextField {
-        id: baseUrlField
-
-        Layout.fillWidth: true
-        text: root.openaiBaseUrl
-        placeholderText: Settings.defaultOf("openaiBaseUrl")
-        foreground: Color.popups.text
-        onTextEdited: {
-          root.baseUrlDirty = true
-          baseUrlTimer.restart()
-        }
-        onEditingFinished: {
-          if (root.baseUrlDirty) {
-            root.baseUrlDirty = false
-            root.commitAndSettle("openaiBaseUrl", baseUrlField, baseUrlTimer)
-          } else {
-            baseUrlField.text = Settings.normalised("openaiBaseUrl", baseUrlField.text)
-          }
-        }
-      }
-
-      TextField {
-        id: modelField
-
-        Layout.fillWidth: true
-        text: root.openaiModel
-        placeholderText: Settings.defaultOf("openaiModel")
-        foreground: Color.popups.text
-        onTextEdited: {
-          root.modelDirty = true
-          modelTimer.restart()
-        }
-        onEditingFinished: {
-          if (root.modelDirty) {
-            root.modelDirty = false
-            root.commitAndSettle("openaiModel", modelField, modelTimer)
-          } else {
-            modelField.text = Settings.normalised("openaiModel", modelField.text)
-          }
-        }
-      }
-    }
-
-    Text {
-      Layout.fillWidth: true
-      text: "The base URL must stay on this machine. The API key and the English variant are file only."
-      color: Color.muted
-      wrapMode: Text.Wrap
-      font.family: Style.font.family
-      font.pixelSize: Style.font.caption
-    }
-
-    // Spec section 4: thinking is on by default and the model reads it per
-    // request, so a change here needs no server restart.
-    //
-    // The top margin brings the gap above it up to the `lg` the other rows of
-    // the view sit at, because this group is packed at `labelGap`.
-    Toggle {
-      Layout.fillWidth: true
-      Layout.topMargin: Style.spacing.sm
-      label: "Thinking"
-      description: "Lets the model reason before it answers, which is slower and more accurate"
-      checked: root.localThinking
-      foreground: Color.popups.text
-      onClicked: root.settingChanged("localThinking", !root.localThinking)
-    }
-
-    // Spec section 5.3: the weights this machine keeps, under the fields that
-    // name the server they run on. The model field above still takes any name,
-    // so a `.gguf` placed here by hand stays reachable without a row.
-    ModelsView {
-      Layout.fillWidth: true
-      Layout.topMargin: Style.spacing.md
-
-      models: root.models
-      busy: root.modelBusy
-      busyBytes: root.modelBusyBytes
-      working: root.modelsBusy
-      setting: root.openaiModel
-      confirmName: root.modelConfirm
-      directory: root.modelsDirectory
-      freeBytes: root.modelsFreeBytes
-      note: root.modelNote
-
-      onDownload: function(name) { root.modelDownloadRequested(name) }
-      onCancel: root.modelCancelRequested()
-      onUse: function(name) { root.modelUseRequested(name) }
-      onRemove: function(name) { root.modelRemoveRequested(name) }
-      onConfirmRemove: function(name) { root.modelRemoveConfirmed(name) }
-      onKeepModel: root.modelKeepRequested()
-    }
-  }
-
-  // `docs/spec/evals.md` section 7 shows the cloud model field for the Cloud
-  // LLM engine only. The field has no built-in default, so an empty one stays
-  // empty and the placeholder alone names the recommended model: a Check with
-  // nothing here answers `bad_arguments` rather than reaching a model the user
-  // never chose.
-  //
-  // `cloudConsent` has no control. Only the consent card in front of the first
-  // cloud Check writes it.
-  ColumnLayout {
-    Layout.fillWidth: true
-    visible: root.showsOpenrouter
-    spacing: Style.spacing.labelGap
-
-    Text {
-      text: "Cloud model"
-      color: Qt.darker(Color.popups.text, 1.4)
-      font.family: Style.font.family
-      font.pixelSize: Style.font.caption
-      font.bold: true
-    }
-
-    TextField {
-      id: cloudModelField
-
-      Layout.fillWidth: true
-      text: root.openrouterModel
-      placeholderText: Settings.OPENROUTER_MODEL_PLACEHOLDER
-      foreground: Color.popups.text
-      onTextEdited: {
-        root.cloudModelDirty = true
-        cloudModelTimer.restart()
-      }
-      onEditingFinished: {
-        if (root.cloudModelDirty) {
-          root.cloudModelDirty = false
-          root.commitAndSettle("openrouterModel", cloudModelField, cloudModelTimer)
-        } else {
-          cloudModelField.text = Settings.normalised("openrouterModel", cloudModelField.text)
-        }
-      }
-    }
-
-    Text {
-      Layout.fillWidth: true
-      text: "This engine sends the text you check to openrouter.ai. No other engine sends it off this machine."
-      color: Color.muted
-      wrapMode: Text.Wrap
-      font.family: Style.font.family
-      font.pixelSize: Style.font.caption
-    }
-
-    // The key lives in a 0600 file the CLI owns, so `doctor` reports its state
-    // and names the command that writes it. Nothing here reads the key itself.
-    Text {
-      Layout.fillWidth: true
-      Layout.topMargin: Style.spacing.sm
-      visible: root.cloudKeyHint.length > 0
-      text: root.cloudKeyHint
-      color: root.cloudKey && root.cloudKey.present ? Color.muted : Color.urgent
-      wrapMode: Text.Wrap
-      font.family: "monospace"
-      font.pixelSize: Style.font.caption
-    }
   }
 }

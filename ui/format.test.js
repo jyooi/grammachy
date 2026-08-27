@@ -83,8 +83,9 @@ test("the note of a Check stays what it was when the Engine setting moves", () =
   const note = Format.truncatedNote(checked.length, capture.length)
 
   assert.equal(note, "First 5,000 of 6,000 units checked")
-  // The reader then picks the local engine, whose limit is another number.
-  assert.notEqual(Limits.checkLimit("openai"), checked.length)
+  // The reader then picks the other engine, whose limit reads the same, so
+  // the note built from the earlier answer stays exactly as it was.
+  assert.equal(Limits.checkLimit("harper"), Limits.checkLimit("languagetool"))
   assert.equal(Format.truncatedNote(checked.length, capture.length), note)
 })
 

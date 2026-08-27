@@ -22,8 +22,7 @@ import "capture.js" as Capture
 BorderSurface {
   id: root
 
-  // "empty", "checking", "result", "error", "notice", "cloudConsent", or
-  // "toolong".
+  // "empty", "checking", "result", "error", "notice", or "toolong".
   property string phase: "checking"
   // The exact text the Check ran on. Every Issue span indexes into it.
   property string sourceText: ""
@@ -71,15 +70,6 @@ BorderSurface {
   property bool settingsOpen: false
   property string nativeLanguage: "none"
   property string engineSetting: "languagetool"
-  property string openaiBaseUrl: ""
-  property string openaiModel: ""
-  property bool localThinking: true
-  property string openrouterModel: ""
-  property var cloudKey: null
-
-  // The cloud consent card of `docs/spec/evals.md` section 7, or null. The
-  // model comes from `ui/settings.js`, so this file draws it and words nothing.
-  property var consentCard: null
 
   // The Engines list of spec section 5.4, passed straight to the Settings view.
   // The card knows nothing about it either: Overlay.qml owns every process.
@@ -91,17 +81,6 @@ BorderSurface {
   property string enginesDirectory: ""
   property double enginesFreeBytes: 0
   property var engineNote: null
-
-  // The Models list of spec section 5.3, passed straight to the Settings view.
-  // The card knows nothing about it: Overlay.qml owns every process.
-  property var models: []
-  property string modelBusy: ""
-  property double modelBusyBytes: 0
-  property bool modelsBusy: false
-  property string modelConfirm: ""
-  property string modelsDirectory: ""
-  property double modelsFreeBytes: 0
-  property var modelNote: null
 
   property int cardWidth: Style.space(680)
   // The whole card fits in this, spec section 6. The marked text is what
@@ -121,19 +100,11 @@ BorderSurface {
   signal closeRequested()
   signal settingsToggled()
   signal settingChanged(string name, var value)
-  signal cloudContinueRequested()
-  signal cloudCancelRequested()
   signal engineInstallRequested(string slug)
   signal engineCancelRequested()
   signal engineRemoveRequested(string slug)
   signal engineRemoveConfirmed(string slug)
   signal engineKeepRequested()
-  signal modelDownloadRequested(string name)
-  signal modelCancelRequested()
-  signal modelUseRequested(string name)
-  signal modelRemoveRequested(string name)
-  signal modelRemoveConfirmed(string name)
-  signal modelKeepRequested()
   // One button of an error card, spec section 8. The action is a button id
   // from `ui/errors.js`; Overlay.qml owns where each one goes.
   signal errorActionRequested(string action)
@@ -148,7 +119,6 @@ BorderSurface {
   readonly property int openCount: root.issueCount - root.acceptedCount - root.skippedCount
   readonly property bool hasIssues: root.phase === "result" && root.issueCount > 0
   readonly property bool hasError: root.phase === "error" && Boolean(root.errorCard)
-  readonly property bool consenting: root.phase === "cloudConsent" && Boolean(root.consentCard)
   // The Settings view takes the body over; every check row hangs off this.
   readonly property bool showsCheck: !root.settingsOpen
   readonly property bool isEmptyResult: root.phase === "result" && root.issueCount === 0
@@ -186,7 +156,6 @@ BorderSurface {
   }
 
   function metaLine() {
-    if (root.consenting) return String(root.consentCard.meta)
     if (root.phase === "checking") return "checking the selection"
     if (root.hasError) return String(root.errorCard.meta)
     if (root.phase === "notice") return root.noticeMeta
@@ -247,9 +216,7 @@ BorderSurface {
       // screen, so both stand here. The too-long card offers the same handover
       // as its primary button, so the hero stands aside there, and the empty
       // state has nothing left to clear.
-      // The consent card stands aside for nothing: it is one question, and a
-      // second way out of it would send the Selection somewhere unasked.
-      actions: root.showsCheck && root.phase !== "toolong" && !root.consenting
+      actions: root.showsCheck && root.phase !== "toolong"
         ? (root.isNothingNew
           ? [{ id: "compose", text: "Compose", tooltip: "Open the selection in Compose", primary: false }]
           : [{ id: "clear", text: "Clear", tooltip: "Ctrl + L", primary: false },
@@ -272,11 +239,6 @@ BorderSurface {
       nativeLanguage: root.nativeLanguage
       engine: root.engineSetting
       autoReplace: root.autoReplace
-      openaiBaseUrl: root.openaiBaseUrl
-      openaiModel: root.openaiModel
-      localThinking: root.localThinking
-      openrouterModel: root.openrouterModel
-      cloudKey: root.cloudKey
       engines: root.engines
       engineBusy: root.engineBusy
       engineBusyBytes: root.engineBusyBytes
@@ -290,20 +252,6 @@ BorderSurface {
       onEngineRemoveRequested: function(slug) { root.engineRemoveRequested(slug) }
       onEngineRemoveConfirmed: function(slug) { root.engineRemoveConfirmed(slug) }
       onEngineKeepRequested: root.engineKeepRequested()
-      models: root.models
-      modelBusy: root.modelBusy
-      modelBusyBytes: root.modelBusyBytes
-      modelsBusy: root.modelsBusy
-      modelConfirm: root.modelConfirm
-      modelsDirectory: root.modelsDirectory
-      modelsFreeBytes: root.modelsFreeBytes
-      modelNote: root.modelNote
-      onModelDownloadRequested: function(name) { root.modelDownloadRequested(name) }
-      onModelCancelRequested: root.modelCancelRequested()
-      onModelUseRequested: function(name) { root.modelUseRequested(name) }
-      onModelRemoveRequested: function(name) { root.modelRemoveRequested(name) }
-      onModelRemoveConfirmed: function(name) { root.modelRemoveConfirmed(name) }
-      onModelKeepRequested: root.modelKeepRequested()
       onSettingChanged: function(name, value) { root.settingChanged(name, value) }
     }
 
@@ -362,38 +310,6 @@ BorderSurface {
         Text {
           Layout.fillWidth: true
           text: root.noticeBody
-          color: Color.popups.text
-          wrapMode: Text.Wrap
-          font.family: Style.font.family
-          font.pixelSize: Style.font.body
-        }
-      }
-
-      // --------------------------------------------- the cloud consent card
-      //
-      // `docs/spec/evals.md` section 7: the first Check on the cloud engine
-      // waits behind this. The footer carries Cancel and Continue.
-
-      ColumnLayout {
-        Layout.fillWidth: true
-        Layout.topMargin: Style.spacing.md
-        Layout.bottomMargin: Style.spacing.md
-        visible: root.showsCheck && root.consenting
-        spacing: Style.spacing.md
-
-        Text {
-          Layout.fillWidth: true
-          text: root.consenting ? String(root.consentCard.title) : ""
-          color: Color.urgent
-          wrapMode: Text.Wrap
-          font.family: Style.font.family
-          font.pixelSize: Style.font.title
-          font.bold: true
-        }
-
-        Text {
-          Layout.fillWidth: true
-          text: root.consenting ? String(root.consentCard.body) : ""
           color: Color.popups.text
           wrapMode: Text.Wrap
           font.family: Style.font.family
@@ -604,37 +520,14 @@ BorderSurface {
         Item { Layout.fillWidth: true }
 
         Button {
-          // An error card draws its own Close, in its own button row, and the
-          // consent card's own Cancel is the only way out that sends nothing.
-          visible: root.showsCheck && !root.hasIssues && !root.hasError && !root.consenting
+          // An error card draws its own Close, in its own button row.
+          visible: root.showsCheck && !root.hasIssues && !root.hasError
           text: "Close"
           tooltipText: "Esc"
           bordered: true
           foreground: Color.popups.text
           fontFamily: Style.font.family
           onClicked: root.closeRequested()
-        }
-
-        // Cancel leads, because the question is whether text may leave this
-        // machine and the safe answer is no.
-        Button {
-          visible: root.showsCheck && root.consenting
-          text: "Cancel"
-          tooltipText: "Esc"
-          bordered: true
-          foreground: Color.popups.text
-          fontFamily: Style.font.family
-          onClicked: root.cloudCancelRequested()
-        }
-
-        Button {
-          visible: root.showsCheck && root.consenting
-          text: "Continue"
-          tooltipText: "Enter"
-          bordered: true
-          foreground: Color.urgent
-          fontFamily: Style.font.family
-          onClicked: root.cloudContinueRequested()
         }
 
         Button {
