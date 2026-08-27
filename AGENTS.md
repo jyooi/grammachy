@@ -87,18 +87,25 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   `ui/errors.test.js` runs the whole loop against a stub binary that answers both subcommands, and `cli/tests/overlay_chunks.rs` is what keeps `Overlay.qml` on those same calls, because no QML test can.
 - Every Compose trigger that carries a text lands on `Overlay.composeWith`, which is the only route to the replace confirm of spec section 2; `showCompose` is the kept-Draft route that SUPER + SHIFT + G and the menu entry take.
   `ui/CardHero.qml` takes an `actions` list for its trailing edge, which is how the popup gets its Compose button and Compose gets its Cancel without the hero knowing either.
-- `manifest.json` version must equal the crate version; `cli/tests/manifest.rs` enforces that.
+- `manifest.json` version must equal the crate version, and `cli.lock` version must too; `cli/tests/manifest.rs` enforces both.
   The Check size limit belongs to the Engine: `EngineSlug::check_limit_utf16` in `cli/src/args.rs` is the Rust authority and `ui/limits.js` is the shell copy. Both remaining engines share one limit, 5,000 UTF-16 code units.
   `check` and `chunk` both take that limit as an argument, so `chunk` has its own `--engine` and packs to the same number the Check will refuse at.
   The Draft cap `chunk::MAX_DRAFT_UTF16_UNITS` is one number and lives twice, in Rust and in the QML that refuses an oversize Draft.
   `cli/tests/overlay_limit.rs` keeps every copy equal.
+- Release and setup, spec section 10 (HUF-200). `.github/workflows/release.yml` builds `grammachy-x86_64-linux` for `x86_64-unknown-linux-musl` on every `v*` tag and attaches the binary and its `.sha256` to the release; `cli/Cargo.toml`'s `[profile.release]` already carries opt-level z, LTO, and strip, so the workflow adds no flags of its own.
+  `cli.lock` at the repo root pins the released version and its sha256; a release is two commits, the tag and this bump, and `bin/release-lock.sh <tag>` makes the bump mechanical by downloading the asset, hashing it, and rewriting the file (`docs/dev.md` section 18).
+  `cli.lock` ships with `sha256: ""` until the first tag exists.
+  `bin/bootstrap.sh` is the end-user download: curl against the public release URL first, falling back to `gh release download` only on a 404 with `gh` authenticated, writing to a temp file beside the target and moving it into place only once the sha256 matches, so a mismatch or an interrupted run never leaves `bin/grammachy` half written.
+  Its seams are `GRAMMACHY_BOOTSTRAP_LOCK`, `GRAMMACHY_BOOTSTRAP_OUT`, `GRAMMACHY_BOOTSTRAP_REPO`, `GRAMMACHY_BOOTSTRAP_BASE_URL`, `GRAMMACHY_BOOTSTRAP_CURL`, and `GRAMMACHY_BOOTSTRAP_GH` (`never` disables the gh fallback); `cli/tests/bootstrap.rs` runs the real script against a stub curl and never reaches the network.
+  `ui/SetupCard.qml` draws the model `ui/setupCard.js` owns from `cli.lock`'s text and the run's own state (`Overlay.qml`'s `bootstrapRunning`, `bootstrapExitCode`, `bootstrapLog`, read through a `FileView` and a streaming `Process`); an empty pinned sha256 reads as `UNPINNED` and shows the developer path with no Install button.
+  `Overlay.showSetup` is the `Setup` button of the `bad_arguments` card (spec section 8) and the `setup` phase it opens; neither it nor `resetRun` touches the bootstrap state, so closing and reopening the popup mid-install leaves the run going, the same rule an engine install keeps.
 - The Omarchy plugin is the repo root: `manifest.json`, `BarWidget.qml`, `Overlay.qml`, and `ui/`.
   `Overlay.qml` owns capture, the CLI run, the key map dispatch, the Apply path, the review state, the Draft, and the settings storage.
   Every QML file in `ui/` only draws.
   `root.surface` is `"quick"` or `"compose"` and is what routes a summon (spec section 2); both surfaces share one `phase`, one Check, one review state, and one key map, so a change to either belongs in `Overlay.qml` rather than in a card.
   `Overlay.keyMode` is where a new `phase` has to be named, or its card silently inherits the review keys.
   `ui/QuickCard.qml` and `ui/ComposeCard.qml` are the two surfaces; `ui/CardHero.qml`, `ui/Inspector.qml`, `ui/ReviewCounts.qml`, `ui/MarkedText.qml`, `ui/ErrorCard.qml`, and `ui/SettingsView.qml` are shared parts, so a change to the hero, the inspector, or the counts reaches both at once.
-  `ui/splice.js`, `ui/tokens.js`, `ui/keymap.js`, `ui/format.js`, `ui/settings.js`, `ui/errors.js`, `ui/anchor.js`, `ui/capture.js`, and `ui/limits.js` are loaded by QML and by node, so they may use neither's API.
+  `ui/splice.js`, `ui/tokens.js`, `ui/keymap.js`, `ui/format.js`, `ui/settings.js`, `ui/errors.js`, `ui/setupCard.js`, `ui/anchor.js`, `ui/capture.js`, and `ui/limits.js` are loaded by QML and by node, so they may use neither's API.
   Their `*.test.js` siblings run under `node --test`; add a new one to `.github/workflows/ci.yml` and to `docs/dev.md`.
   `keymap.js` takes the Qt key codes as an argument, which is what lets node run it, and a mode string that says which card the press landed on.
   Anything worth a test belongs in one of those rather than in QML, because the repo has no QML test harness: `Overlay.qml` cannot be instantiated outside the shell's plugin loader, so a standalone Quickshell config hangs on it.

@@ -25,10 +25,11 @@ There is no automatic fallback: an engine that cannot answer says so, and you sw
 A fresh install checks with Harper.
 It is compiled into the binary, so nothing is downloaded and no `pacman` command is needed to run the first check.
 
-### Adding LanguageTool
+The honest cost: Harper catches about one in eight learner errors with zero false positives, in process, in about 14 MB.
+LanguageTool catches about one in seven, for a 250 MB download, a Java runtime, and about 1 GB resident.
+That gap keeps LanguageTool opt in.
 
-LanguageTool catches a little more than Harper and costs a great deal more: about 250 MB to download, a Java runtime, and about 1 GB of memory while it runs.
-So it is something you add rather than something you get.
+### Adding LanguageTool
 
 Open Settings, Engines and press Install beside LanguageTool.
 It unpacks the upstream release into `~/.local/share/grammachy/engines/languagetool/`, so no password is asked for.
@@ -40,7 +41,45 @@ If you already installed the Arch `languagetool` package, Grammachy uses that an
 
 ## Install
 
-Clone into the Omarchy plugin directory, build the companion binary, write the hotkeys, and enable the plugin.
+1. Add the plugin.
+   This clones the repository and runs `omarchy-plugin-validate`, and nothing else.
+
+   ```bash
+   omarchy plugin add <repo-url>
+   ```
+
+2. Click the Grammachy bar widget.
+   The setup card names the pinned binary and its sha256.
+   Click Install, and watch `bin/bootstrap.sh` fetch and verify it.
+3. Highlight text and press SUPER + G.
+   The first Check runs on Harper, compiled into the binary, so nothing downloads and no `pacman` command runs.
+4. Run `bin/grammachy setup` from the plugin folder.
+   This writes the two hotkeys and the menu entry, then reloads Hyprland.
+   `bin/grammachy setup --remove` takes them out again.
+5. Optional: add LanguageTool.
+   Open Settings, Engines and press Install beside LanguageTool.
+   It needs a Java runtime: `sudo pacman -S jre-openjdk`.
+
+`grammachy doctor` reports what each engine still needs and names the exact command that installs it.
+Doctor installs nothing: pacman steps stay manual.
+
+`docs/dev.md` is the full walkthrough, including the manual smoke items.
+
+### Setting the hotkeys by hand
+
+`bin/grammachy setup` writes this block into `~/.config/hypr/bindings.lua`, between `-- grammachy begin` and `-- grammachy end`, then reloads Hyprland.
+Paste it yourself instead if you would rather not run the command:
+
+```lua
+hl.unbind("SUPER + G")
+o.bind("SUPER + G", "Grammachy", [[omarchy-shell shell summon io.github.jyooi.grammachy '{"mode":"quick"}']])
+hl.unbind("SUPER + SHIFT + G")
+o.bind("SUPER + SHIFT + G", "Grammachy compose", [[omarchy-shell shell summon io.github.jyooi.grammachy '{"mode":"compose"}']])
+```
+
+### Developer path
+
+Build the companion binary from source instead of downloading the pinned release, then copy it in.
 
 ```bash
 git clone <repo-url> ~/.config/omarchy/plugins/io.github.jyooi.grammachy
@@ -52,12 +91,8 @@ omarchy-shell shell rescanPlugins
 omarchy plugin enable io.github.jyooi.grammachy
 ```
 
-`grammachy setup` writes the two hotkeys and the menu entry, then reloads Hyprland.
-`omarchy plugin enable` turns on the bar button and the overlay.
-`grammachy doctor` reports what each engine still needs and names the exact command that installs it.
-Doctor installs nothing: pacman steps stay manual.
-
-`docs/dev.md` is the full walkthrough, including the manual smoke items.
+The setup card offers this path too whenever `cli.lock` carries no pinned release.
+See `docs/dev.md` for cutting a release and pinning `cli.lock`.
 
 ## Documentation
 
