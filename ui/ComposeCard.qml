@@ -12,10 +12,8 @@ import "format.js" as Format
 // the new Draft. Apply is `Copy corrected text` only, because auto-replace has
 // no Selection to paste over here.
 //
-// A Draft of any size under the cap is checked in Chunks, so between the two
-// modes sit the progress of that run with its Cancel, and the inline failure of
-// one Chunk with its two recovery buttons. The confirm that stands in front of
-// a replaced Draft (spec section 2) is the one other card this file draws.
+// Check splits a Draft under the cap into Chunks, with Cancel and a failure card.
+// The confirm of spec section 2 and the setup card of spec section 10 are extra cards.
 //
 // The card renders state and reports intent. The Draft itself, the Check, the
 // key map, the clipboard, and the settings storage all live in Overlay.qml.

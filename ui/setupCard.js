@@ -36,6 +36,10 @@ function companionMissing(present) {
   return present !== true
 }
 
+// Where Retry on the setup card goes.
+// Compose returns to the Draft Check.
+// An empty Selection on the quick surface starts a new capture.
+// A populated Selection retries the failed Check with no new capture.
 function retryAfterSetup(surface, selectionText) {
   if (surface === "compose") return "compose"
   if (typeof selectionText !== "string" || selectionText.length === 0) return "startQuick"

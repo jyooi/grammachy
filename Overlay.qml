@@ -476,11 +476,10 @@ Item {
     Qt.callLater(root.restoreFocus)
   }
 
-  // `Setup` on the `bad_arguments` card, spec section 10: the card names the
-  // pinned binary and its hash, and Install runs `bin/bootstrap.sh`. Neither
-  // it nor `resetRun` touches the run's own state, so closing and reopening
-  // this card mid-install shows the run still going, the same rule an engine
-  // install keeps.
+  // The setup card of spec section 10.
+  // `startQuick` and `startComposeCheck` open it when bin/grammachy is absent.
+  // The `Setup` button of the `bad_arguments` card also opens it.
+  // `showSetup` and `resetRun` do not change the bootstrap state.
   function showSetup() {
     root.phase = "setup"
   }
