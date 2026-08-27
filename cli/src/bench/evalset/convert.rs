@@ -15,7 +15,11 @@
 //!   finds it.
 //! - A zero-width missing-word edit is widened to the next word, because the
 //!   contract of spec section 5.1 has no zero-width span: an Issue quotes the
-//!   text it replaces.
+//!   text it replaces. Punctuation is not a word, so an edit in front of a
+//!   stop or a comma widens onto the word before it instead. A span quoting a
+//!   stop alone is one no Issue overlaps, because an engine writes its Issue
+//!   over the word, which sits beside that span rather than inside it, and
+//!   every metric of section 4 asks for an overlap.
 //! - A word added after the last token of a sentence that ends in a stop is
 //!   not kept. The corrected sentence would read as a fragment behind its own
 //!   full stop, so no engine could write it and the item would measure
@@ -204,10 +208,9 @@ fn place(
     edit: &Edit,
     expected_text: &str,
 ) -> Option<ItemEdit> {
-    let (start, end) = match (edit.is_insertion(), edit.start < tokens.len()) {
-        (false, _) => (spans[edit.start].0, spans[edit.end - 1].1),
-        (true, true) => spans[edit.start],
-        (true, false) => spans[tokens.len() - 1],
+    let (start, end) = match edit.is_insertion() {
+        false => (spans[edit.start].0, spans[edit.end - 1].1),
+        true => widened(spans, tokens, edit.start)?,
     };
     let (start, end, fix) = fit(text, expected_text, start, end)?;
 
@@ -220,6 +223,27 @@ fn place(
         fix,
         code: edit.code.clone(),
     })
+}
+
+/// The span a missing word is widened onto, or `None` when the sentence holds
+/// no word to widen onto.
+///
+/// The next word is the answer wherever there is one, which is the rule of
+/// spec section 5.1. A missing word in front of punctuation, or one that
+/// belongs after the last token, widens back onto the word before it instead,
+/// and takes the punctuation between them, so the span always quotes a word an
+/// Issue can overlap.
+fn widened(spans: &[(usize, usize)], tokens: &[String], at: usize) -> Option<(usize, usize)> {
+    if tokens.get(at).is_some_and(|token| is_word(token)) {
+        return Some(spans[at]);
+    }
+    let word = tokens[..at].iter().rposition(|token| is_word(token))?;
+    Some((spans[word].0, spans[at - 1].1))
+}
+
+/// Whether a token is a word rather than punctuation.
+fn is_word(token: &str) -> bool {
+    token.chars().any(char::is_alphanumeric)
 }
 
 /// The span and replacement that turn `text` into `expected_text`, from a span
@@ -523,8 +547,8 @@ mod tests {
         assert!(
             item(&block(
                 "pt",
-                "I am looking forward to hearing from you .",
-                vec![edit(9, 9, "M:ADV", "soon")],
+                "Our neighbour repaired the broken fence last Tuesday .",
+                vec![edit(9, 9, "M:ADV", "quickly")],
             ))
             .is_none(),
             "the corrected sentence would read as a fragment"
@@ -536,16 +560,16 @@ mod tests {
     fn a_missing_word_at_the_end_widens_onto_the_word_before_it() {
         let item = item(&block(
             "pt",
-            "I am looking forward to hearing from you",
-            vec![edit(8, 8, "M:ADV", "soon")],
+            "Our neighbour repaired the broken fence last Tuesday",
+            vec![edit(8, 8, "M:ADV", "quickly")],
         ))
         .expect("the block is kept");
 
-        assert_eq!(item.edits[0].text, "you");
-        assert_eq!(item.edits[0].fix, "you soon");
+        assert_eq!(item.edits[0].text, "Tuesday");
+        assert_eq!(item.edits[0].fix, "Tuesday quickly");
         assert_eq!(
             item.expected_text,
-            "I am looking forward to hearing from you soon"
+            "Our neighbour repaired the broken fence last Tuesday quickly"
         );
     }
 
@@ -564,6 +588,50 @@ mod tests {
         );
         assert_eq!(item.edits[0].fix, "");
         assert_eq!(item.expected_text, "If you do not agree, I will act.");
+    }
+
+    /// A missing word in front of punctuation quotes the word before it.
+    ///
+    /// A span on the stop alone is a span no Issue overlaps: an engine writes
+    /// its Issue over the word beside it, and every metric of the evals spec
+    /// asks for an overlap, so the item would score every model a miss.
+    #[test]
+    fn a_missing_word_before_punctuation_quotes_a_word_rather_than_the_mark() {
+        let cases = [
+            (
+                "I saw him at the station this morning .",
+                8,
+                "morning",
+                "morning again",
+                "I saw him at the station this morning again.",
+            ),
+            (
+                "In my opinion , the film was very good .",
+                3,
+                "opinion",
+                "opinion however",
+                "In my opinion however, the film was very good.",
+            ),
+        ];
+
+        for (sentence, index, quoted, fix, expected) in cases {
+            let correction = fix.split(' ').next_back().expect("a correction");
+            let item = item(&block(
+                "de",
+                sentence,
+                vec![edit(index, index, "M:ADV", correction)],
+            ))
+            .expect("the block is kept");
+
+            assert_eq!(item.edits[0].text, quoted);
+            assert_eq!(item.edits[0].fix, fix);
+            assert_eq!(item.expected_text, expected);
+            assert!(
+                item.edits[0].text.chars().any(char::is_alphanumeric),
+                "the span quotes a word"
+            );
+            assert_eq!(applied(&item), item.expected_text);
+        }
     }
 
     /// A correction that joins onto the word in front of it takes the space
@@ -611,7 +679,7 @@ mod tests {
     fn an_error_free_block_expects_itself() {
         let item = item(&block(
             "ja",
-            "I look forward to hearing from you soon .",
+            "The rain stopped before we reached the harbour wall .",
             Vec::new(),
         ))
         .expect("the block is kept");

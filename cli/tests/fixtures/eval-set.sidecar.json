@@ -788,8 +788,8 @@
       "sentence": 8,
       "edits": [
         {
-          "start": 33,
-          "end": 34,
+          "start": 30,
+          "end": 33,
           "code": "M:PART"
         }
       ]
@@ -1148,8 +1148,8 @@
       "sentence": 4,
       "edits": [
         {
-          "start": 53,
-          "end": 54,
+          "start": 45,
+          "end": 53,
           "code": "M:OTHER"
         }
       ]
@@ -1844,8 +1844,8 @@
       "sentence": 1,
       "edits": [
         {
-          "start": 102,
-          "end": 103,
+          "start": 98,
+          "end": 102,
           "code": "M:OTHER"
         }
       ]
@@ -2588,8 +2588,8 @@
       "sentence": 6,
       "edits": [
         {
-          "start": 40,
-          "end": 41,
+          "start": 33,
+          "end": 40,
           "code": "M:PRON"
         }
       ]
@@ -3452,8 +3452,8 @@
       "sentence": 15,
       "edits": [
         {
-          "start": 61,
-          "end": 62,
+          "start": 53,
+          "end": 61,
           "code": "M:NOUN"
         }
       ]

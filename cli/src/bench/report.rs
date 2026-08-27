@@ -882,15 +882,15 @@ fn cost_cells(row: &ModelRow) -> Vec<String> {
 const MEASUREMENT_NOTE: &str = "\
 ## How the numbers are measured
 
-- Catch rate: an interference sentence is caught when at least one Issue overlaps a span the fixture expects. A right span with a wrong Fix still counts, because the Panel shows the span and lets the user Skip the Fix.
-- Precision, recall, F0.5: an Issue pairs with the first unpaired expected edit it overlaps, provided it reaches no more than three words past the edit on either side. Precision is pairs over Issues, recall is pairs over expected edits, both over the whole fixture.
-- Exact fix: every Fix of the Check applied to the sentence equals the corrected sentence the fixture holds, after collapsing runs of whitespace.
+- Catch rate: an interference sentence is caught when at least one Issue overlaps a span the item expects. A right span with a wrong Fix still counts, because the Panel shows the span and lets the user Skip the Fix.
+- Precision, recall, F0.5: an Issue pairs with the first unpaired expected edit it overlaps, provided it reaches no more than three words past the edit on either side. Precision is pairs over Issues, recall is pairs over expected edits, both over the whole set.
+- Exact fix: every Fix of the Check applied to the sentence equals the corrected sentence the item holds, after collapsing runs of whitespace.
 - False positives: correct sentences that earned at least one Issue. One sentence counts once, however many Issues it earned.
 - Style creep: unpaired Issues on interference sentences, per 100 interference sentences.
 - Valid: Checks that returned a result. An invalid Check counts as zero Issues, so a miss, and stays out of precision, exact fix, and latency.
-- p50 and p95 latency: nearest rank over the valid Checks of the fixture, correct sentences included, measured in process around one Check.
+- p50 and p95 latency: nearest rank over the valid Checks of the set, correct sentences included, measured in process around one Check.
 - Cost per 1,000 Checks: the sum of `usage.cost` over the row divided by the number of Checks that reported a cost, times 1,000. A cloud answer that reports no cost ends its row as skipped, because the run cannot then measure what it spends. A cloud row where no Check answered prints `n/a`. Local rows cost nothing per Check.
-- Every sentence is checked with the Native language the fixture records for it, which is what the shell passes on a real Check.
+- Every sentence is checked with the Native language the set records for it, which is what the shell passes on a real Check.
 - Thinking: the mode `--thinking` gave the local rows. `both` runs every local model twice, once in each mode. The Engines table's `openai` row runs once, in the mode the flag names, and under `both` in the product default. A cloud row prints `-`.
 ";
 

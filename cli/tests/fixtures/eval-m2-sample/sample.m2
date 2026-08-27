@@ -20,7 +20,7 @@ S They gave me a advice about the new job .
 A 4 5|||R:DET|||an|||REQUIRED|||-NONE-|||0
 A 5 6|||R:NOUN|||advice|||REQUIRED|||-NONE-|||0
 
-S I look forward to hearing from you very soon .
+S My cousin paints small wooden boats in her garage .
 A -1 -1|||noop|||-NONE-|||REQUIRED|||-NONE-|||0
 
 S The weather in London was warm and quite pleasant .

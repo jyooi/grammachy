@@ -257,7 +257,7 @@ mod tests {
         let blocks = vec![block_in(
             "fr",
             3,
-            "I look forward to hearing from you soon .",
+            "The rain stopped before we reached the harbour wall .",
             Vec::new(),
         )];
         let mut selection = selection(Vec::new());
