@@ -414,6 +414,8 @@ fn rate_limiting_stub(answer: String) -> Stub {
 struct RecordedCheck {
     engine: String,
     model: String,
+    /// The mode the row ran in, `None` for every engine but the local LLM.
+    thinking: Option<bool>,
     id: String,
     valid: bool,
     latency_ms: u64,
@@ -765,24 +767,31 @@ fn a_model_with_non_commercial_weights_is_shown_but_never_recommended() {
     );
 }
 
-/// Spec section 7 precedence: the stored entry decides the mode a benchmark
-/// measures, the same way it decides the address.
+/// Evals spec section 4.1: `--thinking` owns the mode of every local row, and
+/// its default is the product default `on`.
 ///
-/// A user who turned Thinking off must not read rows measuring a mode their
-/// machine never runs, in either the latency column or the catch rate.
+/// The stored entry still decides the address, the rule of spec section 7, but
+/// not the mode. A benchmark file has to be the output of its own Command line
+/// rather than of a Setting its reader cannot see, and `--thinking both` runs
+/// one row in each mode whatever that Setting says.
 #[test]
-fn the_stored_thinking_setting_is_what_the_benchmark_measures() {
-    for (stored, expected) in [(r#", "localThinking": false"#, false), ("", true)] {
+fn the_thinking_flag_and_not_the_stored_setting_decides_the_mode_of_a_row() {
+    for (flag, expected) in [(Some("off"), false), (Some("on"), true), (None, true)] {
         let endpoint = stub(answer_body(None), usize::MAX);
+        // A stored `false` the flag has to win over, on every case.
         let settings = settings_file(
             "thinking.json",
-            &format!(r#""openaiBaseUrl": "{}"{stored}"#, endpoint.url()),
+            &format!(
+                r#""openaiBaseUrl": "{}", "localThinking": false"#,
+                endpoint.url()
+            ),
         );
 
-        let run = bench(
-            &settings,
-            &["--engine", "openai", "--model", "qwen2.5-7b-instruct"],
-        );
+        let mut arguments = vec!["--engine", "openai", "--model", "qwen2.5-7b-instruct"];
+        if let Some(flag) = flag {
+            arguments.extend(["--thinking", flag]);
+        }
+        let run = bench(&settings, &arguments);
 
         assert_eq!(run.status, 0, "{}", run.stdout);
         let bodies = endpoint.bodies();
@@ -793,10 +802,130 @@ fn the_stored_thinking_setting_is_what_the_benchmark_measures() {
             assert_eq!(
                 request["chat_template_kwargs"]["enable_thinking"],
                 serde_json::json!(expected),
-                "the stored localThinking is what the request carries: {body}"
+                "the flag {flag:?} is what the request carries: {body}"
+            );
+            // HUF-226: the mode also picks the route the request is forced on.
+            assert_eq!(
+                request.get("grammar").is_some(),
+                !expected,
+                "thinking off takes the compact grammar and thinking on the schema: {body}"
+            );
+            assert_eq!(
+                request.get("response_format").is_some(),
+                expected,
+                "thinking off takes the compact grammar and thinking on the schema: {body}"
             );
         }
     }
+}
+
+/// Evals spec section 4.1: one benchmark file holds both modes of every local
+/// model, and the Cost table is where each row names its own.
+#[test]
+fn thinking_both_prints_two_rows_for_one_local_model() {
+    let endpoint = stub(answer_body(None), usize::MAX);
+    let settings = settings_file(
+        "thinking-both.json",
+        &format!(r#""openaiBaseUrl": "{}""#, endpoint.url()),
+    );
+
+    let run = bench(
+        &settings,
+        &[
+            "--engine",
+            "openai",
+            "--model",
+            "qwen2.5-7b-instruct",
+            "--thinking",
+            "both",
+        ],
+    );
+
+    assert_eq!(run.status, 0, "{}", run.stdout);
+    assert!(
+        run.stdout.contains(
+            "Command: `grammachy bench --engine openai --model qwen2.5-7b-instruct --thinking both`."
+        ),
+        "the file names the flag it was generated with: {}",
+        run.stdout
+    );
+
+    let cost: Vec<&str> = run
+        .stdout
+        .lines()
+        .filter(|line| {
+            line.starts_with("| `qwen2.5-7b-instruct` | on |")
+                || line.starts_with("| `qwen2.5-7b-instruct` | off |")
+        })
+        .collect();
+    assert_eq!(cost.len(), 2, "one Cost row per mode: {}", run.stdout);
+    assert!(
+        cost[0].starts_with("| `qwen2.5-7b-instruct` | on |"),
+        "{cost:?}"
+    );
+    assert!(
+        cost[1].starts_with("| `qwen2.5-7b-instruct` | off |"),
+        "{cost:?}"
+    );
+    assert!(
+        run.stdout
+            .contains("Resident memory of `qwen2.5-7b-instruct` with thinking off is"),
+        "the prose under the table says which row it means: {}",
+        run.stdout
+    );
+    assert!(
+        run.stdout.contains(
+            "Recommended local model, the Settings default and the README line: `qwen2.5-7b-instruct`, with thinking"
+        ),
+        "the README line names the mode the winning row ran under: {}",
+        run.stdout
+    );
+
+    // Both rows ran the whole fixture, one in each mode.
+    let modes: Vec<bool> = endpoint
+        .bodies()
+        .iter()
+        .map(|body| {
+            serde_json::from_str::<serde_json::Value>(body).expect("one JSON object")
+                ["chat_template_kwargs"]["enable_thinking"]
+                .as_bool()
+                .expect("every local request names its mode")
+        })
+        .collect();
+    assert!(modes.iter().any(|on| *on), "one row thought");
+    assert!(modes.iter().any(|on| !*on), "the other did not");
+}
+
+/// A cloud row prints `-`, because the local thinking key is a llama.cpp
+/// chat-template argument and never reaches a provider.
+#[test]
+fn a_cloud_row_names_no_thinking_mode() {
+    let settings = settings_file("thinking-cloud.json", r#""engine": "harper""#);
+    let stub = format!(
+        "http://{}",
+        stub_server(answer_body(Some(cloud_usage(Some(0.0001)))))
+    );
+
+    let run = bench_cloud(
+        &settings,
+        &[
+            "--cloud-model",
+            "google/gemini-3.7-flash",
+            "--max-cost",
+            "10",
+            "--thinking",
+            "both",
+        ],
+        &stub,
+    );
+
+    assert_eq!(run.status, 0, "{}", run.stdout);
+    assert!(
+        cost_row(&run.stdout, "google/gemini-3.7-flash")
+            .starts_with("| `google/gemini-3.7-flash` | - |"),
+        "{}",
+        run.stdout
+    );
 }
 
 #[test]
@@ -839,7 +968,7 @@ fn an_unreachable_model_still_carries_its_license_and_recommendation() {
     );
     assert_eq!(
         cost_row(&run.stdout, "qwen2.5-3b-instruct"),
-        "| `qwen2.5-3b-instruct` | skipped | skipped | skipped | skipped | Qwen Research License | never, the weights are non-commercial |"
+        "| `qwen2.5-3b-instruct` | on | skipped | skipped | skipped | skipped | Qwen Research License | never, the weights are non-commercial |"
     );
     assert!(
         run.stdout
@@ -924,6 +1053,10 @@ fn record_writes_one_typed_entry_per_engine_model_and_fixture_item() {
             "{check:?}"
         );
     }
+    // Only the local LLM engine has a thinking mode, so no other row names
+    // one. `judge.py` reads this field to select the product-default rows.
+    assert!(harper.iter().all(|c| c.thinking.is_none()), "{harper:?}");
+    assert!(cloud.iter().all(|c| c.thinking.is_none()), "{cloud:?}");
 
     // The stub quotes the plural mistake of zh-02, so that one entry carries a
     // normalised Issue and every other entry is a valid Check with none.
@@ -944,6 +1077,71 @@ fn record_writes_one_typed_entry_per_engine_model_and_fixture_item() {
             .filter(|c| c.id != "zh-02")
             .all(|c| c.valid && c.issues.is_empty()),
         "{cloud:?}"
+    );
+}
+
+/// Evals spec section 4.3: one entry per engine, model, thinking mode, and
+/// item, so the judge can select the product-default rows of a `both` run.
+#[test]
+fn record_keeps_one_entry_per_thinking_mode_of_a_local_model() {
+    let endpoint = stub(answer_body(None), usize::MAX);
+    let settings = settings_file(
+        "record-thinking.json",
+        &format!(r#""openaiBaseUrl": "{}""#, endpoint.url()),
+    );
+    let directory = scratch_dir().join("record-thinking-run");
+    let _ = std::fs::remove_dir_all(&directory);
+
+    let run = bench(
+        &settings,
+        &[
+            "--engine",
+            "openai",
+            "--model",
+            "qwen2.5-7b-instruct",
+            "--thinking",
+            "both",
+            "--record",
+            directory.to_str().expect("the scratch path is UTF-8"),
+        ],
+    );
+
+    assert_eq!(run.status, 0, "{}", run.stdout);
+    let text =
+        std::fs::read_to_string(directory.join("checks.json")).expect("checks.json is written");
+    let checks: Vec<RecordedCheck> =
+        serde_json::from_str(&text).expect("the file is a list of Checks");
+
+    let ids = fixture_ids();
+    for mode in [Some(true), Some(false)] {
+        let rows: Vec<&RecordedCheck> = checks
+            .iter()
+            .filter(|c| c.model == "qwen2.5-7b-instruct" && c.thinking == mode)
+            .collect();
+        assert_eq!(
+            rows.iter().map(|c| c.id.clone()).collect::<Vec<String>>(),
+            ids,
+            "the {mode:?} row records every item"
+        );
+    }
+    assert_eq!(
+        checks
+            .iter()
+            .filter(|c| c.model == "qwen2.5-7b-instruct")
+            .count(),
+        ids.len() * 2,
+        "two rows for the named model and no more"
+    );
+    // The Engines `openai` row runs its own model once, in the product
+    // default, because that table has no Thinking column to name a mode in.
+    let engine_row: Vec<&RecordedCheck> = checks
+        .iter()
+        .filter(|c| c.engine == "openai" && c.model == DEFAULT_OPENAI_MODEL)
+        .collect();
+    assert_eq!(engine_row.len(), ids.len(), "one Engines row");
+    assert!(
+        engine_row.iter().all(|c| c.thinking == Some(true)),
+        "{engine_row:?}"
     );
 }
 

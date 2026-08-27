@@ -16,10 +16,11 @@
 //! the validity floor and never with more false positives than the default
 //! engine. Cloud rows compete only for the separate cloud line.
 
-use crate::bench::judge::{Assessment, AGREEMENT_GATE, MINIMUM_LABELLED};
+use crate::bench::judge::{Assessment, RowKey, AGREEMENT_GATE, MINIMUM_LABELLED};
 use crate::bench::machine::Machine;
 use crate::bench::memory::Reading;
 use crate::bench::metrics::Tally;
+use crate::bench::mode_word;
 use crate::bench::weights::{Terms, Weights};
 
 /// What one row prints in every measured column when the row did not run.
@@ -68,6 +69,8 @@ pub struct ModelRow {
     pub model: String,
     /// The engine the row ran on, `openai` or `openrouter`.
     pub engine: String,
+    /// The local thinking mode the row ran in, `None` for a cloud row.
+    pub thinking: Option<bool>,
     pub weights: Weights,
     pub outcome: Outcome,
 }
@@ -75,6 +78,29 @@ pub struct ModelRow {
 impl ModelRow {
     fn is_cloud(&self) -> bool {
         self.weights.terms == Terms::Hosted
+    }
+
+    /// The Thinking cell of the Cost table (evals spec section 3).
+    fn thinking_cell(&self) -> String {
+        match self.thinking {
+            Some(on) => mode_word(on).to_string(),
+            None => "-".to_string(),
+        }
+    }
+
+    /// The key this row's Useful fix count is filed under.
+    fn key(&self) -> RowKey {
+        RowKey {
+            engine: self.engine.clone(),
+            model: self.model.clone(),
+            thinking: self.thinking,
+        }
+    }
+
+    /// Whether the judge left this row out of its sample by rule rather than
+    /// by chance: `judge.py` grades the product default alone (section 4.4).
+    fn out_of_the_judged_sample(&self) -> bool {
+        self.thinking == Some(false)
     }
 }
 
@@ -139,7 +165,10 @@ impl Report {
         }
         out.push('\n');
         for row in &self.engines {
-            out.push_str(&memory_source_line(&row.engine, &row.outcome));
+            out.push_str(&memory_source_line(
+                &format!("`{}`", row.engine),
+                &row.outcome,
+            ));
         }
         out.push('\n');
         out
@@ -175,6 +204,9 @@ impl Report {
             ));
         }
         out.push('\n');
+        if self.holds_both_modes() {
+            out.push_str("Every Models table prints the rows in one order, so a model that appears twice is its two Thinking modes, named in the Cost table below.\n\n");
+        }
         if let Some(judge) = &self.judge {
             out.push_str(&judge.lines());
             out.push_str(&self.ranking_sentence());
@@ -182,26 +214,28 @@ impl Report {
         }
 
         out.push_str("### Cost\n\n");
-        out.push_str("| Model | p50 latency | p95 latency | Resident memory | Cost per 1,000 Checks | Weights license | Recommended |\n");
-        out.push_str("|---|---|---|---|---|---|---|\n");
+        out.push_str("| Model | Thinking | p50 latency | p95 latency | Resident memory | Cost per 1,000 Checks | Weights license | Recommended |\n");
+        out.push_str("|---|---|---|---|---|---|---|---|\n");
         for (row, verdict) in self.models.iter().zip(&verdicts) {
             out.push_str(&format!(
-                "| `{}` | {} | {} | {} |\n",
+                "| `{}` | {} | {} | {} | {} |\n",
                 row.model,
+                row.thinking_cell(),
                 cost_cells(row).join(" | "),
                 row.weights.license,
                 verdict
             ));
         }
         out.push('\n');
+        out.push_str("Thinking is the local mode the row ran in, from `--thinking`. A cloud row prints `-`: the mode is a llama.cpp chat-template argument and never reaches a provider.\n");
         for row in &self.models {
-            out.push_str(&memory_source_line(&row.model, &row.outcome));
+            out.push_str(&memory_source_line(&self.row_label(row), &row.outcome));
         }
         for row in &self.models {
             if let Outcome::Measured(measurement) = &row.outcome {
                 out.push_str(&format!(
-                    "Wall time of `{}`: {} s for the whole fixture{}.\n",
-                    row.model,
+                    "Wall time of {}: {} s for the whole fixture{}.\n",
+                    self.row_label(row),
                     measurement.wall_ms / 1_000,
                     if row.is_cloud() {
                         ""
@@ -255,11 +289,31 @@ impl Report {
         out
     }
 
+    /// The name the prose under the tables gives one row.
+    ///
+    /// `--thinking both` prints one model twice, and the Model column of every
+    /// table is the bare name (evals spec section 4.2), so a line that names a
+    /// row on its own has to say which of the two it means.
+    fn row_label(&self, row: &ModelRow) -> String {
+        let shared = self
+            .models
+            .iter()
+            .filter(|other| other.model == row.model)
+            .count()
+            > 1;
+        match (shared, row.thinking) {
+            (true, Some(on)) => format!("`{}` with thinking {}", row.model, mode_word(on)),
+            _ => format!("`{}`", row.model),
+        }
+    }
+
     /// The measured cells of one Quality row, in table order.
     ///
     /// The Useful fix cell is present only with `--judgements`, and it prints
     /// whether or not the gate passed: below the gate the column is still the
-    /// measurement, it just does not rank.
+    /// measurement, it just does not rank. A thinking-off row says so instead
+    /// of a count, because the judge grades the product default alone and a
+    /// bare `no non-exact hit` would read as a row that produced none.
     fn quality_cells(&self, row: &ModelRow) -> Vec<String> {
         let width = if self.judge.is_some() { 9 } else { 8 };
         let Outcome::Measured(measurement) = &row.outcome else {
@@ -274,12 +328,10 @@ impl Report {
             tally.exact_cell(),
         ];
         if let Some(judge) = &self.judge {
-            cells.push(
-                judge
-                    .row(&row.engine, &row.model)
-                    .unwrap_or_default()
-                    .cell(),
-            );
+            cells.push(match row.out_of_the_judged_sample() {
+                true => "not the product default".to_string(),
+                false => judge.row(&row.key()).unwrap_or_default().cell(),
+            });
         }
         cells.push(tally.false_positive_cell());
         cells.push(tally.creep_cell());
@@ -312,10 +364,10 @@ impl Report {
             .filter(|row| row.outcome.tally().is_some())
             .filter(|row| {
                 judge
-                    .row(&row.engine, &row.model)
+                    .row(&row.key())
                     .is_some_and(|graded| graded.hits > 0 && graded.judged == 0)
             })
-            .map(|row| format!("`{}`", row.model))
+            .map(|row| self.row_label(row))
             .collect()
     }
 
@@ -329,7 +381,7 @@ impl Report {
             .filter(|row| row.outcome.tally().is_some())
             .filter(|row| {
                 judge
-                    .row(&row.engine, &row.model)
+                    .row(&row.key())
                     .is_some_and(|graded| graded.judged > 0)
             })
             .count()
@@ -368,10 +420,7 @@ impl Report {
         if tally.interference == 0 {
             return exact;
         }
-        let useful = judge
-            .row(&row.engine, &row.model)
-            .unwrap_or_default()
-            .useful;
+        let useful = judge.row(&row.key()).unwrap_or_default().useful;
         100.0 * (tally.exact + useful) as f64 / tally.interference as f64
     }
 
@@ -386,7 +435,13 @@ impl Report {
             return String::new();
         };
         if judge.ranks() && self.judge_covers_measured_rows() {
-            return "The Useful fix column counts in the ranking.\n".to_string();
+            let mut out = String::from("The Useful fix column counts in the ranking.\n");
+            if self.has_unjudged_mode() {
+                out.push_str(
+                    "A thinking-off row is never judged, so it ranks on exact fix alone.\n",
+                );
+            }
+            return out;
         }
         let reason = if judge.labelled == 0 {
             "no hand label covers a hit of this run".to_string()
@@ -403,6 +458,26 @@ impl Report {
             "the judgements file covers no measured model row".to_string()
         };
         format!("The Useful fix column does not count in the ranking, because {reason}.\n")
+    }
+
+    /// Whether the run measured a row the judge leaves out of its sample.
+    ///
+    /// Under the swapped measure such a row competes on exact fix while a
+    /// graded row adds its useful hits, so the file says so rather than
+    /// letting the reader assume the two rows were ranked alike.
+    fn has_unjudged_mode(&self) -> bool {
+        self.models
+            .iter()
+            .any(|row| row.outcome.tally().is_some() && row.out_of_the_judged_sample())
+    }
+
+    /// Whether the run holds both modes of at least one local model.
+    fn holds_both_modes(&self) -> bool {
+        self.models.iter().any(|row| {
+            self.models
+                .iter()
+                .any(|other| other.model == row.model && other.thinking != row.thinking)
+        })
     }
 
     /// The Recommended cell of every row, in row order.
@@ -478,22 +553,30 @@ impl Report {
     fn recommendation_lines(&self, verdicts: &[String]) -> String {
         let mut out = String::new();
         let default_fp = self.default_engine_false_positives();
-        let named = |verdict: &str| -> Option<String> {
+        let named = |verdict: &str| -> Option<&ModelRow> {
             self.models
                 .iter()
                 .zip(verdicts)
                 .find(|(_, cell)| cell.as_str() == verdict)
-                .map(|(row, _)| row.model.clone())
+                .map(|(row, _)| row)
         };
+        // The README names the mode the winning row ran under (evals spec
+        // section 5), so the local line always carries it.
         match named("recommended") {
-            Some(model) => out.push_str(&format!(
-                "Recommended local model, the Settings default and the README line: `{model}`.\n"
+            Some(row) => out.push_str(&format!(
+                "Recommended local model, the Settings default and the README line: `{}`, with thinking {}.\n",
+                row.model,
+                match row.thinking {
+                    Some(on) => mode_word(on),
+                    None => "on",
+                }
             )),
             None => out.push_str("No local row is eligible for the recommendation.\n"),
         }
         match named("recommended cloud model") {
-            Some(model) => out.push_str(&format!(
-                "Recommended cloud model, the `openrouterModel` line of the README: `{model}`. Cloud is never the default engine.\n"
+            Some(row) => out.push_str(&format!(
+                "Recommended cloud model, the `openrouterModel` line of the README: `{}`. Cloud is never the default engine.\n",
+                row.model
             )),
             None if self.models.iter().any(ModelRow::is_cloud) => {
                 out.push_str("No cloud row is eligible for the cloud recommendation.\n")
@@ -529,7 +612,7 @@ impl Report {
         }
         for row in &self.models {
             if let Outcome::Skipped(why) = &row.outcome {
-                reasons.push(format!("- Model `{}`: {why}\n", row.model));
+                reasons.push(format!("- Model {}: {why}\n", self.row_label(row)));
             }
         }
 
@@ -557,12 +640,13 @@ impl Report {
 /// A row that ran names its own source rather than a rule read off the engine,
 /// because a llama.cpp row on a graphics device and one on the CPU are the same
 /// engine and two different numbers. A skipped row measured nothing, so it has
-/// no source to name and prints no line.
+/// no source to name and prints no line. `name` arrives quoted, because a
+/// Models row may name its thinking mode outside the backticks.
 fn memory_source_line(name: &str, outcome: &Outcome) -> String {
     match outcome {
         Outcome::Skipped(_) => String::new(),
         Outcome::Measured(measurement) => format!(
-            "Resident memory of `{name}` is {}.\n",
+            "Resident memory of {name} is {}.\n",
             measurement.memory.source.line()
         ),
     }
@@ -650,6 +734,7 @@ const MEASUREMENT_NOTE: &str = "\
 - p50 and p95 latency: nearest rank over the valid Checks of the fixture, correct sentences included, measured in process around one Check.
 - Cost per 1,000 Checks: the sum of `usage.cost` over the row divided by the number of Checks that reported a cost, times 1,000. A cloud answer that reports no cost ends its row as skipped, because the run cannot then measure what it spends. A cloud row where no Check answered prints `n/a`. Local rows cost nothing per Check.
 - Every sentence is checked with the Native language the fixture records for it, which is what the shell passes on a real Check.
+- Thinking: the mode `--thinking` gave the local rows. `both` runs every local model twice, once in each mode, and the Engines table's `openai` row runs once, in the product default. A cloud row prints `-`.
 ";
 
 #[cfg(test)]
@@ -693,11 +778,38 @@ mod tests {
     }
 
     fn model(name: &str, engine: &str, weights: Weights, outcome: Outcome) -> ModelRow {
+        let thinking = match engine {
+            "openai" => Some(true),
+            _ => None,
+        };
+        thinking_model(name, engine, thinking, weights, outcome)
+    }
+
+    fn thinking_model(
+        name: &str,
+        engine: &str,
+        thinking: Option<bool>,
+        weights: Weights,
+        outcome: Outcome,
+    ) -> ModelRow {
         ModelRow {
             model: name.to_string(),
             engine: engine.to_string(),
+            thinking,
             weights,
             outcome,
+        }
+    }
+
+    /// The judge key of one Models row, the way the tests name them.
+    fn key(engine: &str, model: &str) -> RowKey {
+        RowKey {
+            engine: engine.to_string(),
+            model: model.to_string(),
+            thinking: match engine {
+                "openai" => Some(true),
+                _ => None,
+            },
         }
     }
 
@@ -759,13 +871,103 @@ mod tests {
         );
     }
 
+    /// Evals spec sections 3 and 4.1: the Cost table is where a local row names
+    /// its mode, and a run that holds both says which of two like-named rows a
+    /// line under the table means.
+    #[test]
+    fn both_modes_of_one_model_are_two_rows_the_file_can_tell_apart() {
+        let mut report = report();
+        report.models = vec![
+            thinking_model(
+                "gemma-4-e4b-it",
+                "openai",
+                Some(true),
+                weights::of("gemma-4-e4b-it"),
+                measured(tally(20, 12, 0, 40), Some(5_000_000_000)),
+            ),
+            thinking_model(
+                "gemma-4-e4b-it",
+                "openai",
+                Some(false),
+                weights::of("gemma-4-e4b-it"),
+                measured(tally(18, 8, 0, 40), Some(5_000_000_000)),
+            ),
+            thinking_model(
+                "google/gemini-3.7-flash",
+                "openrouter",
+                None,
+                weights::HOSTED,
+                measured(tally(25, 20, 0, 40), None),
+            ),
+        ];
+
+        let rendered = report.render();
+
+        assert!(
+            rendered.contains("| `gemma-4-e4b-it` | on | 20 ms |"),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains("| `gemma-4-e4b-it` | off | 20 ms |"),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains("| `google/gemini-3.7-flash` | - | 20 ms |"),
+            "a cloud row names no mode: {rendered}"
+        );
+        assert!(
+            rendered.contains("a model that appears twice is its two Thinking modes"),
+            "the Quality table says why one name is on two rows: {rendered}"
+        );
+        assert!(
+            rendered.contains("Wall time of `gemma-4-e4b-it` with thinking on:"),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains("Wall time of `google/gemini-3.7-flash`:"),
+            "one row of a name needs no mode: {rendered}"
+        );
+        assert!(
+            rendered.contains(
+                "Recommended local model, the Settings default and the README line: `gemma-4-e4b-it`, with thinking on."
+            ),
+            "the README line names the winning row's mode: {rendered}"
+        );
+    }
+
+    /// The judge grades the product default alone, so a thinking-off row says
+    /// so rather than printing a count no file could hold.
+    #[test]
+    fn a_thinking_off_row_says_it_is_out_of_the_judged_sample() {
+        let mut report = judged_report(4);
+        report.models.push(thinking_model(
+            "phi-4-mini-instruct",
+            "openai",
+            Some(false),
+            weights::of("phi-4-mini-instruct"),
+            measured(tally(20, 12, 0, 40), Some(3_000_000_000)),
+        ));
+
+        let rendered = report.render();
+
+        assert!(
+            rendered.contains("| not the product default |"),
+            "{rendered}"
+        );
+        assert!(
+            rendered
+                .contains("A thinking-off row is never judged, so it ranks on exact fix alone.\n"),
+            "the file says the two rows were not ranked alike: {rendered}"
+        );
+    }
+
     #[test]
     fn a_model_with_non_commercial_weights_is_shown_and_marked_never_recommended() {
         let rendered = report().render();
 
         assert!(
             rendered.contains(
-                "| `qwen2.5-3b-instruct` | skipped | skipped | skipped | skipped | Qwen Research License | never, the weights are non-commercial |"
+                "| `qwen2.5-3b-instruct` | on | skipped | skipped | skipped | skipped | Qwen Research License | never, the weights are non-commercial |"
             ),
             "{rendered}"
         );
@@ -935,14 +1137,14 @@ mod tests {
 
         let rendered = report.render();
 
-        assert!(rendered.contains("| `qwen3.5-4b` | 20 ms | 50 ms | 3.0 GB | 0.00 (local) | Apache-2.0 | recommended |"), "{rendered}");
-        assert!(rendered.contains("| `gemma-4-e4b-it` | 20 ms | 50 ms | 5.0 GB | 0.00 (local) | Apache-2.0 | eligible |"), "{rendered}");
-        assert!(rendered.contains("| `phi-4-mini` | 20 ms | 50 ms | 3.0 GB | 0.00 (local) | MIT | no, more false positives than `languagetool` |"), "{rendered}");
-        assert!(rendered.contains("| `deepseek/deepseek-v4-flash-0731` | 20 ms | 50 ms | not measured | 0.02 USD | hosted | recommended cloud model |"), "{rendered}");
-        assert!(rendered.contains("| `google/gemini-3.7-flash` | 20 ms | 50 ms | not measured | 0.02 USD | hosted | no, validity under 95% |"), "{rendered}");
+        assert!(rendered.contains("| `qwen3.5-4b` | on | 20 ms | 50 ms | 3.0 GB | 0.00 (local) | Apache-2.0 | recommended |"), "{rendered}");
+        assert!(rendered.contains("| `gemma-4-e4b-it` | on | 20 ms | 50 ms | 5.0 GB | 0.00 (local) | Apache-2.0 | eligible |"), "{rendered}");
+        assert!(rendered.contains("| `phi-4-mini` | on | 20 ms | 50 ms | 3.0 GB | 0.00 (local) | MIT | no, more false positives than `languagetool` |"), "{rendered}");
+        assert!(rendered.contains("| `deepseek/deepseek-v4-flash-0731` | - | 20 ms | 50 ms | not measured | 0.02 USD | hosted | recommended cloud model |"), "{rendered}");
+        assert!(rendered.contains("| `google/gemini-3.7-flash` | - | 20 ms | 50 ms | not measured | 0.02 USD | hosted | no, validity under 95% |"), "{rendered}");
         assert!(
             rendered.contains(
-                "Recommended local model, the Settings default and the README line: `qwen3.5-4b`."
+                "Recommended local model, the Settings default and the README line: `qwen3.5-4b`, with thinking on."
             ),
             "{rendered}"
         );
@@ -1124,7 +1326,7 @@ mod tests {
                 }),
             );
             hits.push(Hit {
-                row: ("openai".to_string(), "phi-4-mini-instruct".to_string()),
+                row: key("openai", "phi-4-mini-instruct"),
                 id,
                 result,
             });
@@ -1134,7 +1336,7 @@ mod tests {
             .or_default()
             .insert("one gemma answer".to_string(), entry(true));
         hits.push(Hit {
-            row: ("openai".to_string(), "gemma-4-e4b-it".to_string()),
+            row: key("openai", "gemma-4-e4b-it"),
             id: "es-01".to_string(),
             result: "one gemma answer".to_string(),
         });
@@ -1185,7 +1387,7 @@ mod tests {
         );
         // 10 exact plus 4 useful beats 12 exact plus 1 useful.
         assert!(
-            rendered.contains("Recommended local model, the Settings default and the README line: `phi-4-mini-instruct`."),
+            rendered.contains("Recommended local model, the Settings default and the README line: `phi-4-mini-instruct`, with thinking on."),
             "{rendered}"
         );
         assert!(
@@ -1205,7 +1407,7 @@ mod tests {
         assert!(rendered.contains("| 4 of 5 (80.0%) |"), "{rendered}");
         // The ranking falls back to exact fix rate, so `gemma` wins again.
         assert!(
-            rendered.contains("Recommended local model, the Settings default and the README line: `gemma-4-e4b-it`."),
+            rendered.contains("Recommended local model, the Settings default and the README line: `gemma-4-e4b-it`, with thinking on."),
             "{rendered}"
         );
         assert!(
@@ -1256,7 +1458,7 @@ mod tests {
                         .insert(result.clone(), entry(helped));
                 }
                 hits.push(Hit {
-                    row: ("openai".to_string(), name.to_string()),
+                    row: key("openai", name),
                     id,
                     result,
                 });
@@ -1298,7 +1500,7 @@ mod tests {
         // 15 exact beats 12 exact. The swapped measure would have made it 12
         // plus 8 useful against 15 plus nothing, and handed it to `phi`.
         assert!(
-            rendered.contains("Recommended local model, the Settings default and the README line: `gemma-4-e4b-it`."),
+            rendered.contains("Recommended local model, the Settings default and the README line: `gemma-4-e4b-it`, with thinking on."),
             "{rendered}"
         );
     }
@@ -1324,7 +1526,7 @@ mod tests {
         );
         // 10 exact plus 5 useful beats 12 exact and nothing to add to it.
         assert!(
-            rendered.contains("Recommended local model, the Settings default and the README line: `phi-4-mini-instruct`."),
+            rendered.contains("Recommended local model, the Settings default and the README line: `phi-4-mini-instruct`, with thinking on."),
             "{rendered}"
         );
     }
@@ -1356,7 +1558,7 @@ mod tests {
         // 10 exact plus 5 useful beats 12 exact, which is only true while the
         // skipped row leaves the swapped measure in place.
         assert!(
-            rendered.contains("Recommended local model, the Settings default and the README line: `phi-4-mini-instruct`."),
+            rendered.contains("Recommended local model, the Settings default and the README line: `phi-4-mini-instruct`, with thinking on."),
             "{rendered}"
         );
     }
@@ -1398,7 +1600,7 @@ mod tests {
                 .or_default()
                 .insert(result.clone(), entry(true));
             hits.push(Hit {
-                row: ("harper".to_string(), "harper".to_string()),
+                row: key("harper", "harper"),
                 id,
                 result,
             });

@@ -41,6 +41,12 @@
 //! one llama.cpp server and one in-process Harper. Every row is placed back at
 //! its own index, so the tables print in plan order whatever order they end in.
 //!
+//! `--thinking off|on|both` decides the mode of every local row, and `both`
+//! runs each local model twice so one file holds both modes. The flag rather
+//! than the stored `localThinking` is what the rows carry, so a benchmark file
+//! is reproducible from the Command line it prints. The Engines table has no
+//! Thinking column, so its `openai` row runs once, in the product default.
+//!
 //! `--max-cost` is read under one lock before each cloud Check, so a run may
 //! pass the cap by at most one Check for each cloud row in flight. The report
 //! prints what the run actually paid rather than the cap.
@@ -61,7 +67,7 @@ use std::time::{Duration, Instant};
 
 use serde::Serialize;
 
-use crate::args::{BenchArgs, CheckOptions, EngineSlug};
+use crate::args::{BenchArgs, BenchThinking, CheckOptions, EngineSlug};
 use crate::engine::{self, Engine, EngineFailure};
 use crate::engines::{languagetool, openai, openrouter};
 use crate::envelope::Issue;
@@ -101,7 +107,7 @@ pub struct Run {
 /// Build the report of one run, or say why the arguments do not describe a run.
 pub fn run(args: &BenchArgs, stored: &StoredSettings) -> Result<Run, String> {
     let plan = Plan::of(args)?;
-    let base = base_options(stored);
+    let base = base_options(stored, args.thinking);
     let sentences = fixture::sentences();
     let spend = Mutex::new(Spend::new(args.max_cost));
 
@@ -112,10 +118,10 @@ pub fn run(args: &BenchArgs, stored: &StoredSettings) -> Result<Run, String> {
             .rows
             .iter()
             .enumerate()
-            .filter(|(_, (slug, _))| slug.is_cloud())
-            .map(|(index, (slug, model))| {
-                let (slug, base, sentences, spend) = (*slug, &base, &sentences, &spend);
-                let handle = scope.spawn(move || model_row(slug, model, base, sentences, spend));
+            .filter(|(_, row)| row.slug.is_cloud())
+            .map(|(index, row)| {
+                let (base, sentences, spend) = (&base, &sentences, &spend);
+                let handle = scope.spawn(move || model_row(row, base, sentences, spend));
                 (index, handle)
             })
             .collect();
@@ -127,10 +133,18 @@ pub fn run(args: &BenchArgs, stored: &StoredSettings) -> Result<Run, String> {
 
         let mut models: Vec<Option<(ModelRow, Vec<RecordedCheck>)>> =
             plan.rows.iter().map(|_| None).collect();
-        for (index, (slug, model)) in plan.rows.iter().enumerate() {
-            if !slug.is_cloud() {
-                models[index] = Some(model_row(*slug, model, &base, &sentences, &spend));
+        // The model the llama.cpp unit currently serves, so two rows that
+        // differ only by thinking mode share one server start.
+        let mut serving: Option<&str> = None;
+        for (index, row) in plan.rows.iter().enumerate() {
+            if row.slug.is_cloud() {
+                continue;
             }
+            if serving != Some(row.model.as_str()) {
+                restart_model_server();
+                serving = Some(row.model.as_str());
+            }
+            models[index] = Some(model_row(row, &base, &sentences, &spend));
         }
         for (index, handle) in cloud {
             models[index] = Some(handle.join().expect("a benchmark row does not panic"));
@@ -193,10 +207,63 @@ pub fn run(args: &BenchArgs, stored: &StoredSettings) -> Result<Run, String> {
     })
 }
 
+/// One Models row: a model, on an engine, in one thinking mode.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Row {
+    slug: EngineSlug,
+    model: String,
+    /// The local thinking mode, `None` for a cloud row. A provider never reads
+    /// `chat_template_kwargs`, so a cloud row has no mode of its own to name.
+    thinking: Option<bool>,
+}
+
+impl Row {
+    /// The rows one planned pair expands into, one per thinking mode.
+    ///
+    /// A cloud row is one row whatever the flag says: `--thinking` is a local
+    /// setting, and running a provider twice would bill the run twice for the
+    /// same answers.
+    fn of(slug: EngineSlug, model: String, thinking: BenchThinking) -> Vec<Row> {
+        if slug.is_cloud() {
+            return vec![Row {
+                slug,
+                model,
+                thinking: None,
+            }];
+        }
+        thinking
+            .modes()
+            .iter()
+            .map(|mode| Row {
+                slug,
+                model: model.clone(),
+                thinking: Some(*mode),
+            })
+            .collect()
+    }
+
+    /// The Settings this row runs its whole fixture with.
+    fn options(&self, base: &CheckOptions) -> CheckOptions {
+        match self.slug {
+            EngineSlug::Openrouter => CheckOptions {
+                engine: self.slug,
+                openrouter_model: self.model.clone(),
+                ..base.clone()
+            },
+            _ => CheckOptions {
+                engine: self.slug,
+                openai_model: self.model.clone(),
+                local_thinking: self.thinking.unwrap_or(base.local_thinking),
+                ..base.clone()
+            },
+        }
+    }
+}
+
 /// The Models rows one run evaluates, each on its engine, local rows first.
 #[derive(Debug, PartialEq)]
 struct Plan {
-    rows: Vec<(EngineSlug, String)>,
+    rows: Vec<Row>,
     /// Where `record` writes, in a directory already proved writable.
     record: Option<PathBuf>,
     /// The judgements `--judgements` named, read before the first row so a
@@ -225,31 +292,38 @@ impl Plan {
             }
         };
 
-        let mut rows: Vec<(EngineSlug, String)> = Vec::new();
+        let mut pairs: Vec<(EngineSlug, String)> = Vec::new();
         let mut cloud: Vec<(EngineSlug, String)> = Vec::new();
         for model in &args.models {
             if engine.is_cloud() {
                 cloud.push((engine, model.clone()));
             } else {
-                rows.push((engine, model.clone()));
+                pairs.push((engine, model.clone()));
             }
         }
         for model in &args.cloud_models {
             cloud.push((EngineSlug::Openrouter, model.clone()));
         }
-        rows.extend(cloud);
+        pairs.extend(cloud);
         // The same pair twice is one fixture run twice, and a cloud row billed
         // twice, so only its first place in the order stays.
         let mut planned: Vec<(EngineSlug, String)> = Vec::new();
-        rows.retain(|row| {
-            let fresh = !planned.contains(row);
+        pairs.retain(|pair| {
+            let fresh = !planned.contains(pair);
             if fresh {
-                planned.push(row.clone());
+                planned.push(pair.clone());
             }
             fresh
         });
 
-        let any_cloud = rows.iter().any(|(slug, _)| slug.is_cloud());
+        // A local pair becomes one row per mode, and the two modes of one
+        // model stay next to each other so they share a server start.
+        let rows: Vec<Row> = pairs
+            .into_iter()
+            .flat_map(|(slug, model)| Row::of(slug, model, args.thinking))
+            .collect();
+
+        let any_cloud = rows.iter().any(|row| row.slug.is_cloud());
         match (any_cloud, args.max_cost) {
             (true, None) => {
                 return Err(
@@ -389,6 +463,10 @@ fn unpriced(id: &str) -> String {
 struct RecordedCheck {
     engine: String,
     model: String,
+    /// The thinking mode of the row, `None` for every engine but the local
+    /// LLM. The judge selects on it, so it travels with the answer (evals spec
+    /// section 4.3); see [`row_thinking`].
+    thinking: Option<bool>,
     id: String,
     native: String,
     text: String,
@@ -423,13 +501,29 @@ impl RecordedCheck {
             && !metrics::is_exact(&self.text, &self.issues, &self.expected_text)
     }
 
+    /// The row this Check belongs to, the key of its Models row.
+    fn row_key(&self) -> judge::RowKey {
+        judge::RowKey {
+            engine: self.engine.clone(),
+            model: self.model.clone(),
+            thinking: self.thinking,
+        }
+    }
+
     /// This Check as one folded hit of the run, when it is one.
+    ///
+    /// A local row that ran with thinking off is never one. `judge.py` grades
+    /// the product default alone (evals spec section 4.4), so grading a
+    /// thinking-off answer here would count a judgement the file never holds.
     fn hit(&self) -> Option<judge::Hit> {
+        if self.thinking == Some(false) {
+            return None;
+        }
         if !self.non_exact_hit() {
             return None;
         }
         Some(judge::Hit {
-            row: (self.engine.clone(), self.model.clone()),
+            row: self.row_key(),
             id: self.id.clone(),
             result: self.result_text.clone()?,
         })
@@ -440,9 +534,11 @@ impl RecordedCheck {
 ///
 /// The stored `shell.json` still applies, because the OpenAI base URL lives
 /// there and a benchmark must talk to the server the user's Checks talk to.
-/// `localThinking` follows the same rule: a row has to measure the mode the
-/// machine runs, so a stored `false` is what the request carries.
-fn base_options(stored: &StoredSettings) -> CheckOptions {
+/// `localThinking` is the one exception: `--thinking` owns it, so the file a
+/// run prints is the output of its own Command line rather than of a Setting
+/// the reader cannot see. This value is the mode the Engines `openai` row
+/// runs in, and every Models row names its own.
+fn base_options(stored: &StoredSettings, thinking: BenchThinking) -> CheckOptions {
     let defaults = CheckOptions::default();
     CheckOptions {
         openai_base_url: stored
@@ -454,7 +550,7 @@ fn base_options(stored: &StoredSettings) -> CheckOptions {
             .openai_api_key
             .clone()
             .unwrap_or(defaults.openai_api_key),
-        local_thinking: stored.local_thinking.unwrap_or(defaults.local_thinking),
+        local_thinking: thinking.engine_mode(),
         ..defaults
     }
 }
@@ -499,6 +595,8 @@ fn command_line(args: &BenchArgs) -> String {
     if let Some(cap) = args.max_cost {
         line.push_str(&format!(" --max-cost {cap}"));
     }
+    // Always named, because it always decides what the local rows measured.
+    line.push_str(&format!(" --thinking {}", args.thinking.as_str()));
     line
 }
 
@@ -522,40 +620,28 @@ fn engine_row(
     )
 }
 
+/// Run the whole fixture for one Models row.
+///
+/// The caller owns the llama.cpp server, because two rows of one model differ
+/// only by a request field and must not pay for two server starts.
 fn model_row(
-    slug: EngineSlug,
-    model: &str,
+    row: &Row,
     base: &CheckOptions,
     sentences: &[Sentence],
     spend: &Mutex<Spend>,
 ) -> (ModelRow, Vec<RecordedCheck>) {
-    let options = match slug {
-        EngineSlug::Openrouter => CheckOptions {
-            engine: slug,
-            openrouter_model: model.to_string(),
-            ..base.clone()
-        },
-        _ => {
-            // llama.cpp serves one model per process, so each row needs its
-            // own server.
-            restart_model_server();
-            CheckOptions {
-                engine: slug,
-                openai_model: model.to_string(),
-                ..base.clone()
-            }
-        }
-    };
-    let weights = if slug.is_cloud() {
+    let options = row.options(base);
+    let weights = if row.slug.is_cloud() {
         weights::HOSTED
     } else {
-        weights::of(model)
+        weights::of(&row.model)
     };
-    let (outcome, checks) = measure(slug, &options, sentences, spend);
+    let (outcome, checks) = measure(row.slug, &options, sentences, spend);
     (
         ModelRow {
-            model: model.to_string(),
-            engine: slug.as_str().to_string(),
+            model: row.model.clone(),
+            engine: row.slug.as_str().to_string(),
+            thinking: row.thinking,
             weights,
             outcome,
         },
@@ -586,7 +672,8 @@ fn measure(
     let before = memory::peak_resident_bytes();
     let mut recorded = Vec::with_capacity(sentences.len());
     let model = row_model(slug, options);
-    let label = row_label(slug, &model);
+    let thinking = row_thinking(slug, options);
+    let label = row_label(slug, &model, thinking);
 
     for (index, sentence) in sentences.iter().enumerate() {
         // The cap and the reason another row ended are read together, so a row
@@ -640,6 +727,7 @@ fn measure(
         checks.push(RecordedCheck {
             engine: slug.as_str().to_string(),
             model: model.clone(),
+            thinking,
             id: sentence.id.clone(),
             native: sentence.native.clone(),
             text: sentence.text.clone(),
@@ -721,12 +809,40 @@ fn seconds(elapsed: Duration) -> String {
 }
 
 /// The name one row carries on stderr: the engine, plus its model when the
-/// engine takes one.
-fn row_label(slug: EngineSlug, model: &str) -> String {
-    if model == slug.as_str() {
-        return model.to_string();
+/// engine takes one, plus its mode when the engine has one.
+///
+/// `--thinking both` runs one model twice, so a progress line that named the
+/// model alone would not say which of the two rows it belongs to.
+fn row_label(slug: EngineSlug, model: &str, thinking: Option<bool>) -> String {
+    let mut label = if model == slug.as_str() {
+        model.to_string()
+    } else {
+        format!("{} {model}", slug.as_str())
+    };
+    if let Some(on) = thinking {
+        label.push_str(&format!(" (thinking {})", mode_word(on)));
     }
-    format!("{} {model}", slug.as_str())
+    label
+}
+
+/// How a thinking mode is written, everywhere a run names one.
+pub fn mode_word(on: bool) -> &'static str {
+    match on {
+        true => "on",
+        false => "off",
+    }
+}
+
+/// The thinking mode one row's record entry and label carry.
+///
+/// Only the local LLM engine has one. `harper` and `languagetool` never read
+/// the Setting, so recording a mode for them would drop their answers out of
+/// the judge's sample on a `--thinking off` run.
+fn row_thinking(slug: EngineSlug, options: &CheckOptions) -> Option<bool> {
+    match slug {
+        EngineSlug::Openai => Some(options.local_thinking),
+        _ => None,
+    }
 }
 
 /// The name the record file carries for one row.
@@ -770,7 +886,8 @@ fn record(path: &Path, checks: &[RecordedCheck]) -> Result<(), String> {
         .map_err(|error| format!("--record: {} cannot be written: {error}", path.display()))
 }
 
-/// One entry per engine, model, and item, the promise of evals section 4.3.
+/// One entry per engine, model, thinking mode, and item, the promise of evals
+/// section 4.3.
 ///
 /// The Engines `openai` row runs the model the Settings name, so a `--model`
 /// row that names that model is the same fixture run twice. A repeated key
@@ -780,11 +897,12 @@ fn record(path: &Path, checks: &[RecordedCheck]) -> Result<(), String> {
 /// must never leave the record empty.
 fn one_per_item(checks: &[RecordedCheck]) -> Vec<&RecordedCheck> {
     let mut kept: Vec<&RecordedCheck> = Vec::with_capacity(checks.len());
-    let mut place: HashMap<(&str, &str, &str), usize> = HashMap::new();
+    let mut place: HashMap<(&str, &str, Option<bool>, &str), usize> = HashMap::new();
     for check in checks {
         let key = (
             check.engine.as_str(),
             check.model.as_str(),
+            check.thinking,
             check.id.as_str(),
         );
         match place.get(&key) {
@@ -847,7 +965,25 @@ mod tests {
             max_cost: None,
             record: None,
             judgements: None,
+            thinking: BenchThinking::On,
         }
+    }
+
+    /// One planned row, the way the tests name them.
+    fn row(slug: EngineSlug, model: &str, thinking: Option<bool>) -> Row {
+        Row {
+            slug,
+            model: model.to_string(),
+            thinking,
+        }
+    }
+
+    fn local(model: &str) -> Row {
+        row(EngineSlug::Openai, model, Some(true))
+    }
+
+    fn cloud_row(model: &str) -> Row {
+        row(EngineSlug::Openrouter, model, None)
     }
 
     /// The record one earlier run left in the directory.
@@ -857,6 +993,7 @@ mod tests {
         RecordedCheck {
             engine: "openrouter".to_string(),
             model: "deepseek/deepseek-v4-flash-0731".to_string(),
+            thinking: None,
             id: id.to_string(),
             native: "zh".to_string(),
             text: "She has twenty years.".to_string(),
@@ -888,7 +1025,7 @@ mod tests {
             Plan::of(&args(None, &["qwen2.5-7b-instruct"]))
                 .unwrap()
                 .rows,
-            [(EngineSlug::Openai, "qwen2.5-7b-instruct".to_string())]
+            [local("qwen2.5-7b-instruct")]
         );
     }
 
@@ -922,11 +1059,8 @@ mod tests {
         assert_eq!(
             plan.rows,
             [
-                (EngineSlug::Openai, "gemma-4-e4b-it".to_string()),
-                (
-                    EngineSlug::Openrouter,
-                    "deepseek/deepseek-v4-flash-0731".to_string()
-                ),
+                local("gemma-4-e4b-it"),
+                cloud_row("deepseek/deepseek-v4-flash-0731"),
             ]
         );
 
@@ -952,10 +1086,7 @@ mod tests {
         .expect("a capped cloud run");
         assert_eq!(
             both_flags.rows,
-            [(
-                EngineSlug::Openrouter,
-                "deepseek/deepseek-v4-flash-0731".to_string()
-            )]
+            [cloud_row("deepseek/deepseek-v4-flash-0731")]
         );
 
         let repeated = Plan::of(&cloud(
@@ -978,11 +1109,8 @@ mod tests {
         assert_eq!(
             mixed.rows,
             [
-                (EngineSlug::Openai, "gemma-4-e4b-it".to_string()),
-                (
-                    EngineSlug::Openrouter,
-                    "google/gemini-3.7-flash".to_string()
-                ),
+                local("gemma-4-e4b-it"),
+                cloud_row("google/gemini-3.7-flash"),
             ],
             "local rows still come before cloud rows"
         );
@@ -1015,19 +1143,29 @@ mod tests {
         })
         .expect("a capped cloud run");
 
-        assert_eq!(plan.rows[0].0, EngineSlug::Openrouter);
+        assert_eq!(plan.rows[0].slug, EngineSlug::Openrouter);
     }
 
     #[test]
     fn the_command_line_repeats_every_flag_so_the_file_can_be_reproduced() {
-        assert_eq!(command_line(&args(None, &[])), "grammachy bench");
+        assert_eq!(
+            command_line(&args(None, &[])),
+            "grammachy bench --thinking on"
+        );
         assert_eq!(
             command_line(&args(Some(EngineSlug::Openai), &["qwen2.5-7b-instruct", "qwen2.5-3b-instruct"])),
-            "grammachy bench --engine openai --model qwen2.5-7b-instruct --model qwen2.5-3b-instruct"
+            "grammachy bench --engine openai --model qwen2.5-7b-instruct --model qwen2.5-3b-instruct --thinking on"
         );
         assert_eq!(
             command_line(&cloud(&["gemma-4-e4b-it"], &["google/gemini-3.7-flash"], Some(10.0))),
-            "grammachy bench --engine openai --model gemma-4-e4b-it --cloud-model google/gemini-3.7-flash --max-cost 10"
+            "grammachy bench --engine openai --model gemma-4-e4b-it --cloud-model google/gemini-3.7-flash --max-cost 10 --thinking on"
+        );
+        assert_eq!(
+            command_line(&BenchArgs {
+                thinking: BenchThinking::Both,
+                ..args(None, &["gemma-4-e4b-it"])
+            }),
+            "grammachy bench --engine openai --model gemma-4-e4b-it --thinking both"
         );
     }
 
@@ -1167,9 +1305,144 @@ mod tests {
             ..StoredSettings::default()
         };
 
-        let options = base_options(&stored);
+        let options = base_options(&stored, BenchThinking::On);
 
         assert_eq!(options.openai_base_url, "http://127.0.0.1:9999");
         assert_eq!(options.engine, CheckOptions::default().engine);
+    }
+
+    /// Evals spec section 4.1: `both` prints one local model twice, and the
+    /// two modes stay adjacent so they share one llama.cpp server start.
+    #[test]
+    fn thinking_both_runs_every_local_row_twice_and_leaves_cloud_rows_alone() {
+        let plan = Plan::of(&BenchArgs {
+            thinking: BenchThinking::Both,
+            ..cloud(
+                &["gemma-4-e4b-it", "qwen3.5-4b"],
+                &["google/gemini-3.7-flash"],
+                Some(1.0),
+            )
+        })
+        .expect("a capped cloud run");
+
+        assert_eq!(
+            plan.rows,
+            [
+                row(EngineSlug::Openai, "gemma-4-e4b-it", Some(true)),
+                row(EngineSlug::Openai, "gemma-4-e4b-it", Some(false)),
+                row(EngineSlug::Openai, "qwen3.5-4b", Some(true)),
+                row(EngineSlug::Openai, "qwen3.5-4b", Some(false)),
+                cloud_row("google/gemini-3.7-flash"),
+            ]
+        );
+    }
+
+    #[test]
+    fn thinking_off_runs_every_local_row_once_in_that_mode() {
+        let plan = Plan::of(&BenchArgs {
+            thinking: BenchThinking::Off,
+            ..args(None, &["gemma-4-e4b-it"])
+        })
+        .expect("a local run");
+
+        assert_eq!(
+            plan.rows,
+            [row(EngineSlug::Openai, "gemma-4-e4b-it", Some(false))]
+        );
+    }
+
+    /// The flag decides the request, so the file a run prints is the output of
+    /// its own Command line rather than of a Setting the reader cannot see.
+    #[test]
+    fn the_flag_and_not_the_stored_setting_decides_what_a_row_thinks() {
+        let stored = StoredSettings {
+            local_thinking: Some(false),
+            ..StoredSettings::default()
+        };
+        let base = base_options(&stored, BenchThinking::Both);
+
+        assert!(
+            base.local_thinking,
+            "the Engines openai row runs in the product default under --thinking both"
+        );
+        assert!(local("gemma-4-e4b-it").options(&base).local_thinking);
+        assert!(
+            !row(EngineSlug::Openai, "gemma-4-e4b-it", Some(false))
+                .options(&base)
+                .local_thinking
+        );
+    }
+
+    /// Evals spec section 4.4: `judge.py` grades the product default alone, so
+    /// the Rust half must not offer it a thinking-off answer.
+    #[test]
+    fn a_thinking_off_check_is_never_a_judged_hit() {
+        let mut check = recorded_check("zh-01");
+        check.engine = "openai".to_string();
+        check.model = "gemma-4-e4b-it".to_string();
+        check.edits = vec![fixture::Edit {
+            start: 4,
+            end: 7,
+            text: "has".to_string(),
+            fix: "is".to_string(),
+            kind: String::new(),
+        }];
+        check.issues = vec![Issue {
+            start: 4,
+            end: 7,
+            original: "has".to_string(),
+            fix: "is".to_string(),
+            reason: "Be for age.".to_string(),
+            category: crate::envelope::Category::Grammar,
+            rule_id: None,
+        }];
+
+        check.thinking = Some(true);
+        assert!(check.hit().is_some(), "the product default is judged");
+
+        check.thinking = Some(false);
+        assert!(check.non_exact_hit(), "the answer is still a non-exact hit");
+        assert!(check.hit().is_none(), "but it is out of the judge's sample");
+    }
+
+    /// A record entry per mode, so `--thinking both` never folds two rows onto
+    /// one key (evals spec section 4.3).
+    #[test]
+    fn the_record_keeps_one_entry_per_thinking_mode() {
+        let mut on = recorded_check("zh-01");
+        on.engine = "openai".to_string();
+        on.model = "gemma-4-e4b-it".to_string();
+        on.thinking = Some(true);
+        let mut off = on.clone();
+        off.thinking = Some(false);
+
+        let both = [on, off];
+        let kept = one_per_item(&both);
+
+        assert_eq!(kept.len(), 2);
+        assert_eq!(kept[0].thinking, Some(true));
+        assert_eq!(kept[1].thinking, Some(false));
+    }
+
+    #[test]
+    fn only_the_local_llm_engine_records_a_thinking_mode() {
+        let options = CheckOptions {
+            local_thinking: false,
+            ..CheckOptions::default()
+        };
+
+        assert_eq!(row_thinking(EngineSlug::Openai, &options), Some(false));
+        assert_eq!(row_thinking(EngineSlug::Harper, &options), None);
+        assert_eq!(row_thinking(EngineSlug::Languagetool, &options), None);
+        assert_eq!(row_thinking(EngineSlug::Openrouter, &options), None);
+    }
+
+    #[test]
+    fn a_progress_line_names_the_mode_of_the_row_it_belongs_to() {
+        assert_eq!(
+            row_label(EngineSlug::Openai, "gemma-4-e4b-it", Some(true)),
+            "openai gemma-4-e4b-it (thinking on)"
+        );
+        assert_eq!(row_label(EngineSlug::Harper, "harper", None), "harper");
     }
 }

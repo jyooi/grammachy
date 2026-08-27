@@ -85,11 +85,24 @@ pub fn labels() -> Judgements {
     parse(LABELS).expect("the compiled hand labels are a judgements file")
 }
 
+/// The Models row one hit belongs to.
+///
+/// The thinking mode is part of it, because `--thinking both` prints one model
+/// twice and the two rows must not share a Useful fix count. A cloud row
+/// carries `None`: the local thinking key is a llama.cpp chat-template
+/// argument and never reaches a provider (evals spec section 7).
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct RowKey {
+    pub engine: String,
+    pub model: String,
+    pub thinking: Option<bool>,
+}
+
 /// One non-exact hit of a run, folded onto its judgement key.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Hit {
-    /// The engine and model whose row produced it, the key of the table row.
-    pub row: (String, String),
+    /// The row that produced it, the key of the table row.
+    pub row: RowKey,
     pub id: String,
     /// The sentence the writer gets after Accept.
     pub result: String,
@@ -132,7 +145,7 @@ impl RowTally {
 #[derive(Debug, Clone, Default)]
 pub struct Assessment {
     /// The Useful fix count of every row that produced a non-exact hit.
-    rows: BTreeMap<(String, String), RowTally>,
+    rows: BTreeMap<RowKey, RowTally>,
     /// Folded non-exact hits of the run that a hand label also covers.
     pub labelled: usize,
     /// Labelled hits where the judge and the hand label say the same thing.
@@ -186,10 +199,8 @@ impl Assessment {
         assessment
     }
 
-    pub fn row(&self, engine: &str, model: &str) -> Option<RowTally> {
-        self.rows
-            .get(&(engine.to_string(), model.to_string()))
-            .copied()
+    pub fn row(&self, key: &RowKey) -> Option<RowTally> {
+        self.rows.get(key).copied()
     }
 
     /// How often the judge and the hand labels said the same thing, in percent.
@@ -259,8 +270,22 @@ mod tests {
     use super::*;
 
     fn hit(engine: &str, model: &str, id: &str, result: &str) -> Hit {
+        thinking_hit(engine, model, Some(true), id, result)
+    }
+
+    fn thinking_hit(
+        engine: &str,
+        model: &str,
+        thinking: Option<bool>,
+        id: &str,
+        result: &str,
+    ) -> Hit {
         Hit {
-            row: (engine.to_string(), model.to_string()),
+            row: RowKey {
+                engine: engine.to_string(),
+                model: model.to_string(),
+                thinking,
+            },
             id: id.to_string(),
             result: result.to_string(),
         }
@@ -291,7 +316,7 @@ mod tests {
         let judgements = file(&[("zh-03", "kept one", true), ("zh-04", "kept two", false)]);
 
         let row = Assessment::of(&hits, &judgements, &Judgements::new())
-            .row("openai", "gemma")
+            .row(&hit("openai", "gemma", "zh-03", "kept one").row)
             .expect("the row produced hits");
 
         assert_eq!(
@@ -319,11 +344,27 @@ mod tests {
         assert_eq!(RowTally::default().cell(), "no non-exact hit");
     }
 
+    /// `--thinking both` prints one model twice, so the two rows must never
+    /// share a Useful fix count.
+    #[test]
+    fn the_two_thinking_modes_of_one_model_are_two_rows() {
+        let hits = [
+            thinking_hit("openai", "gemma", Some(true), "zh-03", "kept one"),
+            thinking_hit("openai", "gemma", Some(false), "zh-03", "kept two"),
+        ];
+        let judgements = file(&[("zh-03", "kept one", true)]);
+
+        let assessment = Assessment::of(&hits, &judgements, &Judgements::new());
+
+        assert_eq!(assessment.row(&hits[0].row).unwrap().judged, 1);
+        assert_eq!(assessment.row(&hits[1].row).unwrap().judged, 0);
+    }
+
     #[test]
     fn agreement_counts_one_folded_hit_once_however_many_rows_produced_it() {
         let hits = [
             hit("openai", "gemma", "zh-03", "same answer"),
-            hit("openrouter", "deepseek", "zh-03", "same answer"),
+            thinking_hit("openrouter", "deepseek", None, "zh-03", "same answer"),
         ];
         let judgements = file(&[("zh-03", "same answer", true)]);
         let labels = file(&[("zh-03", "same answer", true)]);
@@ -333,8 +374,8 @@ mod tests {
         assert_eq!((assessment.hits, assessment.judged), (1, 1));
         assert_eq!((assessment.agreed, assessment.labelled), (1, 1));
         // Both rows still carry the hit, because the column is a row column.
-        assert_eq!(assessment.row("openai", "gemma").unwrap().hits, 1);
-        assert_eq!(assessment.row("openrouter", "deepseek").unwrap().hits, 1);
+        assert_eq!(assessment.row(&hits[0].row).unwrap().hits, 1);
+        assert_eq!(assessment.row(&hits[1].row).unwrap().hits, 1);
     }
 
     /// A run of `labels` hand labels where the first `agree` of them agree.
