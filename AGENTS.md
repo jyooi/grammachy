@@ -141,10 +141,11 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   Every metric of that spec has a unit test in `metrics.rs` that runs from recorded answers, so no test needs a live model.
   The Chunk fixture of evals spec section 1 shares that shape too: `cli/tests/fixtures/chunks/<native>.json`, one Draft per native language, loaded by `cli/src/bench/chunks.rs`.
   Each Draft is a few paragraphs at the `openai` Check size limit.
-  Its unit tests hold it under that limit, in the item shape, and reconstructing its own `expected_text`.
+  The fixture unit tests hold every Draft under that limit and in the item shape, and prove that its edits rebuild its `expected_text`.
   The Drafts are the project's own writing, so they are committed while the eval set is not.
   Every local Models row runs the sentences and then the Drafts, and `Pass` is what tells the two apart on stderr.
-  A Chunk pass reuses the server the sentence pass of that row already started, and a skipped sentence pass skips the Drafts with the same reason.
+  A Chunk pass reuses the server the sentence pass of that row already started.
+  A skipped sentence pass skips the Drafts with the same reason.
   The Chunk Checks never reach `--record`, because that file is the input of a judge that grades one sentence against one reference correction.
   The Chunk table is a gate, not a ranking: wall time, validity, and recall only.
   `cli/tests/bench.rs` must seam every server the run can reach, LanguageTool and the OpenAI base URL both.
