@@ -1368,7 +1368,8 @@ fn a_model_named_twice_runs_the_fixture_once() {
 
 /// The Engines `openai` row runs the model the Settings name, so a `--model`
 /// row that names the same model is the same Check run twice. The record file
-/// promises one entry per engine, model, and item, so only one row writes it.
+/// promises one entry per engine, model, thinking mode, and item, so only one
+/// row writes it.
 #[test]
 fn a_model_row_that_repeats_the_engines_row_records_its_items_once() {
     let settings = settings_file(
