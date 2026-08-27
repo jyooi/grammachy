@@ -31,10 +31,19 @@ struct Run {
 /// `usage` is what a cloud provider reports beside the answer. A local server
 /// reports none, so `None` is the body the llama.cpp rows are answered with.
 fn answer_body(usage: Option<Value>) -> String {
+    answer_with("three book", "three books", "Plural after a number.", usage)
+}
+
+/// A chat completion that quotes one span of the fixture and rewrites it.
+///
+/// A quote no sentence holds is dropped by `issues::normalise`, so one answer
+/// reaches exactly the sentences that hold the quote and leaves the rest with
+/// a valid Check and no Issue.
+fn answer_with(original: &str, fix: &str, reason: &str, usage: Option<Value>) -> String {
     let content = json!([{
-        "original": "three book",
-        "fix": "three books",
-        "reason": "Plural after a number.",
+        "original": original,
+        "fix": fix,
+        "reason": reason,
         "category": "grammar",
     }])
     .to_string();
@@ -1392,5 +1401,155 @@ fn a_rate_limited_cloud_check_is_retried_once_and_says_so() {
     assert!(
         quality.contains("| 40 of 40 (100.0%) |"),
         "no Check was lost to the rate limit: {quality}"
+    );
+}
+
+/// The whole judgements route of the evals spec section 4.4, end to end.
+///
+/// The stub answers the word-order mistake of `zh-06` with the wrong order, so
+/// the row earns one non-exact hit whose result text is a committed hand label.
+/// A judgements file that agrees with that label clears the 80% gate, so the
+/// Useful fix column prints and the file says it counts in the ranking.
+#[test]
+fn judgements_print_the_useful_fix_column_and_the_gate_the_run_cleared() {
+    let settings = settings_file("judgements.json", r#""engine": "harper""#);
+    let stub = format!(
+        "http://{}",
+        stub_server(answer_with(
+            "very like",
+            "like very",
+            "Word order.",
+            Some(cloud_usage(Some(0.0001))),
+        ))
+    );
+    // The hand label of `zh-06`: `I like very this song.` is not useful.
+    let judgements = scratch_dir().join("judgements-agree.json");
+    std::fs::write(
+        &judgements,
+        r#"{ "zh-06": { "I like very this song.": { "useful": false, "reason": "The adverb is still misplaced." } } }"#,
+    )
+    .expect("the judgements file is written");
+
+    let run = bench_cloud(
+        &settings,
+        &[
+            "--engine",
+            "openrouter",
+            "--model",
+            "deepseek/deepseek-v4-flash-0731",
+            "--max-cost",
+            "10",
+            "--judgements",
+            judgements.to_str().expect("the scratch path is UTF-8"),
+        ],
+        &stub,
+    );
+
+    assert_eq!(run.status, 0, "{}", run.stderr);
+    assert!(
+        run.stdout
+            .contains("| F0.5 | Exact fix | Useful fix | False positives |"),
+        "{}",
+        run.stdout
+    );
+    let quality = row(&run.stdout, "deepseek/deepseek-v4-flash-0731");
+    assert!(
+        quality.contains("| 0 of 1 (0.0%) |"),
+        "one non-exact hit, judged not useful: {quality}"
+    );
+    assert!(
+        run.stdout.contains(
+            "The judge agreed with the hand labels on 1 of 1 (100.0%), at or above the 80% gate, so the Useful fix column counts in the ranking."
+        ),
+        "{}",
+        run.stdout
+    );
+    assert!(
+        run.stdout.contains("Ranking: exact fix rate plus the non-exact hits the judge called useful, over the interference sentences,"),
+        "{}",
+        run.stdout
+    );
+}
+
+/// A judgements file the judge and the labels do not meet on cannot be ranked
+/// on, and the file has to say that rather than quietly ranking anyway.
+#[test]
+fn a_run_no_hand_label_covers_prints_the_column_but_excludes_it_from_the_ranking() {
+    let settings = settings_file("judgements-unlabelled.json", r#""engine": "harper""#);
+    let stub = format!(
+        "http://{}",
+        stub_server(answer_with(
+            "three book",
+            "three bookes",
+            "Plural after a number.",
+            Some(cloud_usage(Some(0.0001))),
+        ))
+    );
+    // `zh-02` with this result text carries no hand label, so the gate cannot
+    // be measured on this run.
+    let judgements = scratch_dir().join("judgements-unlabelled-file.json");
+    std::fs::write(
+        &judgements,
+        r#"{ "zh-02": { "She bought three bookes from the store.": { "useful": true, "reason": "Closer to the plural." } } }"#,
+    )
+    .expect("the judgements file is written");
+
+    let run = bench_cloud(
+        &settings,
+        &[
+            "--engine",
+            "openrouter",
+            "--model",
+            "deepseek/deepseek-v4-flash-0731",
+            "--max-cost",
+            "10",
+            "--judgements",
+            judgements.to_str().expect("the scratch path is UTF-8"),
+        ],
+        &stub,
+    );
+
+    assert_eq!(run.status, 0, "{}", run.stderr);
+    let quality = row(&run.stdout, "deepseek/deepseek-v4-flash-0731");
+    assert!(quality.contains("| 1 of 1 (100.0%) |"), "{quality}");
+    assert!(
+        run.stdout.contains(
+            "so the 80% gate could not be measured and the Useful fix column is excluded from the ranking."
+        ),
+        "{}",
+        run.stdout
+    );
+    assert!(
+        run.stdout.contains("Ranking: exact fix rate, then F0.5"),
+        "{}",
+        run.stdout
+    );
+}
+
+/// A judgements file the run cannot read ends it before the first row, the
+/// same promise `--record` makes: a run never pays for a report it discards.
+#[test]
+fn a_judgements_file_that_cannot_be_read_is_refused_before_any_row_runs() {
+    let settings = settings_file("judgements-missing.json", r#""engine": "harper""#);
+    let missing = scratch_dir().join("no-such-judgements.json");
+    let _ = std::fs::remove_file(&missing);
+
+    let run = bench(
+        &settings,
+        &[
+            "--judgements",
+            missing.to_str().expect("the scratch path is UTF-8"),
+        ],
+    );
+
+    assert_eq!(run.status, 1, "{}", run.stdout);
+    let envelope: Value = serde_json::from_str(&run.stdout).expect("an error envelope");
+    assert_eq!(envelope["error"]["code"], "bad_arguments", "{envelope}");
+    assert!(
+        envelope["error"]["message"]
+            .as_str()
+            .expect("a message")
+            .contains("--judgements"),
+        "{envelope}"
     );
 }

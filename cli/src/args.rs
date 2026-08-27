@@ -98,6 +98,12 @@ pub struct BenchArgs {
     /// Write every Check's answer to <DIR>/checks.json, the input of the judge.
     #[arg(long = "record", value_name = "DIR")]
     pub record: Option<std::path::PathBuf>,
+
+    /// Add the Useful fix column from a judgements file, the output of
+    /// `cli/bench/judge.py`. The column counts in the ranking only when the
+    /// judge agrees with the committed hand labels on at least 80% of them.
+    #[arg(long = "judgements", value_name = "FILE")]
+    pub judgements: Option<std::path::PathBuf>,
 }
 
 #[derive(Debug, Parser)]

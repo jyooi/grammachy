@@ -4,3 +4,4 @@ cli/target/
 bin/grammachy
 checks.json
 checks.json.pending
+judgements.json

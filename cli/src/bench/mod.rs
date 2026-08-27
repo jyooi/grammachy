@@ -46,6 +46,7 @@
 //! prints what the run actually paid rather than the cap.
 
 pub mod fixture;
+pub mod judge;
 pub mod machine;
 pub mod memory;
 pub mod metrics;
@@ -159,6 +160,16 @@ pub fn run(args: &BenchArgs, stored: &StoredSettings) -> Result<Run, String> {
         .as_ref()
         .and_then(|path| record(path, &checks).err());
 
+    // The judgement is read from the record of this run rather than from the
+    // rows, so one folded answer is graded once however many rows wrote it.
+    let judge = plan.judgements.as_ref().map(|judgements| {
+        let hits: Vec<judge::Hit> = one_per_item(&checks)
+            .iter()
+            .filter_map(|check| check.hit())
+            .collect();
+        judge::Assessment::of(&hits, judgements, &judge::labels())
+    });
+
     let (interference, clean) = counts(&sentences);
     let report = Report {
         version: env!("CARGO_PKG_VERSION").to_string(),
@@ -172,6 +183,7 @@ pub fn run(args: &BenchArgs, stored: &StoredSettings) -> Result<Run, String> {
         cloud_spend_usd: spend.spent_usd(),
         engines,
         models,
+        judge,
     }
     .render();
 
@@ -187,6 +199,9 @@ struct Plan {
     rows: Vec<(EngineSlug, String)>,
     /// Where `record` writes, in a directory already proved writable.
     record: Option<PathBuf>,
+    /// The judgements `--judgements` named, read before the first row so a
+    /// file the run cannot read never costs it a fixture pass.
+    judgements: Option<judge::Judgements>,
 }
 
 impl Plan {
@@ -257,8 +272,16 @@ impl Plan {
             Some(directory) => Some(open_record(directory)?),
             None => None,
         };
+        let judgements = match &args.judgements {
+            Some(path) => Some(judge::read(path)?),
+            None => None,
+        };
 
-        Ok(Plan { rows, record })
+        Ok(Plan {
+            rows,
+            record,
+            judgements,
+        })
     }
 }
 
@@ -356,11 +379,22 @@ fn unpriced(id: &str) -> String {
 }
 
 /// One Check as `--record` writes it.
+///
+/// The item travels with the answer, because the record file is the whole
+/// input of the judge script (spec section 4.4) and the only place eval-set
+/// text may land (section 4.3). `result_text` is the sentence the writer gets
+/// after Accept: it is what the judge grades and the second half of the
+/// judgement key, so it is written rather than left to be derived twice.
 #[derive(Debug, Clone, Serialize)]
 struct RecordedCheck {
     engine: String,
     model: String,
     id: String,
+    native: String,
+    text: String,
+    /// The item's own edits, the reference correction the judge is shown.
+    edits: Vec<fixture::Edit>,
+    expected_text: String,
     valid: bool,
     latency_ms: u64,
     cost: Option<f64>,
@@ -369,6 +403,37 @@ struct RecordedCheck {
     prompt_ms: Option<f64>,
     generation_ms: Option<f64>,
     issues: Vec<Issue>,
+    /// The text after every Fix, or `None` when a span does not index the text.
+    result_text: Option<String>,
+}
+
+impl RecordedCheck {
+    /// Whether this Check is a non-exact hit, the sample of spec section 4.4.
+    ///
+    /// The item carries a mistake, the Check answered, at least one Issue
+    /// touched a span the item expects, and applying every Fix does not
+    /// reproduce the expected sentence. An item nothing touched is a plain
+    /// miss: the writer is offered nothing to accept, so there is nothing to
+    /// grade.
+    fn non_exact_hit(&self) -> bool {
+        let spans: Vec<fixture::Span> = self.edits.iter().map(fixture::Edit::span).collect();
+        self.valid
+            && !spans.is_empty()
+            && metrics::is_caught(&self.issues, &spans)
+            && !metrics::is_exact(&self.text, &self.issues, &self.expected_text)
+    }
+
+    /// This Check as one folded hit of the run, when it is one.
+    fn hit(&self) -> Option<judge::Hit> {
+        if !self.non_exact_hit() {
+            return None;
+        }
+        Some(judge::Hit {
+            row: (self.engine.clone(), self.model.clone()),
+            id: self.id.clone(),
+            result: self.result_text.clone()?,
+        })
+    }
 }
 
 /// The Settings every row starts from, before the row sets its own engine.
@@ -576,6 +641,10 @@ fn measure(
             engine: slug.as_str().to_string(),
             model: model.clone(),
             id: sentence.id.clone(),
+            native: sentence.native.clone(),
+            text: sentence.text.clone(),
+            edits: sentence.edits.clone(),
+            expected_text: sentence.expected_text.clone(),
             valid,
             latency_ms,
             cost,
@@ -584,6 +653,7 @@ fn measure(
             prompt_ms: usage.and_then(|usage| usage.prompt_ms),
             generation_ms: usage.and_then(|usage| usage.generation_ms),
             issues: issues.clone(),
+            result_text: metrics::corrected(&sentence.text, &issues),
         });
 
         if slug.is_cloud() {
@@ -776,6 +846,7 @@ mod tests {
             cloud_models: Vec::new(),
             max_cost: None,
             record: None,
+            judgements: None,
         }
     }
 
@@ -787,6 +858,10 @@ mod tests {
             engine: "openrouter".to_string(),
             model: "deepseek/deepseek-v4-flash-0731".to_string(),
             id: id.to_string(),
+            native: "zh".to_string(),
+            text: "She has twenty years.".to_string(),
+            edits: Vec::new(),
+            expected_text: "She is twenty years old.".to_string(),
             valid: true,
             latency_ms: 120,
             cost: Some(0.0001),
@@ -795,6 +870,7 @@ mod tests {
             prompt_ms: Some(12.5),
             generation_ms: Some(240.0),
             issues: Vec::new(),
+            result_text: Some("She has twenty years.".to_string()),
         }
     }
 

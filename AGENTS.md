@@ -99,10 +99,10 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   A cloud row needs `--max-cost <usd>`, the cap on the whole run, and the flag is refused when no cloud row runs.
   `Spend` in `cli/src/bench/mod.rs` owns both ways a cloud row ends and what the report prints as the run's spend, because a row the cap ended carries no tally.
   A cloud answer with no `usage.cost` ends its row and every later cloud row, because a run that cannot measure its spend cannot hold the cap.
-  `--record <dir>` writes `checks.json`, one entry per engine, model, and item, which the judge of a later ticket reads.
+  `--record <dir>` writes `checks.json`, one entry per engine, model, and item, and it carries the item beside the answer because it is the whole input of the judge.
   `Plan::of` proves the directory holds that file before the first row, so a directory the run cannot write never discards a report it already paid for.
   The run writes `checks.json.pending` and renames it, so the record of an earlier run stays whole until this run has one of its own.
-  That file is gitignored, because it is the only place model output text lands.
+  That file is gitignored, and so is `judgements.json` beside it, because they are the only place model output text and eval-set text land.
   Every sentence prints one stderr progress line naming its row, its item, and both its times, because a silent forty-minute command is unacceptable.
   Cloud rows each run their own thread beside each other and beside the local rows.
   Local rows stay on the main thread, because they share one llama.cpp server and one in-process Harper.
@@ -121,6 +121,17 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   Every metric of that spec has a unit test in `metrics.rs` that runs from recorded answers, so no test needs a live model.
   `cli/tests/bench.rs` must seam every server the run can reach, LanguageTool and the OpenAI base URL both.
   The OpenAI default is a fixed loopback port, so a machine that already runs llama.cpp there answers a case meant to find nothing.
+- The judge of `docs/spec/evals.md` section 4.4 is two halves that must agree on one rule.
+  `cli/bench/judge.py` grades a recorded run, and `cli/src/bench/judge.rs` reads the answer into the Useful fix column.
+  Both select the same sample: a valid Check on an item with edits, where an Issue touches an expected span and the applied Fixes do not reproduce `expected_text`.
+  An item nothing touched is a plain miss and is never judged, because the writer is offered nothing to accept.
+  Both files nest the key, item id then result text, which needs no delimiter and folds two models that answered alike onto one judgement.
+  `cli/tests/fixtures/judge-labels.json` holds the 17 committed hand labels of HUF-210 and is compiled in.
+  Every label must name a fixture item, because a label on a fetched eval-set item would commit FCE text against section 2.1.
+  The gate is 80% agreement on the labels a run matched.
+  Below the gate, or with no label matched, the column still prints and the file says it does not rank.
+  `Report::rank_score` is the one place the ranking swaps to exact fix plus useful non-exact fixes.
+  No test may call Claude: `judge.py` is smoke-tested by hand, and the Rust side is tested from a recorded judgements file.
 - `doctor` reports the install state and the one-line engine diagnosis the `engine_unavailable` card shows.
   `docs/doctor.md` documents its envelope, exit code, and hardware tiers.
   `cli/src/doctor/facts.rs` is the only place that reads the machine, so the report is a pure function of recorded `Facts` and no test reads real hardware.
