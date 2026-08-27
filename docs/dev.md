@@ -725,9 +725,28 @@ It now says `cloudConsent': True`.
 
 15. Run a second Check.
     No card stands in front of it.
-16. Press SUPER + SHIFT + G, paste a few paragraphs into the Draft, and press Ctrl + Enter.
-    The card appears once, before the first Chunk, and never between two Chunks of the same run.
-17. Empty the Cloud model field and run a Check.
+
+### The card asks once for a whole Draft
+
+Two answers keep the card away: the stored `cloudConsent` and the session answer the overlay holds.
+The session answer outlives every summon, so this part needs both cleared.
+
+16. Open `~/.config/omarchy/shell.json` in an editor.
+    Find the `io.github.jyooi.grammachy` entry and delete its `cloudConsent` key.
+    Save the file.
+17. Restart the shell, which drops the session answer with the old overlay:
+
+```bash
+omarchy restart shell
+```
+
+18. Press SUPER + SHIFT + G, paste a few paragraphs into the Draft, and press Ctrl + Enter.
+    The card stands in front of the first Chunk.
+    Wait about half a minute before you answer.
+19. Press Continue.
+    The progress line walks every Chunk and the card never comes back between two Chunks of the same run.
+    The time on that line starts at the Continue, so the wait of step 18 is not in it.
+20. Empty the Cloud model field and run a Check.
     The `bad_arguments` card says the cloud model is not set, because that field has no built-in default.
 
 ## 17. Running the automated checks

@@ -250,6 +250,21 @@ fn cancel_sends_nothing_and_keeps_the_engine() {
         body.contains("root.clearCloudConsent()"),
         "Cancel drops the text it was holding: {body}"
     );
+
+    // The notice names the Engine, and Cancel runs when the reader opens
+    // Settings, so the name is read where the card is drawn and never baked in.
+    assert!(
+        !body.contains("engineLabel"),
+        "Cancel bakes no Engine name into the notice: {body}"
+    );
+    assert!(
+        source.contains(
+            r#"readonly property string noticeBody: root.noticeNamesEngine
+    ? root.noticeBodyText + root.engineLabel(root.setting("engine")) + "."
+    : root.noticeBodyText"#
+        ),
+        "the drawn notice reads the Engine setting at draw time"
+    );
 }
 
 /// A phase that is not in the key map inherits the review keys, which would let
@@ -299,20 +314,45 @@ fn opening_settings_cancels_the_pending_consent() {
         settings < consent,
         "Settings hides the consent card, so Settings takes the keyboard first: {mode}"
     );
+}
 
-    // Neither card draws the consent over Settings, which is what makes the
-    // two rules above the whole of the answer.
-    for card in ["ui/QuickCard.qml", "ui/ComposeCard.qml"] {
-        let card_source = read(card);
-        assert!(
-            card_source.contains("readonly property bool consenting: root.showsCard")
-                || card_source.contains("readonly property bool consenting: root.phase"),
-            "{card} declares the consent state"
+/// Neither card draws the consent over the Settings view, which is what makes
+/// the cancel above the whole of the answer rather than half of it.
+///
+/// The wording and both buttons are three drawn parts, and every one of them
+/// has to hang off the flag the Settings view clears: `showsCheck` on the quick
+/// card and `showsCard` on the compose card. The gate may sit on `consenting`
+/// itself or on each `visible` line, and nowhere else.
+#[test]
+fn neither_card_draws_the_consent_over_the_settings_view() {
+    for (card, gate) in [
+        ("ui/QuickCard.qml", "root.showsCheck"),
+        ("ui/ComposeCard.qml", "root.showsCard"),
+    ] {
+        let source = read(card);
+        let declaration = source
+            .lines()
+            .find(|line| line.contains("property bool consenting:"))
+            .unwrap_or_else(|| panic!("{card} declares consenting"));
+        let gated_at_the_source = declaration.contains(gate);
+
+        let drawn: Vec<&str> = source
+            .lines()
+            .filter(|line| line.contains("visible:"))
+            .filter(|line| line.contains("root.consenting") && !line.contains("!root.consenting"))
+            .collect();
+        assert_eq!(
+            drawn.len(),
+            3,
+            "{card} draws the consent wording and both buttons: {drawn:?}"
         );
-        assert!(
-            !card_source.contains("visible: root.settingsOpen && root.consenting"),
-            "{card} never draws the consent over the Settings view"
-        );
+        for line in drawn {
+            assert!(
+                gated_at_the_source || line.contains(gate),
+                "{card} draws `{}` while the Settings view is up",
+                line.trim()
+            );
+        }
     }
 }
 

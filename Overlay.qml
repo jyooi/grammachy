@@ -76,8 +76,17 @@ Item {
   // Apply has run on the Corrected text as it stands.
   property bool applied: false
   property string noticeTitle: ""
-  property string noticeBody: ""
   property string noticeMeta: ""
+  // The body a notice was raised with. A notice that ends by naming the Engine
+  // keeps only the words before the name here, because the name is read at the
+  // moment the card is drawn: `cancelCloudCheck` runs when the reader opens
+  // Settings from the consent card, and they may pick another Engine before
+  // they read the notice behind it.
+  property string noticeBodyText: ""
+  property bool noticeNamesEngine: false
+  readonly property string noticeBody: root.noticeNamesEngine
+    ? root.noticeBodyText + root.engineLabel(root.setting("engine")) + "."
+    : root.noticeBodyText
   property bool settingsOpen: false
   property string engineMessage: ""
 
@@ -375,8 +384,16 @@ Item {
     root.phase = "notice"
     root.errorCard = null
     root.noticeTitle = title
-    root.noticeBody = body
+    root.noticeBodyText = body
+    root.noticeNamesEngine = false
     root.noticeMeta = meta === undefined ? "" : meta
+  }
+
+  // A notice whose last words are the Engine name. `body` ends where the name
+  // starts, and the binding above finishes the sentence from the setting.
+  function showEngineNotice(title, body, meta) {
+    root.showNotice(title, body, meta)
+    root.noticeNamesEngine = true
   }
 
   // Every summon starts from the same clean state: nothing of the last one is
@@ -842,9 +859,8 @@ Item {
     }
     // The quick popup has no card behind this one: the Selection was captured
     // for a Check that is not going to run.
-    root.showNotice("Nothing was sent",
-      "The check was cancelled, so no text left this machine. The engine is still "
-        + root.engineLabel(root.setting("engine")) + ".",
+    root.showEngineNotice("Nothing was sent",
+      "The check was cancelled, so no text left this machine. The engine is still ",
       "cancelled, nothing sent")
   }
 
