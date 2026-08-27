@@ -170,8 +170,9 @@ Measured on the 890M: gemma-4-E4B-it writes 25 tokens per second; thinking raise
 - The Check size limit belongs to the Engine: 2,000 UTF-16 units for `openai`, 5,000 for `languagetool`, `harper`, and `openrouter`.
   `grammachy chunk` packs to the selected engine's limit, and the Quick popup's too-long card fires at it.
 - One prompt for every engine: compact JSON, and a `reason` of at most six words.
-  On llama-server the request sends a raw `grammar` with no whitespace between tokens in place of the `json_schema` response format, so compactness is forced; cloud rows keep `json_schema` and the wording.
-  About 30 tokens per Issue against 56 before.
+  On llama-server with thinking off, the request sends a raw `grammar` with no whitespace between tokens in place of the `json_schema` response format, so compactness is forced.
+  A raw grammar bounds the whole generation, so thinking on keeps `json_schema` and the wording alone, and so do cloud rows.
+  About 30 tokens per Issue against 56 before, on the thinking-off route.
 - The Check timeout stays 90 s for the local engine, on every surface.
   Compose is no exception, and thinking is no exception.
   Every other engine keeps its own timeout from the v1 section 4 table, where `openrouter` is 30 s.

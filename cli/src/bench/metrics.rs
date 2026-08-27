@@ -790,6 +790,46 @@ mod tests {
         assert_eq!(none.throughput, Throughput::default());
     }
 
+    /// HUF-219 reads this number, so both sides of the ratio have to come from
+    /// the same Checks.
+    #[test]
+    fn output_tokens_per_issue_counts_only_the_checks_that_reported_tokens() {
+        let counted = |id: &str, issues: &[(usize, usize, &str)], tokens: u64| {
+            let mut sentence = recorded(id, BOOK, &[(17, 21, "books")], issues, 10);
+            sentence.usage = Some(Usage {
+                completion_tokens: Some(tokens),
+                ..Usage::default()
+            });
+            sentence
+        };
+
+        // A Check whose server reported no token count keeps its two Issues
+        // out of the denominator, so the ratio stays 60 over 2 rather than
+        // 60 over 4.
+        let mut silent = recorded(
+            "zh-02",
+            BOOK,
+            &[(17, 21, "books")],
+            &[(17, 21, "books"), (27, 30, "a")],
+            10,
+        );
+        silent.usage = None;
+        let tally = Tally::of(&[counted("zh-01", &[(17, 21, "books")], 40), silent]);
+        assert_eq!(tally.throughput.tokens_per_issue, Some(40.0));
+
+        // An invalid Check is out of the ratio on both sides.
+        let mut invalid = counted("zh-03", &[(17, 21, "books")], 1_000);
+        invalid.valid = false;
+        let tally = Tally::of(&[counted("zh-01", &[(17, 21, "books")], 40), invalid]);
+        assert_eq!(tally.throughput.tokens_per_issue, Some(40.0));
+
+        // Counted Checks that answered nothing divide by zero, so there is no
+        // number to print.
+        let tally = Tally::of(&[counted("zh-01", &[], 40), counted("zh-02", &[], 20)]);
+        assert_eq!(tally.throughput.tokens_per_issue, None);
+        assert_eq!(tally.throughput.output_tokens_p50, Some(20));
+    }
+
     #[test]
     fn an_empty_run_reports_zero_rather_than_dividing_by_zero() {
         let tally = Tally::of(&[]);

@@ -12,11 +12,14 @@
 //! Chunk from finishing inside the Check timeout. The same Issues cost about 30
 //! tokens compact. One prompt says this to every engine (HUF-219).
 //!
-//! Asking is not forcing, so the two engines take different routes to the same
-//! shape. llama-server is given [`GRAMMAR`], a raw GBNF that admits no
-//! whitespace between two tokens, so compactness is decided by the decoder. A
-//! cloud provider takes no grammar, so it keeps the `json_schema` response
-//! format and the wording alone.
+//! Asking is not forcing, so a request takes one of two routes to the same
+//! shape, and [`super::force_of`] is the one place that picks it. [`GRAMMAR`]
+//! is a raw GBNF that admits no whitespace between two tokens, so compactness
+//! is decided by the decoder rather than asked for. Only llama-server reads it,
+//! and it bounds the whole generation, so it leaves no room for a think. A
+//! Check with Local thinking on therefore keeps the `json_schema` response
+//! format, and so does every cloud provider, because none of them reads a
+//! grammar.
 //!
 //! Two things differ from the benchmark runner. The native language is named
 //! for every value but `none` (spec section 4), where the runner always had
@@ -34,9 +37,18 @@ use crate::args::{CheckOptions, NativeLanguage};
 /// Check is at most 5,000 UTF-16 units and a compact Issue costs about 30
 /// tokens, so the answer half is far past any honest answer and still bounds a
 /// model that will not stop.
+///
+/// This number, and nothing on the unit, is what bounds the grammar route. A
+/// probe measured it: gemma-4-E4B-it behind the current unit flags, a 1,991
+/// UTF-16 unit error-dense Draft, [`GRAMMAR`], and `enable_thinking` false
+/// answered `finish_reason` `stop` after 1,250 completion tokens, with 54
+/// well-formed Issues in `content` and an empty `reasoning_content`. So
+/// `--reasoning-budget 1024` bounds the think alone, and it never cuts a
+/// grammar-forced answer short.
 const MAX_TOKENS: u32 = 2_048;
 
-/// The decoding grammar llama-server is given in place of the response format.
+/// The decoding grammar llama-server is given in place of the response format,
+/// on the thinking-off route alone.
 ///
 /// It is the array of [`schema`] written as GBNF, with every whitespace rule of
 /// the stock `json.gbnf` removed. There is no rule that can emit a space or a
@@ -58,10 +70,11 @@ pub const GRAMMAR: &str = concat!(
 /// How a server is made to answer the shape of [`schema`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Force {
-    /// llama-server takes a raw GBNF, the one route that can forbid whitespace
-    /// between two tokens.
+    /// llama-server with Local thinking off takes a raw GBNF, the one route
+    /// that can forbid whitespace between two tokens.
     Grammar,
-    /// A provider that speaks the OpenAI response format and no grammar.
+    /// Local thinking on, or a cloud provider. Both need the whole generation
+    /// left free, so both take the OpenAI response format and no grammar.
     JsonSchema,
 }
 

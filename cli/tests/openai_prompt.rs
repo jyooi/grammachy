@@ -5,6 +5,7 @@
 //! things the spec fixes rather than the prose.
 
 use grammachy::args::{CheckOptions, NativeLanguage, TargetEnglish};
+use grammachy::engines::openai::force_of;
 use grammachy::engines::openai::prompt::{build, native_name, request_body, Force, GRAMMAR};
 
 fn options(native: NativeLanguage) -> CheckOptions {
@@ -125,6 +126,34 @@ fn the_prompt_caps_the_reason_and_asks_for_compact_json() {
         prompt.contains("no spaces and no newlines between tokens"),
         "{prompt}"
     );
+}
+
+/// The Local thinking Setting of spec section 4 picks the forcing route, so
+/// both Toggle positions stay live. A grammar bounds the whole generation, so
+/// thinking on has to keep the response format instead.
+#[test]
+fn the_thinking_setting_picks_the_forcing_route() {
+    let thinking_on = CheckOptions {
+        local_thinking: true,
+        ..options(NativeLanguage::Fr)
+    };
+    let thinking_off = CheckOptions {
+        local_thinking: false,
+        ..options(NativeLanguage::Fr)
+    };
+
+    let on = request_body(TEXT, &thinking_on, force_of(&thinking_on));
+    assert_eq!(on["response_format"]["type"], "json_schema");
+    assert!(on.get("grammar").is_none(), "{on}");
+    assert_eq!(on["chat_template_kwargs"]["enable_thinking"], true);
+
+    let off = request_body(TEXT, &thinking_off, force_of(&thinking_off));
+    assert_eq!(off["grammar"], serde_json::json!(GRAMMAR));
+    assert!(off.get("response_format").is_none(), "{off}");
+    assert_eq!(off["chat_template_kwargs"]["enable_thinking"], false);
+
+    // HUF-219: the wording is one prompt, whatever forces the shape.
+    assert_eq!(on["messages"], off["messages"]);
 }
 
 #[test]
