@@ -319,18 +319,40 @@ impl Report {
             .collect()
     }
 
-    /// Whether the judgements file covers every measured row that produced a
-    /// hit, the second condition of the ranking swap.
-    fn every_row_is_judged(&self) -> bool {
-        self.unjudged_rows().is_empty()
+    /// How many measured Models rows the judgements file graded a hit of.
+    fn judged_rows(&self) -> usize {
+        let Some(judge) = self.judge.as_ref() else {
+            return 0;
+        };
+        self.models
+            .iter()
+            .filter(|row| row.outcome.tally().is_some())
+            .filter(|row| {
+                judge
+                    .row(&row.engine, &row.model)
+                    .is_some_and(|graded| graded.judged > 0)
+            })
+            .count()
+    }
+
+    /// Whether the judgements file covers the measured rows well enough to
+    /// rank on, the second condition of the ranking swap.
+    ///
+    /// It covers them when no measured row is unjudged and at least one
+    /// measured row carries a judged hit. Without the second half the swap is
+    /// vacuously true for a run whose every Models row was skipped: the
+    /// Engines rows still feed the judge, so the gate can pass, and the file
+    /// would name a ranking measure that ranked nothing at all.
+    fn judge_covers_measured_rows(&self) -> bool {
+        self.unjudged_rows().is_empty() && self.judged_rows() > 0
     }
 
     /// What one row is ranked on, in percent of its interference sentences.
     ///
     /// Exact fix rate, unless the judge cleared the gate of spec section 4.4
-    /// and the file covers every row. Then it is exact fix plus the non-exact
-    /// hits the judge called useful, because both are answers the writer can
-    /// accept and keep.
+    /// and the file covers the measured rows. Then it is exact fix plus the
+    /// non-exact hits the judge called useful, because both are answers the
+    /// writer can accept and keep.
     fn rank_score(&self, row: &ModelRow) -> f64 {
         let Some(tally) = row.outcome.tally() else {
             return 0.0;
@@ -339,7 +361,7 @@ impl Report {
         let Some(judge) = self
             .judge
             .as_ref()
-            .filter(|judge| judge.ranks() && self.every_row_is_judged())
+            .filter(|judge| judge.ranks() && self.judge_covers_measured_rows())
         else {
             return exact;
         };
@@ -363,7 +385,7 @@ impl Report {
         let Some(judge) = self.judge.as_ref() else {
             return String::new();
         };
-        if judge.ranks() && self.every_row_is_judged() {
+        if judge.ranks() && self.judge_covers_measured_rows() {
             return "The Useful fix column counts in the ranking.\n".to_string();
         }
         let reason = if judge.labelled == 0 {
@@ -372,11 +394,13 @@ impl Report {
             format!("this run matched under the {MINIMUM_LABELLED} hand labels the gate needs")
         } else if !judge.ranks() {
             format!("the judge is under the {AGREEMENT_GATE:.0}% gate")
-        } else {
+        } else if !self.unjudged_rows().is_empty() {
             format!(
                 "the judgements file covers no non-exact hit of {}",
                 self.unjudged_rows().join(", ")
             )
+        } else {
+            "the judgements file covers no measured model row".to_string()
         };
         format!("The Useful fix column does not count in the ranking, because {reason}.\n")
     }
@@ -490,7 +514,7 @@ impl Report {
 
     /// What the ranking is measured on, named in the file.
     fn ranking_measure(&self) -> &'static str {
-        match self.judge.as_ref().is_some_and(Assessment::ranks) && self.every_row_is_judged() {
+        match self.judge.as_ref().is_some_and(Assessment::ranks) && self.judge_covers_measured_rows() {
             true => "exact fix rate plus the non-exact hits the judge called useful, over the interference sentences",
             false => "exact fix rate",
         }
@@ -1333,6 +1357,68 @@ mod tests {
         // skipped row leaves the swapped measure in place.
         assert!(
             rendered.contains("Recommended local model, the Settings default and the README line: `phi-4-mini-instruct`."),
+            "{rendered}"
+        );
+    }
+    /// Every Models row skipped is not a table the judge may claim to rank.
+    ///
+    /// The Engines rows still feed the judge, so the gate can pass on a run
+    /// whose whole Models table says `skipped`. Nothing was ranked, so naming
+    /// the swapped measure would be an untrue sentence in a released file.
+    #[test]
+    fn a_run_whose_every_model_row_is_skipped_never_claims_the_swapped_measure() {
+        use crate::bench::judge::{Assessment, Hit, Judgement, Judgements};
+
+        let entry = |useful: bool| Judgement {
+            useful,
+            reason: "a recorded reason".to_string(),
+        };
+        let mut report = report();
+        let mut judgements = Judgements::new();
+        let mut labels = Judgements::new();
+        let mut hits: Vec<Hit> = Vec::new();
+
+        report.models = vec![model(
+            "gemma-4-e4b-it",
+            "openai",
+            weights::of("gemma-4-e4b-it"),
+            Outcome::Skipped("llama.cpp is not installed.".to_string()),
+        )];
+        // Five graded hits of the `harper` Engines row, every one agreed with,
+        // so the gate itself passes on this run.
+        for index in 0..5 {
+            let id = format!("zh-0{index}");
+            let result = format!("answer {index}");
+            judgements
+                .entry(id.clone())
+                .or_default()
+                .insert(result.clone(), entry(true));
+            labels
+                .entry(id.clone())
+                .or_default()
+                .insert(result.clone(), entry(true));
+            hits.push(Hit {
+                row: ("harper".to_string(), "harper".to_string()),
+                id,
+                result,
+            });
+        }
+
+        report.judge = Some(Assessment::of(&hits, &judgements, &labels));
+        let rendered = report.render();
+
+        assert!(
+            rendered.contains("at or above the 80% gate.\n"),
+            "the gate itself passed: {rendered}"
+        );
+        assert!(
+            rendered.contains(
+                "The Useful fix column does not count in the ranking, because the judgements file covers no measured model row.\n"
+            ),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains("Ranking: exact fix rate, then F0.5"),
             "{rendered}"
         );
     }

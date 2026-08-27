@@ -31,6 +31,8 @@ Pass `--replace` to overwrite the file wholesale instead.
 The run proves it can write the output file before it pays for one call.
 A write that fails anyway prints the judgements on stdout rather than losing
 them.
+An interrupt cancels the calls that have not started and writes what the run
+already graded.
 
 Usage:
 
@@ -379,8 +381,27 @@ def main() -> int:
         print(refusal, file=sys.stderr)
         return 1
 
+    interrupted = False
     with concurrent.futures.ThreadPoolExecutor(arguments.jobs) as pool:
-        graded = list(pool.map(lambda item: judge(item, arguments.model), items))
+        pending = [pool.submit(judge, item, arguments.model) for item in items]
+        try:
+            for _ in concurrent.futures.as_completed(pending):
+                pass
+        except KeyboardInterrupt:
+            # Cancel here rather than on the way out: leaving the block waits
+            # for every call, and a cancelled call is one this run never pays
+            # for. The calls already in flight finish and are kept.
+            interrupted = True
+            for call in pending:
+                call.cancel()
+
+    graded = [call.result() for call in pending if not call.cancelled()]
+    if interrupted:
+        print(
+            f"Interrupted. {len(graded)} of {len(items)} items were graded, "
+            "and this run writes those.",
+            file=sys.stderr,
+        )
 
     judgements: dict[str, dict[str, dict]] = {}
     failures = []
@@ -421,13 +442,13 @@ def main() -> int:
                 file=sys.stderr,
             )
     print(
-        f"{len(items) - len(failures)} judged, {len(failures)} failed, "
+        f"{len(graded) - len(failures)} judged, {len(failures)} failed, "
         f"{spend:.2f} USD notional.",
         file=sys.stderr,
     )
     for failure in failures:
         print(f"  {failure}", file=sys.stderr)
-    return 1 if failures or refused or dropped else 0
+    return 1 if failures or refused or dropped or interrupted else 0
 
 
 if __name__ == "__main__":
