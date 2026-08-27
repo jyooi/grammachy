@@ -135,7 +135,7 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   The gate is 80% agreement on the labels a run matched, over at least `judge::MINIMUM_LABELLED` of them.
   Below the gate, under that sample, or with no label matched, the column still prints and the file says it does not rank.
   `Report::rank_score` is the one place the ranking swaps to exact fix plus useful non-exact fixes.
-  `Report::judge_covers_measured_rows` is the second condition of that swap, and both the score and the ranking sentence read it.
+  `Report::judge_covers_measured_rows` is the second condition of that swap, and the score, the ranking sentence, and the regression rule all read it.
   It needs one measured row with a judged hit, so a table of skipped rows never claims a measure that ranked nothing.
   One measured row the file covers no hit of drops the swap for the whole table, and the report names that row.
   A skipped row keeps the Checks it ran, so its hits reach the judge, but it never decides what the measured rows are ranked on.

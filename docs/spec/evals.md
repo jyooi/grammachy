@@ -120,8 +120,9 @@ Wall time per row and the run's cloud spend print under the tables.
 ### 4.3 Record file
 
 `--record <dir>` writes `checks.json`: one entry per (engine, model, thinking, item id) with validity, latency, cost, token counts, server timings, and the normalised Issues.
-The directory is gitignored.
-It is the only place model output text and eval-set text ever land.
+Every entry also carries the item and the sentence after Accept, because that pair is the whole input of the judge.
+The directory is gitignored, and so is the `judgements.json` the judge writes beside the record.
+Those two files are the only place model output text and eval-set text ever land.
 
 ### 4.4 Judge
 
@@ -147,6 +148,7 @@ Two lines, re-decided from the eval-set tables on every tag ([HUF-205](https://l
   When the judge gate passes, exact fix rate is replaced by exact fix plus useful non-exact fixes over interference sentences.
   The swap also needs the judgements file to cover every measured row that produced a non-exact hit.
   One uncovered row would compete on a smaller measure than a graded one, so the whole table keeps the raw ranking.
+  It also needs one measured row the file grades a hit of, so a table of skipped rows never claims a measure that ranked nothing.
   The file states the gate result and the ranking result in two sentences, and the second one names why the column does not rank.
 - Floors: a row with more false positives than the default engine, or validity under 95%, is never recommended.
 - Recommended local model, the Settings default and the README line: the best local row that is Apache-2.0 or MIT and fits the 8 GB tier by measured resident memory.
