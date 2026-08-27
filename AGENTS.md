@@ -54,7 +54,8 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   So `Openai::confirm_started` asks again after the start path has a server up, and `local::Started` decides what a mismatch earns there: a unit this adapter built is refused, and one an earlier session left is reloaded and the Check re-run, which is the HUF-236 recovery.
   That second question takes no short cut on a settled answer, because reaching it means the server left the port and something brought it back, which is the one event a settled answer cannot survive.
   A row whose server holds the port for its whole life never reaches it, so the guard still costs one probe there.
-  Only a settled answer is cached, and one adapter is built per bench row and per `check` run, so a 365-item row pays a small constant number of probes.
+  `Openai::confirm` answers from the record after the first probe, and only a reload drops that record.
+  One adapter is built per bench row and per `check` run, so a 365-item row pays a small constant number of probes.
   `Engine::served_model` carries it to `Measurement::served`, which is the "Weights served for" line under both bench tables.
   Every stub of `cli/tests/bench.rs` and `cli/tests/openai_stub.rs` therefore has to route on the request line: a probe is not a Check and must not reach the counters.
   The guard also gave `cli/tests/openai_live.rs` a way onto the real unit, because a reload runs `systemctl`, so every case there but the `#[ignore]` cold start sets `GRAMMACHY_LLAMA_START=never` and `GRAMMACHY_LLAMA_STOP=never`.

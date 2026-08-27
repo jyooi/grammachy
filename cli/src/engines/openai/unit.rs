@@ -155,7 +155,10 @@ pub fn server_command(model_path: &Path, host: &str, port: u16) -> ServerCommand
     }
 }
 
-/// Start the transient unit, or answer `Ok(())` when it already runs.
+/// Start the transient unit, and say whether this call created it.
+///
+/// A unit an earlier session left holds the weights that session asked for, so
+/// the caller has to know which of the two it got (HUF-236).
 pub fn start(model: &str, host: &str, port: u16) -> Result<Started, StartFailure> {
     if !Path::new(PACKAGE_SERVER).is_file() {
         return Err(StartFailure(format!(

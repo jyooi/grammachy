@@ -157,10 +157,12 @@ pub enum Transfer {
 /// covered without reaching the network.
 pub type Downloader = Box<dyn Fn(&str, &Path) -> Result<Transfer, String> + Send + Sync>;
 
-/// What stops the llama.cpp unit before its weights file is deleted.
+/// What stops the llama.cpp unit.
 ///
-/// The real one runs `systemctl --user stop`. Tests hand in their own, because
-/// no test may touch the unit the live shell uses.
+/// `remove` uses it before it deletes a weights file, and the served-model
+/// guard of the `openai` adapter uses it to reload a server that holds the
+/// wrong weights (HUF-236). The real one runs `systemctl --user stop`. Tests
+/// hand in their own, because no test may touch the unit the live shell uses.
 pub type Stopper = Box<dyn Fn(&str) -> Result<(), String> + Send + Sync>;
 
 /// Which llama.cpp backend package this machine wants.
