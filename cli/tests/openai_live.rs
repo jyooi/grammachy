@@ -10,7 +10,10 @@
 //! ```
 //!
 //! The cold start case is `#[ignore]` because it stops and starts a systemd
-//! unit. Run it by hand with
+//! unit. It is the only case that may: every other one sets
+//! `GRAMMACHY_LLAMA_START=never` and `GRAMMACHY_LLAMA_STOP=never`, so no
+//! ordinary run reaches the developer's own unit whatever the base URL holds.
+//! Run the cold start by hand with
 //! `cargo test --test openai_live -- --ignored --nocapture`.
 
 use std::io::Write;
@@ -40,12 +43,35 @@ fn server_answers() -> bool {
     TcpStream::connect_timeout(&address, Duration::from_millis(300)).is_ok()
 }
 
+/// Whether one run may reach the `grammachy-llama` unit.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Unit {
+    /// The run may start and stop it. Only the `#[ignore]` cold start says so.
+    Drive,
+    /// The seams forbid both, so no run touches the developer's own unit.
+    LeaveAlone,
+}
+
 /// Run `grammachy check --engine openai` with `text` on stdin.
 ///
+/// The served-model guard reloads a port that holds another model, so a run
+/// that leaves the seams open could stop and start the unit whenever the
+/// weights on the base URL are not the ones `openaiModel` names. That is the
+/// very state HUF-236 is about, so every ordinary case forbids both and lets
+/// the guard refuse instead.
+fn check(name: &str, text: &str, base_url: Option<&str>) -> Value {
+    run(name, text, base_url, Unit::LeaveAlone)
+}
+
+/// The same run with the unit seams open, for the cold start case alone.
+fn check_driving_the_unit(name: &str, text: &str) -> Value {
+    run(name, text, None, Unit::Drive)
+}
+
 /// `base_url` overrides the Settings entry, which is how the remote-host case
 /// reaches the adapter without touching the developer's real `shell.json`.
 /// `name` keeps that file to one test, because tests run side by side.
-fn check(name: &str, text: &str, base_url: Option<&str>) -> Value {
+fn run(name: &str, text: &str, base_url: Option<&str>, unit: Unit) -> Value {
     let settings = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("openai-live-{name}.json"));
     match base_url {
         Some(url) => std::fs::write(
@@ -63,9 +89,16 @@ fn check(name: &str, text: &str, base_url: Option<&str>) -> Value {
     let _slot = ONE_AT_A_TIME
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let mut child = Command::new(env!("CARGO_BIN_EXE_grammachy"))
+    let mut command = Command::new(env!("CARGO_BIN_EXE_grammachy"));
+    command
         .args(["check", "--engine", "openai"])
-        .env("GRAMMACHY_SHELL_JSON", &settings)
+        .env("GRAMMACHY_SHELL_JSON", &settings);
+    if unit == Unit::LeaveAlone {
+        command
+            .env("GRAMMACHY_LLAMA_START", "never")
+            .env("GRAMMACHY_LLAMA_STOP", "never");
+    }
+    let mut child = command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -186,7 +219,7 @@ fn a_cold_start_brings_the_unit_up() {
     assert!(!server_answers(), "the unit is stopped before the Check");
 
     let text = "Yesterday I go to the library with my friend.";
-    let envelope = check("cold", text, None);
+    let envelope = check_driving_the_unit("cold", text);
 
     assert!(
         !envelope["issues"].as_array().expect("issues").is_empty(),
@@ -201,7 +234,7 @@ fn a_cold_start_brings_the_unit_up() {
     assert_eq!(String::from_utf8_lossy(&active.stdout).trim(), "active");
 
     // The second Check reuses what the first one started.
-    assert!(!check("cold", text, None)["issues"]
+    assert!(!check_driving_the_unit("cold", text)["issues"]
         .as_array()
         .expect("issues")
         .is_empty());

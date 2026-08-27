@@ -200,12 +200,20 @@ impl Openai {
         }
     }
 
-    /// The adapter with another way to start the server.
+    /// The adapter with another way to start the server, and no way to stop
+    /// one.
+    ///
+    /// [`Self::with_server_control`] is the only route that hands the adapter a
+    /// stopper, so a test that takes this one cannot reach systemd. A case that
+    /// gives such a stub a served model then refuses a mismatch rather than
+    /// stopping the developer's own unit.
     pub fn with_starter(config: Config, starter: Starter) -> Self {
         Openai {
             config,
             starter,
-            stopper: model::stopper(),
+            stopper: Box::new(|unit: &str| {
+                Err(format!("this adapter holds no way to stop {unit}"))
+            }),
             served: Mutex::default(),
         }
     }
@@ -528,17 +536,29 @@ impl Openai {
 /// only a person can settle which of the two is wrong. Every port the guard
 /// cannot reload ends here, so `why` carries what stopped the reload when
 /// there is something a person can act on.
+///
+/// The remedy follows `why`. A stop that did not run means the port belongs to
+/// a server this adapter never started, so telling a person to stop the unit
+/// would name the one repair that already failed.
 fn mismatch(
     endpoint: &Endpoint,
     served: &str,
     requested: &str,
     why: Option<String>,
 ) -> EngineFailure {
-    let why = why.map_or_else(String::new, |why| format!(" The reload did not run: {why}"));
+    let remedy = match why {
+        Some(why) => format!(
+            " The reload did not run: {}. Stop that server, or point openaiBaseUrl at a server that holds {requested}.",
+            why.trim().trim_end_matches('.'),
+        ),
+        None => format!(
+            " Stop the {} unit, or point openaiBaseUrl at a server that holds {requested}.",
+            unit::UNIT_NAME,
+        ),
+    };
     EngineFailure::BadArguments(format!(
-        "The model server on {} serves {served}, and this Check asks for {requested}.{why} Stop the {} unit, or point openaiBaseUrl at a server that holds {requested}.",
+        "The model server on {} serves {served}, and this Check asks for {requested}.{remedy}",
         endpoint.address(),
-        unit::UNIT_NAME,
     ))
 }
 

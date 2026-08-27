@@ -52,6 +52,8 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   Only a settled answer is cached, and one adapter is built per bench row and per `check` run, so a 365-item row pays a small constant number of probes.
   `Engine::served_model` carries it to `Measurement::served`, which is the "Weights served for" line under both bench tables.
   Every stub of `cli/tests/bench.rs` and `cli/tests/openai_stub.rs` therefore has to route on the request line: a probe is not a Check and must not reach the counters.
+  The guard also gave `cli/tests/openai_live.rs` a way onto the real unit, because a reload runs `systemctl`, so every case there but the `#[ignore]` cold start sets `GRAMMACHY_LLAMA_START=never` and `GRAMMACHY_LLAMA_STOP=never`.
+  `Openai::with_starter` holds no working stopper for the same reason; `with_server_control` is the only route that takes one.
 - The `openai` base URL host must be loopback, and `cli/src/engines/openai/endpoint.rs` is the only place that decides it.
   A remote host is `bad_arguments` and no request is made; that is a product guarantee, so keep it tested.
   Its prompt in `prompt.rs` is the wording HUF-181 measured, and the "shortest exact substring" rule is what makes the spans usable rather than whole-sentence rewrites.
@@ -82,6 +84,7 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   The three verbs agree on one pair of paths, the row's pinned file name and its `.part`.
   So a hand-placed `.gguf` is never listed and never deleted.
   The licence of a row comes from `bench::weights::of`, the one product rule of spec section 13.1.
+  `remove` stops the unit only for the file the setting resolves to, and `model::stop_found_nothing_to_stop` is what lets a unit that was not running through: a transient unit is collected when it stops, so `systemctl` exits 5 on it, and that is the outcome the Remove wanted.
   `cancel.rs` is the whole cancel.
   The SIGTERM handler only sets a flag, and `curl` polls it so the child dies and the `.part` file stays.
   Seams are `GRAMMACHY_MODELS_DIR`, `GRAMMACHY_MODEL_BASE_URL`, `GRAMMACHY_MODEL_SHA256`, `GRAMMACHY_MODEL_SIZE_BYTES`, `GRAMMACHY_LLAMA_STOP`, plus the `Downloader` and `Stopper` values.

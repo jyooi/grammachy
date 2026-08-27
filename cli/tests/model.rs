@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
-use grammachy::model::{Failure, ModelEnvelope, Models, State, Stopper, Transfer};
+use grammachy::model::{self, Failure, ModelEnvelope, Models, State, Stopper, Transfer};
 
 /// The pinned file name of each catalogue row, so a test can put one in place.
 const GEMMA: &str = "gemma-4-E4B-it-Q4_K_M.gguf";
@@ -39,6 +39,15 @@ fn models(directory: PathBuf) -> (Models, Arc<AtomicUsize>) {
         },
         stops,
     )
+}
+
+/// A run whose stop always fails, with the reason a case names.
+fn models_that_cannot_stop(directory: PathBuf, why: String) -> Models {
+    Models {
+        directory,
+        download: Box::new(|_url, _path| Ok(Transfer::Finished)),
+        stop: Box::new(move |_unit| Err(why.clone())),
+    }
 }
 
 fn row<'a>(rows: &'a [grammachy::model::ModelRow], name: &str) -> &'a grammachy::model::ModelRow {
@@ -218,6 +227,55 @@ fn remove_of_the_model_in_use_stops_the_unit_first() {
     assert_eq!(row.state, State::Absent);
     assert_eq!(stops.load(Ordering::SeqCst), 1);
     assert!(!directory.join(GEMMA).exists());
+}
+
+/// A transient unit is collected when it stops, so a unit that is not running
+/// is not loaded and `systemctl` fails the stop. That is the ordinary state
+/// before the first Check of a session, and it holds no weights open, so the
+/// Remove goes ahead.
+#[test]
+fn remove_goes_ahead_when_the_unit_was_not_running() {
+    let directory = scratch("remove-not-loaded");
+    std::fs::write(directory.join(GEMMA), b"whole").expect("the ready file is written");
+    let models = models_that_cannot_stop(
+        directory.clone(),
+        format!(
+            "systemctl could not stop grammachy-llama: {}",
+            model::NOT_LOADED
+        ),
+    );
+
+    let row = models
+        .delete("gemma-4-e4b-it", true)
+        .expect("a unit that was not running holds nothing open");
+
+    assert_eq!(row.state, State::Absent);
+    assert!(!directory.join(GEMMA).exists());
+}
+
+/// A stop that did not do its job is another matter: llama.cpp may still hold
+/// the file, so the weights stay and the message says why.
+#[test]
+fn remove_keeps_the_weights_when_the_stop_really_failed() {
+    let directory = scratch("remove-stop-failed");
+    std::fs::write(directory.join(GEMMA), b"whole").expect("the ready file is written");
+    let models = models_that_cannot_stop(
+        directory.clone(),
+        "systemctl could not stop grammachy-llama: Access denied".to_string(),
+    );
+
+    let failure = models
+        .delete("gemma-4-e4b-it", true)
+        .expect_err("the unit is still holding the weights");
+
+    assert!(
+        matches!(failure, Failure::BadArguments(ref why) if why.contains("Access denied")),
+        "{failure:?}"
+    );
+    assert!(
+        directory.join(GEMMA).exists(),
+        "the file the unit may still hold open stays"
+    );
 }
 
 /// Only the file the setting resolves to counts as in use, and the answer comes

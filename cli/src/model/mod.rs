@@ -451,6 +451,15 @@ pub fn stopper() -> Stopper {
     Box::new(stop_unit)
 }
 
+/// What `systemctl` exits with for a unit it does not hold.
+const NOT_LOADED_EXIT: i32 = 5;
+
+/// What [`stop_unit`] reports for a unit that was not running.
+///
+/// The wording is this project's own, because code reads it and a `systemctl`
+/// message follows the locale. [`stop_found_nothing_to_stop`] is the reader.
+pub const NOT_LOADED: &str = "the unit is not loaded, so nothing was running";
+
 /// Stop one transient user unit.
 ///
 /// A transient unit is collected when it stops, so a unit that is not running
@@ -467,10 +476,22 @@ pub fn stop_unit(unit: &str) -> Result<(), String> {
     if output.status.success() {
         return Ok(());
     }
+    if output.status.code() == Some(NOT_LOADED_EXIT) {
+        return Err(format!("systemctl could not stop {unit}: {NOT_LOADED}"));
+    }
     Err(format!(
         "systemctl could not stop {unit}: {}",
         String::from_utf8_lossy(&output.stderr).trim()
     ))
+}
+
+/// Whether one stop failure says the unit was not running.
+///
+/// A caller that only needs the unit gone has what it wanted here, so this is
+/// the one stop failure it may pass. Anything else is a stop that did not do
+/// its job.
+pub fn stop_found_nothing_to_stop(why: &str) -> bool {
+    why.contains(NOT_LOADED)
 }
 
 /// Why a verb of `grammachy model` did not do what it was asked.
@@ -603,12 +624,21 @@ impl Models {
     /// otherwise read a file that is no longer there. The setting is left
     /// alone: which model the engine asks for is the user's choice, and this
     /// verb only says what is on disk.
+    ///
+    /// A unit that was not running holds no weights open, so that stop reports
+    /// the outcome this verb wanted. The ordinary state before the first Check
+    /// of a session is exactly that, so only a stop that did not do its job may
+    /// keep the file.
     pub fn delete(&self, name: &str, in_use: bool) -> Result<ModelRow, Failure> {
         let weights = weights(name).ok_or_else(|| self.unknown(name))?;
         let (final_path, partial) = paths(&self.directory, &weights);
 
         if in_use && final_path.is_file() {
-            (self.stop)(unit::UNIT_NAME).map_err(Failure::BadArguments)?;
+            if let Err(why) = (self.stop)(unit::UNIT_NAME) {
+                if !stop_found_nothing_to_stop(&why) {
+                    return Err(Failure::BadArguments(why));
+                }
+            }
         }
 
         for path in [&final_path, &partial] {

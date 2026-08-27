@@ -7,7 +7,7 @@
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock, RwLockWriteGuard};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -35,6 +35,24 @@ const REQUESTED: &str = "qwen3.8-4b";
 
 /// How long a stub waits for a port another case holds to come free again.
 const REBIND_BUDGET: Duration = Duration::from_secs(5);
+
+/// Who may take a loopback port at any one moment.
+///
+/// [`silent_address`] releases the port it picked, because a case needs one
+/// that refuses a connection. Any bind after that may then take the very same
+/// port and answer a Check the case expects nothing to answer. So a case that
+/// needs a silent port holds this lock for writing for its whole run, and every
+/// other bind takes it for reading. No port changes hands under a case that
+/// relies on it.
+static PORTS: RwLock<()> = RwLock::new(());
+
+/// One loopback port, taken while no case holds a silent one.
+fn bind_free_port() -> TcpListener {
+    let _shared = PORTS
+        .read()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    TcpListener::bind("127.0.0.1:0").expect("a loopback port is free")
+}
 
 /// How the stub answers one request.
 #[derive(Clone, Copy)]
@@ -64,17 +82,17 @@ impl Stub {
 
     /// The same stub, naming the weights it serves to the probe.
     fn holding(answer: Answer, served: ServedModel) -> Stub {
-        let listener = TcpListener::bind("127.0.0.1:0").expect("a loopback port is free");
-        Stub::on(listener, answer, served)
+        Stub::on(bind_free_port(), answer, served)
     }
 
     /// The same stub on a port a test already knows, which is how a starter
     /// brings a server up on a port that was silent a moment ago.
     ///
-    /// Cargo runs the cases of this binary beside each other and several of
-    /// them ask the operating system for a port. So the port this one released
-    /// may belong to another case for a moment, and the bind waits it out
-    /// rather than failing the build over a lost race.
+    /// [`PORTS`] keeps every other case out of this port, so only the operating
+    /// system can hold it back now. It takes a moment to release one, and the
+    /// bind waits that out rather than failing the build over it. This call
+    /// takes no lock of its own, because the case that reserved the port holds
+    /// the write side already.
     fn on_port(port: u16, answer: Answer, served: ServedModel) -> Stub {
         let deadline = Instant::now() + REBIND_BUDGET;
         let listener = loop {
@@ -163,7 +181,7 @@ impl Stub {
     /// That is what a reload looks like from the client side: the wrong model
     /// until the stop lands, and the right one after it.
     fn reloading(answer: Answer, before: &'static str, after: &'static str) -> (Stub, Stops) {
-        let listener = TcpListener::bind("127.0.0.1:0").expect("a loopback port is free");
+        let listener = bind_free_port();
         let address = listener
             .local_addr()
             .expect("the port is known")
@@ -204,7 +222,7 @@ impl Stub {
 
     /// A 307 whose Location is another server, so a follow would be visible.
     fn redirecting(location: &str) -> Stub {
-        let listener = TcpListener::bind("127.0.0.1:0").expect("a loopback port is free");
+        let listener = bind_free_port();
         let address = listener
             .local_addr()
             .expect("the port is known")
@@ -396,14 +414,21 @@ fn port_of(address: &str) -> u16 {
 }
 
 /// An address on the loopback interface with nothing listening on it.
-fn silent_address() -> String {
+///
+/// The guard that comes back keeps every other case out of the port pool for
+/// as long as the caller holds it, because this port is free again the moment
+/// this returns. Bind it to a name, not to `_`, or it drops at once.
+fn silent_address() -> (String, RwLockWriteGuard<'static, ()>) {
+    let held = PORTS
+        .write()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let listener = TcpListener::bind("127.0.0.1:0").expect("a loopback port is free");
     let address = listener
         .local_addr()
         .expect("the port is known")
         .to_string();
     drop(listener);
-    address
+    (address, held)
 }
 
 #[test]
@@ -469,7 +494,7 @@ fn a_port_that_already_answers_starts_no_unit() {
 
 #[test]
 fn a_silent_port_starts_the_unit_once() {
-    let address = silent_address();
+    let (address, _ports) = silent_address();
     let starts = Starts::default();
 
     let failure = adapter(Duration::from_secs(2), true, &starts)
@@ -492,7 +517,7 @@ fn a_silent_port_starts_the_unit_once() {
 
 #[test]
 fn a_silent_port_starts_no_unit_when_the_seam_forbids_it() {
-    let address = silent_address();
+    let (address, _ports) = silent_address();
     let starts = Starts::default();
 
     let failure = adapter(Duration::from_secs(2), false, &starts)
@@ -886,7 +911,7 @@ fn the_server_is_asked_what_it_serves_once_for_the_whole_row() {
 /// `openaiModel` itself, so nothing is left to disagree with.
 #[test]
 fn a_silent_port_is_started_rather_than_refused() {
-    let address = silent_address();
+    let (address, _ports) = silent_address();
     let (starts, stops) = (Starts::default(), Stops::default());
 
     let failure = adapter_with_stopper(true, &starts, &stops)
@@ -938,7 +963,7 @@ fn adapter_that_brings_up(
 /// the row can name the weights it was measured on.
 #[test]
 fn a_server_the_start_path_brought_up_is_asked_what_it_serves() {
-    let address = silent_address();
+    let (address, _ports) = silent_address();
     let held = Arc::new(std::sync::Mutex::new(None));
     let stops = Stops::default();
     let served = "qwen3.8-4b-Q4_K_M.gguf";
@@ -962,7 +987,7 @@ fn a_server_the_start_path_brought_up_is_asked_what_it_serves() {
 /// Check refuses rather than reporting a quality those weights never produced.
 #[test]
 fn a_started_server_that_holds_another_model_refuses_the_check() {
-    let address = silent_address();
+    let (address, _ports) = silent_address();
     let held = Arc::new(std::sync::Mutex::new(None));
     let stops = Stops::default();
     let adapter = adapter_that_brings_up(
