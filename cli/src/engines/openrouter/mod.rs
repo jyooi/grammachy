@@ -7,9 +7,10 @@
 //! `usage.cost` so the benchmark can price a Check. The key lives in a 0600
 //! file under `~/.config/grammachy/`, never in `shell.json`.
 //!
-//! It keeps the `json_schema` response format where the local engine now sends
-//! a raw grammar (HUF-219): no provider here reads a GBNF, so the compact
-//! answer is asked for in the shared wording alone.
+//! It always keeps the `json_schema` response format, where the local engine
+//! sends a raw grammar on the thinking-off route (HUF-219): no provider here
+//! reads a GBNF, so the compact answer is asked for in the shared wording
+//! alone.
 //!
 //! The loopback rule of the `openai` engine is untouched: `endpoint::parse` is
 //! not consulted here because there is no base URL to parse.
