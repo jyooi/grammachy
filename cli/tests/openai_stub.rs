@@ -31,6 +31,9 @@ enum Answer {
     Status(&'static str),
     /// Read the request and never write, so the client runs out of time.
     Silence,
+    /// A `503` for this many requests, then a `200` with this JSON body. That
+    /// is llama.cpp: it binds the port before it has read the weights.
+    LoadingThenJson(usize, &'static str),
 }
 
 /// A stub server on a port the operating system picks, torn down with the test.
@@ -51,6 +54,7 @@ impl Stub {
         let recorder = Arc::clone(&seen);
 
         thread::spawn(move || {
+            let mut served = 0usize;
             for stream in listener.incoming() {
                 let Ok(mut stream) = stream else { break };
                 let request = read_request(&mut stream);
@@ -58,6 +62,7 @@ impl Stub {
                     .lock()
                     .expect("the log is not poisoned")
                     .push(request);
+                served += 1;
                 match answer {
                     Answer::Json(body) => {
                         let _ = write!(
@@ -74,6 +79,19 @@ impl Stub {
                     }
                     // Hold the connection open until the client gives up.
                     Answer::Silence => thread::sleep(Duration::from_secs(30)),
+                    Answer::LoadingThenJson(loading, _) if served <= loading => {
+                        let _ = write!(
+                            stream,
+                            "HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                        );
+                    }
+                    Answer::LoadingThenJson(_, body) => {
+                        let _ = write!(
+                            stream,
+                            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                            body.len()
+                        );
+                    }
                 }
             }
         });
@@ -158,15 +176,27 @@ impl Starts {
 }
 
 /// An adapter that records its start calls instead of running systemd.
+///
+/// Nothing comes up behind a recording starter, so one probe is all the retry
+/// loop needs to conclude and the budget is zero.
 fn adapter(timeout: Duration, start_unit: bool, starts: &Starts) -> Openai {
+    adapter_with_budget(timeout, start_unit, Duration::from_millis(0), starts)
+}
+
+/// The same recording adapter with a startup budget, for the one case where the
+/// stub does come up on a later request.
+fn adapter_with_budget(
+    timeout: Duration,
+    start_unit: bool,
+    startup_budget: Duration,
+    starts: &Starts,
+) -> Openai {
     let counter = Arc::clone(&starts.0);
     Openai::with_starter(
         Config {
             timeout,
             start_unit,
-            // Nothing comes up behind a recording starter, so one probe is all
-            // the retry loop needs to conclude.
-            startup_budget: Duration::from_millis(0),
+            startup_budget,
         },
         Box::new(move |_model: &str, _endpoint: &Endpoint| {
             counter.fetch_add(1, Ordering::SeqCst);
@@ -349,6 +379,59 @@ fn a_server_error_is_an_engine_error() {
         matches!(failure, EngineFailure::Failed(ref message) if message.contains("500")),
         "expected engine_error, got {failure:?}"
     );
+}
+
+/// llama.cpp binds its port before it has read the weights and answers 503
+/// until it has. That is the server not being up yet, so it is what the startup
+/// budget waits out rather than an engine error the user is shown.
+#[test]
+fn a_server_still_loading_its_weights_is_waited_out_rather_than_failed() {
+    let stub = Stub::serving(Answer::LoadingThenJson(2, ANSWER));
+    let starts = Starts::default();
+    let adapter = adapter_with_budget(
+        Duration::from_secs(2),
+        true,
+        Duration::from_secs(5),
+        &starts,
+    );
+
+    let issues = adapter
+        .check(TEXT, &options(&stub.base_url()))
+        .expect("the server finishes loading and answers");
+
+    assert_eq!(issues.len(), 1);
+    // One request found it loading, the retry loop found it loading again, and
+    // the third one got the answer.
+    assert_eq!(stub.requests().len(), 3);
+    // The unit is asked once and never again: `systemctl start` on a unit that
+    // is already running is a no-op, so waiting is what earns the answer. A
+    // count that climbed with the retries would mean the loop was restarting a
+    // server that was already coming up.
+    assert_eq!(
+        starts.count(),
+        1,
+        "the unit is asked for once and then waited for"
+    );
+}
+
+/// With no budget left, a server that is still loading is the
+/// `engine_unavailable` card, which is the one that explains a first Check.
+#[test]
+fn a_server_still_loading_with_no_budget_left_is_engine_unavailable() {
+    let stub = Stub::serving(Answer::Status("503 Service Unavailable"));
+    let starts = Starts::default();
+
+    let failure = adapter(Duration::from_secs(2), true, &starts)
+        .check(TEXT, &options(&stub.base_url()))
+        .expect_err("the stub never finishes loading");
+
+    match failure {
+        EngineFailure::Unavailable(message) => assert!(
+            message.contains("still loading"),
+            "the message says what the server is doing: {message}"
+        ),
+        other => panic!("expected engine_unavailable, got {other:?}"),
+    }
 }
 
 #[test]

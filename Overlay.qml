@@ -11,6 +11,7 @@ import "ui/splice.js" as Splice
 import "ui/format.js" as Format
 import "ui/anchor.js" as Anchor
 import "ui/limits.js" as Limits
+import "ui/models.js" as ModelsJs
 
 // The overlay entry point. `open(payload)` routes a summon to a surface, spec
 // section 2. Quick mode captures the Selection (section 3), runs one Check
@@ -139,6 +140,51 @@ Item {
   // opens beside it and Replace types into it, so both stop guessing.
   property var sourceWindow: null
 
+  // ------------------------------------------------------------- models
+  //
+  // The weights the Local LLM engine runs on, spec section 5.3. The list lives
+  // here rather than in the card because it outlives a summon: a download runs
+  // for minutes and closing the overlay does not cancel it, so `models` and
+  // `modelBusy` are what a second summon comes back to.
+  //
+  // One download at a time. `modelBusy` is the name in flight and is what turns
+  // the poll on, disables every other Download, and turns the row's Download
+  // into Cancel.
+  property var models: []
+  property string modelBusy: ""
+  // The `.part` length of the row in flight, moved by every poll answer.
+  // It lives outside `models` so that the list keeps its identity while a
+  // download runs, which is what lets the bar animate rather than rebuild.
+  property double modelBusyBytes: 0
+  property string modelsDirectory: ""
+  property double modelsFreeBytes: 0
+  // Which `model list` run answered, and the first run a verb has not already
+  // overtaken. A list run reads the directory when it starts, while a download
+  // answers only after it has hashed and renamed a multi-gigabyte `.part` file,
+  // so a poll that fired during the hash lands afterwards still calling the row
+  // `partial`. An answer stamped below the floor is out of date and is dropped.
+  property int modelListSerial: 0
+  property int modelListFloor: 0
+  // The note one failed verb left, from `ui/models.js`, or null.
+  property var modelNote: null
+  // The catalogue name a Remove confirm is waiting on, spec section 7.
+  property string modelConfirm: ""
+  // The phase the card comes back to once the confirm is answered. The confirm
+  // is a phase of its own so that it has a key mode of its own, and the card
+  // behind it is whatever was there before.
+  property string phaseBeforeModelConfirm: ""
+
+  // The one fact every model verb and every drawn button asks, spec section 7.
+  //
+  // `grammachy model` runs one verb at a time, so a second one is dropped
+  // whatever it was: a download, a remove that is stopping the unit, or the
+  // remove an open confirm is still waiting to be told about. Keeping the
+  // question in one place is what stops a row being drawn live over a press
+  // that goes nowhere. `modelBusy` stays separate, because it names the one row
+  // that gets a bar and a Cancel rather than a disabled button.
+  readonly property bool modelsBusy: modelActionProcess.running
+    || root.modelConfirm.length > 0
+
   // The clipboard the Ctrl + C fallback borrowed, put back once the Selection
   // is in hand. Spec section 3.
   property string borrowedClipboard: ""
@@ -174,6 +220,20 @@ Item {
   // of that key, and an unknown stored value reads as it without a rewrite.
   function setting(name, fallback) {
     return Settings.valueOf(root.entry, name, fallback)
+  }
+
+  // The Models list is drawn only for the Local LLM engine, so it is read only
+  // then: opening Settings on another engine costs nothing. A download that is
+  // still running keeps the poll going whatever the card shows.
+  readonly property bool showsModels: root.settingsOpen && String(root.setting("engine")) === "openai"
+
+  // A question that is off the screen must never still be answerable: the
+  // confirm is a phase, and a phase answers the keyboard whether or not its
+  // card is drawn. Closing Settings and moving the engine away from Local LLM
+  // both take the list away, so both drop the question with it.
+  onShowsModelsChanged: {
+    if (root.showsModels) root.refreshModels()
+    else if (root.phase === "confirmModel") root.closeModelConfirm()
   }
 
   // Persist on change, spec section 7: no Save button, and the Issues on
@@ -303,6 +363,11 @@ Item {
     root.errorDiagnosis = ""
     root.pendingDraft = ""
     root.sourceWindow = null
+    // Spec section 5.3: closing the overlay does not cancel a download, so a
+    // summon leaves `models`, `modelBusy`, and the process in flight alone. The
+    // confirm is a question about a card that is gone, so it goes.
+    root.modelConfirm = ""
+    root.phaseBeforeModelConfirm = ""
     root.clearChunkRun()
     // End the last borrow.
     if (root.clipboardBorrowed && !restoreClipboard.running)
@@ -463,6 +528,176 @@ Item {
     restoreClipboard.command = hasText ? ["wl-copy"] : ["wl-copy", "--clear"]
     restoreClipboard.stdinEnabled = hasText
     restoreClipboard.running = true
+  }
+
+
+  // ------------------------------------------------------------------ models
+  //
+  // Spec section 5.3. Every verb of `grammachy model` runs through one of two
+  // processes: `modelListProcess` reads the list and is what the poll repeats,
+  // and `modelActionProcess` carries the one verb the user asked for. Both
+  // answer the same envelope, so one reader serves them.
+
+  function modelCommand(verbArgs) {
+    return [root.binaryPath, "model"].concat(verbArgs)
+  }
+
+  // The list as it is right now. It runs when Settings opens on the Local LLM
+  // engine and once a second while a download is in flight.
+  function refreshModels() {
+    modelListProcess.command = root.modelCommand(["list"])
+    if (modelListProcess.running) {
+      modelListProcess.restartQueued = true
+      return
+    }
+    modelListProcess.running = true
+  }
+
+  function onModelListOutput(text, stamp) {
+    var answer = ModelsJs.read(text)
+    if (answer.error) {
+      // A poll that failed says nothing new: the rows on screen are still the
+      // last true answer, and the note the verb itself left is the one to keep.
+      if (root.models.length === 0) root.modelNote = ModelsJs.note(answer.error.code, answer.error.message, "")
+      return
+    }
+    root.absorbModelReport(answer.report, stamp)
+  }
+
+  // The rows of one answer merged into the list. `list` answers every row and
+  // the other two verbs answer the one they acted on, so a merge is what keeps
+  // the other rows through a download.
+  //
+  // The list is replaced only when it actually says something new. A Repeater
+  // rebuilds every delegate the moment its array is replaced, and the poll
+  // answers once a second, so replacing it each tick would restart the bar's
+  // animation, drop an open tooltip, and lose a press whose release came late.
+  // The one number the poll is there to move rides on `modelBusyBytes`, which
+  // the running row's bar and hint read instead of the list.
+  //
+  // A poll answer older than the verb that has already answered says nothing at
+  // all, which `ModelsJs.absorbed` decides from the run's own stamp.
+  function absorbModelReport(report, stamp) {
+    var settled = ModelsJs.absorbed(root.models, report, stamp, root.modelListFloor)
+    if (!settled) return
+    var next = settled.models
+    root.modelBusyBytes = ModelsJs.partialOf(next, root.modelBusy)
+    if (!ModelsJs.sameRows(root.models, next, root.modelBusy)) root.models = next
+    root.modelsDirectory = settled.directory
+    root.modelsFreeBytes = settled.freeBytes
+  }
+
+  // Spec section 5.3: one download at a time, so a second Download while a verb
+  // is in flight is a no-op rather than a second transfer. The buttons that
+  // would reach here are drawn disabled from the same `modelsBusy`, so this
+  // guard is what makes the drawing true rather than a second opinion.
+  function downloadModel(name) {
+    if (root.modelsBusy) return
+    root.modelNote = null
+    root.modelBusy = name
+    // The running row's bar reads the live count rather than the list, so it
+    // starts where the list already is. Without this a resumed download snaps
+    // the bar back to empty until the first poll lands a second later.
+    root.modelBusyBytes = ModelsJs.partialOf(root.models, name)
+    root.runModelAction(["download", name])
+    modelPoll.start()
+  }
+
+  // Cancel is a SIGTERM, which the CLI turns into a kept `.part` file and the
+  // `cancelled` code. Killing the process outright would leave curl running.
+  function cancelModelDownload() {
+    if (root.modelBusy.length === 0) return
+    modelActionProcess.signal(15)
+  }
+
+  // Spec section 7: Use is the `openaiModel` setting and nothing else. The
+  // weights are already on disk, so nothing is fetched and no Check is touched.
+  function useModel(name) {
+    if (root.modelsBusy) return
+    root.modelNote = null
+    root.persistSetting("openaiModel", name)
+  }
+
+  // Remove asks once when the setting resolves to this model, because the next
+  // Check would then have nothing to load. Every other row goes straight out.
+  //
+  // The setting is resolved the way `unit::model_file` resolves it, so a name
+  // that reaches the file by prefix or in another case still asks.
+  function removeModel(name) {
+    // One question at a time too: a second bin press would take the phase to
+    // restore back with it and leave the confirm with no way out.
+    if (root.modelsBusy) return
+    root.modelNote = null
+    var row = root.modelRow(name)
+    if (!ModelsJs.resolves(row, String(root.setting("openaiModel")), root.models)) {
+      root.runModelAction(["remove", name])
+      return
+    }
+    root.askRemoveModel(name)
+  }
+
+  function modelRow(name) {
+    for (var i = 0; i < root.models.length; i++)
+      if (String(root.models[i].name) === name) return root.models[i]
+    return null
+  }
+
+  function askRemoveModel(name) {
+    root.modelConfirm = name
+    root.phaseBeforeModelConfirm = root.phase
+    root.phase = "confirmModel"
+  }
+
+  function confirmRemoveModel(name) {
+    if (root.phase !== "confirmModel") return
+    root.closeModelConfirm()
+    root.runModelAction(["remove", name])
+  }
+
+  function keepModel() {
+    if (root.phase !== "confirmModel") return
+    root.closeModelConfirm()
+  }
+
+  function closeModelConfirm() {
+    root.modelConfirm = ""
+    root.phase = root.phaseBeforeModelConfirm.length > 0 ? root.phaseBeforeModelConfirm : root.phase
+    root.phaseBeforeModelConfirm = ""
+  }
+
+  // One verb at a time. Setting `command` under a process that is already
+  // running would change what the answer on its way back belongs to, and
+  // setting `running` again is a no-op, so the second verb would vanish.
+  function runModelAction(verbArgs) {
+    if (modelActionProcess.running) return
+    modelActionProcess.verbName = verbArgs.length > 1 ? String(verbArgs[1]) : ""
+    modelActionProcess.command = root.modelCommand(verbArgs)
+    modelActionProcess.launchPending = true
+    modelActionProcess.running = true
+  }
+
+  function onModelActionOutput(text, name) {
+    // The verb has spoken about the directory, so every `list` run that started
+    // before now read it too early to know that. Raising the floor to the run
+    // after the last one started is what makes those answers lose.
+    root.modelListFloor = root.modelListSerial + 1
+    var answer = ModelsJs.read(text)
+    if (answer.error) {
+      root.modelNote = ModelsJs.note(answer.error.code, answer.error.message, name)
+      // A cancel or a failure both leave a `.part` file worth redrawing.
+      root.refreshModels()
+      return
+    }
+    root.modelNote = null
+    root.absorbModelReport(answer.report)
+  }
+
+  // The verb is over, whatever it answered, so the poll stops and every other
+  // Download comes back.
+  function finishModelAction() {
+    modelPoll.stop()
+    root.modelBusy = ""
+    modelActionProcess.verbName = ""
   }
 
   // ------------------------------------------------------------------ check
@@ -1042,6 +1277,9 @@ Item {
   // Which card the press landed on, spec sections 6 and 9. Settings owns its
   // own fields, so every card key stays off while it is open.
   function keyMode() {
+    // The Remove confirm sits over the Settings view and is one question, so it
+    // takes the keyboard from every other card while it is up.
+    if (root.phase === "confirmModel") return Keymap.MODE_MODEL_CONFIRM
     if (root.settingsOpen) return Keymap.MODE_IDLE
     if (root.surface === "compose") {
       if (root.phase === "editing") return Keymap.MODE_COMPOSE_EDIT
@@ -1069,6 +1307,8 @@ Item {
     else if (action === Keymap.ACCEPT_ALL) root.acceptAllOpen()
     else if (action === Keymap.COPY) root.copyCorrected()
     else if (action === Keymap.APPLY) root.applyCorrected()
+    else if (action === Keymap.REMOVE_MODEL) root.confirmRemoveModel(root.modelConfirm)
+    else if (action === Keymap.KEEP_MODEL) root.keepModel()
 
     event.accepted = true
   }
@@ -1252,6 +1492,78 @@ Item {
       waitForEnd: true
       onStreamFinished: if (text.length > 0) console.warn("grammachy chunk:", text)
     }
+  }
+
+
+  // The Models list of spec section 5.3. It runs when Settings opens on the
+  // Local LLM engine and once a second while a download is in flight, which is
+  // how the progress bar moves: the CLI prints nothing while curl runs, so the
+  // `.part` file on disk is the only progress there is to read.
+  Process {
+    id: modelListProcess
+    property bool restartQueued: false
+    // When this run read the directory, which is the moment it started.
+    property int startedSerial: 0
+
+    onStarted: {
+      root.modelListSerial += 1
+      modelListProcess.startedSerial = root.modelListSerial
+    }
+    onRunningChanged: {
+      if (modelListProcess.running) return
+      if (!modelListProcess.restartQueued) return
+      modelListProcess.restartQueued = false
+      modelListProcess.running = true
+    }
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root.onModelListOutput(text, modelListProcess.startedSerial)
+    }
+    stderr: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: if (text.length > 0) console.warn("grammachy model list:", text)
+    }
+  }
+
+  // The one verb the user asked for. A download lives here for minutes, which
+  // is why Cancel signals this process rather than ending it: the CLI turns a
+  // SIGTERM into a kept `.part` file and the `cancelled` code.
+  Process {
+    id: modelActionProcess
+    property string verbName: ""
+    property string startedName: ""
+    property bool launchPending: false
+
+    onStarted: {
+      modelActionProcess.launchPending = false
+      modelActionProcess.startedName = modelActionProcess.verbName
+    }
+    onRunningChanged: {
+      if (modelActionProcess.running) return
+      // No binary to run, so there is no stdout for the reader to answer from.
+      if (modelActionProcess.launchPending) {
+        modelActionProcess.launchPending = false
+        root.modelNote = ModelsJs.note(ModelsJs.BAD_ARGUMENTS, "", modelActionProcess.verbName)
+      }
+      root.finishModelAction()
+    }
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root.onModelActionOutput(text, modelActionProcess.startedName)
+    }
+    stderr: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: if (text.length > 0) console.warn("grammachy model:", text)
+    }
+  }
+
+  // One second, because that is the smallest step a reader notices on a bar
+  // that takes minutes to fill, and it is one cheap `stat` per model.
+  Timer {
+    id: modelPoll
+    interval: 1000
+    repeat: true
+    onTriggered: root.refreshModels()
   }
 
   // The progress line of spec section 9 names the time the reader is waiting,
@@ -1483,6 +1795,22 @@ Item {
         openaiModel: root.setting("openaiModel")
         localThinking: root.setting("localThinking") === true
 
+        models: root.models
+        modelBusy: root.modelBusy
+        modelBusyBytes: root.modelBusyBytes
+        modelsBusy: root.modelsBusy
+        modelConfirm: root.modelConfirm
+        modelsDirectory: root.modelsDirectory
+        modelsFreeBytes: root.modelsFreeBytes
+        modelNote: root.modelNote
+
+        onModelDownloadRequested: function(name) { root.downloadModel(name) }
+        onModelCancelRequested: root.cancelModelDownload()
+        onModelUseRequested: function(name) { root.useModel(name) }
+        onModelRemoveRequested: function(name) { root.removeModel(name) }
+        onModelRemoveConfirmed: function(name) { root.confirmRemoveModel(name) }
+        onModelKeepRequested: root.keepModel()
+
         onSettingsToggled: root.settingsOpen = !root.settingsOpen
         onSettingChanged: function(name, value) { root.persistSetting(name, value) }
         onAccepted: function(index) { root.decide(index, true) }
@@ -1544,6 +1872,22 @@ Item {
         openaiBaseUrl: root.setting("openaiBaseUrl")
         openaiModel: root.setting("openaiModel")
         localThinking: root.setting("localThinking") === true
+
+        models: root.models
+        modelBusy: root.modelBusy
+        modelBusyBytes: root.modelBusyBytes
+        modelsBusy: root.modelsBusy
+        modelConfirm: root.modelConfirm
+        modelsDirectory: root.modelsDirectory
+        modelsFreeBytes: root.modelsFreeBytes
+        modelNote: root.modelNote
+
+        onModelDownloadRequested: function(name) { root.downloadModel(name) }
+        onModelCancelRequested: root.cancelModelDownload()
+        onModelUseRequested: function(name) { root.useModel(name) }
+        onModelRemoveRequested: function(name) { root.removeModel(name) }
+        onModelRemoveConfirmed: function(name) { root.confirmRemoveModel(name) }
+        onModelKeepRequested: root.keepModel()
 
         onSettingsToggled: root.settingsOpen = !root.settingsOpen
         onSettingChanged: function(name, value) { root.persistSetting(name, value) }

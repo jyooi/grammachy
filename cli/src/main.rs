@@ -5,6 +5,7 @@ use clap::Parser;
 
 use grammachy::args::{CheckArgs, CheckOptions, Cli, Command, EngineSlug};
 use grammachy::envelope::{Envelope, ErrorCode};
+use grammachy::model::{self, ModelEnvelope};
 use grammachy::settings::StoredSettings;
 use grammachy::setup::{Setup, SetupEnvelope};
 use grammachy::{bench, check, chunk, doctor};
@@ -16,7 +17,8 @@ use grammachy::{bench, check, chunk, doctor};
 /// when its arguments do not describe a run. A `--record` write that fails
 /// after the rows ran keeps the report on stdout and exits 1.
 /// `doctor` renders its report (spec section 10).
-/// `setup` renders its JSON envelope (spec section 10).
+/// `setup` renders its JSON envelope (spec section 10), and so does `model`
+/// (spec section 5.3).
 struct Output {
     text: String,
     exit_code: i32,
@@ -45,6 +47,15 @@ impl From<doctor::DoctorOutput> for Output {
         Output {
             text: output.text.trim_end().to_string(),
             exit_code: output.exit_code,
+        }
+    }
+}
+
+impl From<ModelEnvelope> for Output {
+    fn from(envelope: ModelEnvelope) -> Self {
+        Output {
+            text: envelope.to_json(),
+            exit_code: envelope.exit_code(),
         }
     }
 }
@@ -158,6 +169,14 @@ fn run() -> Option<Output> {
                 )
             };
             Some(envelope.into())
+        }
+        // `model` reads no stdin either: the verb names the model, and the
+        // Settings entry says only which one the engine is currently using.
+        Command::Model(args) => {
+            let defaults = CheckOptions::default();
+            let stored = StoredSettings::load();
+            let openai_model = stored.openai_model.unwrap_or(defaults.openai_model);
+            Some(model::run(&args.verb, &openai_model).into())
         }
     }
 }

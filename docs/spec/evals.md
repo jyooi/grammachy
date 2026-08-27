@@ -41,7 +41,7 @@ The FCE licence is non-commercial research use with a 100-word excerpt cap.
 The stance, recorded in ADR 0003: the bench is research into which engine to recommend; Grammachy is free software under MIT and is not sold, offered for sale, licensed for money, leased, or rented; the repo redistributes no corpus text.
 A commercial fork must drop the fetch step.
 
-- The bench fetches the tarball at run time into a gitignored cache, pinned by sha256 the way `setup/model.rs` pins the weights.
+- The bench fetches the tarball at run time into a gitignored cache, pinned by sha256 the way `cli/src/model/` pins the weights.
   The first fill prints the licence path and its non-commercial line to stderr once.
   With the cache absent the eval tables are skipped with a reason, never an error.
 - The committed sidecar `cli/tests/fixtures/eval-set.sidecar.json` holds ids, document and sentence index, offsets, and error codes only.

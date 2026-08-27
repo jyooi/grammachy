@@ -9,6 +9,13 @@ A missing package carries the exact command that installs it.
 Doctor never installs anything.
 pacman steps stay manual.
 
+Missing weights are the one piece a user fixes without a terminal.
+Settings, Models downloads, picks, and removes any catalogue model (spec section 5.3).
+`grammachy model download <name>` is the same step from a shell.
+Doctor names that command only for a catalogue name.
+The `openaiModel` field takes any name, and a name the catalogue does not carry has no download.
+For such a name the detail says to place the `.gguf` file by hand, or to pick a catalogue model.
+
 ```
 grammachy doctor [--engine <slug>] [--json]
 ```
@@ -34,7 +41,7 @@ Grammachy doctor
   ok       Java runtime        /usr/lib/jvm/default/bin/java
   missing  llama.cpp server    llama.cpp is not installed: /usr/bin/llama-server does not exist. Run: sudo pacman -S llama-cpp ggml-cpu ggml-vulkan
   missing  llama.cpp backend   llama.cpp is missing the ggml-cpu and ggml-vulkan backends. It needs ggml-cpu to answer at all. Run: sudo pacman -S ggml-cpu ggml-vulkan
-  missing  Model weights       No weights for gemma-4-e4b-it in /home/u/.local/share/grammachy/models. Run: grammachy setup
+  missing  Model weights       No weights for gemma-4-e4b-it in /home/u/.local/share/grammachy/models. Run: grammachy model download gemma-4-e4b-it
   ok       Local LLM endpoint  127.0.0.1:8080
   ok       LanguageTool unit   grammachy-languagetool is not running. The next Check starts it.
   ok       llama.cpp unit      grammachy-llama is not running. The next Check starts it.

@@ -2196,6 +2196,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "harper-core",
+ "libc",
  "serde",
  "serde_json",
  "ureq",

@@ -256,7 +256,7 @@ fn a_missing_accelerator_never_hides_the_real_cause() {
     assert!(!report.ready);
     assert_eq!(
         report.diagnosis,
-        "No weights for gemma-4-e4b-it in /home/u/.local/share/grammachy/models. Run: grammachy setup"
+        "No weights for gemma-4-e4b-it in /home/u/.local/share/grammachy/models. Run: grammachy model download gemma-4-e4b-it"
     );
 }
 
@@ -329,7 +329,7 @@ fn a_missing_backend_never_fails_another_engine() {
 }
 
 #[test]
-fn missing_weights_point_at_setup_and_never_at_pacman() {
+fn missing_weights_point_at_the_download_verb_and_never_at_pacman() {
     let mut facts = ready();
     facts.model_file = None;
 
@@ -337,7 +337,47 @@ fn missing_weights_point_at_setup_and_never_at_pacman() {
 
     assert_eq!(missing_lines(&text).len(), 1, "{text}");
     assert!(text.contains("No weights for gemma-4-e4b-it"), "{text}");
-    assert!(text.contains("Run: grammachy setup"), "{text}");
+    assert!(
+        text.contains("Run: grammachy model download gemma-4-e4b-it"),
+        "{text}"
+    );
+}
+
+/// The `openaiModel` field takes any name, and `unit::model_file` resolves a
+/// hand-placed `.gguf`. `model download` refuses such a name, so naming the
+/// verb here would hand the reader a line that always fails.
+#[test]
+fn missing_weights_for_a_name_outside_the_catalogue_name_no_command_to_run() {
+    let mut facts = ready();
+    facts.model = "something-the-user-typed".to_string();
+    facts.model_file = None;
+
+    let report = Report::new(&facts, EngineSlug::Openai);
+    let check = report
+        .checks
+        .iter()
+        .find(|check| check.id == "model")
+        .expect("the model check is there");
+
+    assert!(!check.ok);
+    assert_eq!(
+        check.remedy, None,
+        "a name the catalogue does not carry has no download to run"
+    );
+    assert!(
+        check.detail.contains("something-the-user-typed"),
+        "{}",
+        check.detail
+    );
+    assert!(
+        check.detail.contains("Settings, Models"),
+        "the detail says what does help: {}",
+        check.detail
+    );
+    assert!(
+        !text_of(&facts, EngineSlug::Openai).contains("model download"),
+        "no line the reader could copy and watch fail"
+    );
 }
 
 #[test]

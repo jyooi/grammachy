@@ -38,8 +38,8 @@
 //!   out, which turns a runaway think into an answer rather than a timeout.
 //!
 //! The model file comes from `~/.local/share/grammachy/models/`, which is where
-//! `grammachy setup` downloads it (spec section 10). Nothing here downloads
-//! anything.
+//! `grammachy model download` and the Settings Models list put it (spec
+//! section 5.3). Nothing here downloads anything.
 
 use std::path::{Path, PathBuf};
 
@@ -74,7 +74,7 @@ pub const PACKAGE_SERVER: &str = "/usr/bin/llama-server";
 pub const INSTALL_LINE: &str =
     "sudo pacman -S llama-cpp ggml-cpu   (add ggml-vulkan for a GPU or an iGPU)";
 
-/// Where `grammachy setup` keeps the downloaded weights.
+/// Where the downloaded weights live.
 ///
 /// The product path is `$HOME` only, the same rule the Settings file follows
 /// (spec section 7), so `XDG_DATA_HOME` is not read.
@@ -99,7 +99,7 @@ pub fn model_file(directory: &Path, model: &str) -> Result<PathBuf, StartFailure
     let mut matches: Vec<PathBuf> = std::fs::read_dir(directory)
         .map_err(|error| {
             StartFailure(format!(
-                "No model is installed: {} could not be read ({error}). Run `grammachy setup` to download {model}.",
+                "No model is installed: {} could not be read ({error}). Download {model} in Settings, Models.",
                 directory.display()
             ))
         })?
@@ -115,7 +115,7 @@ pub fn model_file(directory: &Path, model: &str) -> Result<PathBuf, StartFailure
 
     matches.into_iter().next().ok_or_else(|| {
         StartFailure(format!(
-            "No weights file for {model} in {}. Run `grammachy setup` to download it.",
+            "No weights file for {model} in {}. Download it in Settings, Models.",
             directory.display()
         ))
     })

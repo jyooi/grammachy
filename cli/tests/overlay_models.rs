@@ -1,0 +1,384 @@
+//! The Models list of spec section 5.3 makes promises no node test can reach.
+//!
+//! `ui/models.test.js` runs the whole route against a stub binary, but it drives
+//! the verbs itself: the shared functions it calls are only the right ones if
+//! `Overlay.qml` calls the same ones. The overlay cannot be instantiated outside
+//! the shell's plugin loader, so this test reads the file the shell ships and
+//! holds those calls in place, the way `overlay_chunks.rs` holds the Chunk loop.
+//!
+//! No test here downloads a model, writes the models directory, or stops a unit.
+
+use grammachy::envelope::ErrorCode;
+
+fn read(relative: &str) -> String {
+    let path = format!("{}/../{relative}", env!("CARGO_MANIFEST_DIR"));
+    std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("{relative} is readable: {error}"))
+}
+
+/// The body of one `function <name>(...)` in a QML or JavaScript file.
+fn function_body(source: &str, name: &str) -> String {
+    let needle = format!("function {name}(");
+    let start = source
+        .find(&needle)
+        .unwrap_or_else(|| panic!("the source declares {name}"));
+    let open = source[start..]
+        .find('{')
+        .unwrap_or_else(|| panic!("{name} has a body"))
+        + start;
+
+    let mut depth = 0usize;
+    for (offset, character) in source[open..].char_indices() {
+        match character {
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return source[open..=open + offset].to_string();
+                }
+            }
+            _ => {}
+        }
+    }
+    panic!("{name} has a closing brace")
+}
+
+/// The three verbs the CLI answers are the three the overlay runs, spelled the
+/// same way. A fourth spelling would be a `bad_arguments` envelope at run time.
+#[test]
+fn the_overlay_runs_the_three_verbs_of_the_subcommand() {
+    let source = read("Overlay.qml");
+
+    assert!(
+        function_body(&source, "modelCommand").contains("\"model\""),
+        "every verb goes through the model subcommand"
+    );
+    assert!(
+        function_body(&source, "refreshModels").contains("[\"list\"]"),
+        "the list is the list verb"
+    );
+    assert!(
+        function_body(&source, "downloadModel").contains("[\"download\", name]"),
+        "Download runs the download verb on the row's own name"
+    );
+    for remover in ["removeModel", "confirmRemoveModel"] {
+        assert!(
+            function_body(&source, remover).contains("[\"remove\", name]"),
+            "{remover} runs the remove verb on the row's own name"
+        );
+    }
+}
+
+/// The acceptance criterion of the progress bar: the CLI prints nothing while
+/// curl runs, so the only progress there is comes from polling `model list`.
+#[test]
+fn a_running_download_is_polled_once_a_second() {
+    let source = read("Overlay.qml");
+
+    let timer = source
+        .split_once("id: modelPoll")
+        .expect("the overlay declares the poll timer")
+        .1;
+    let body = timer.split_once('}').expect("the timer is closed").0;
+
+    assert!(
+        body.contains("interval: 1000"),
+        "the poll is one second: {body}"
+    );
+    assert!(body.contains("repeat: true"), "the poll repeats: {body}");
+    assert!(
+        body.contains("root.refreshModels()"),
+        "the poll runs the list verb: {body}"
+    );
+
+    // A Repeater rebuilds every delegate the moment its array is replaced, so a
+    // poll that answers the same rows must leave the list alone. Otherwise the
+    // bar restarts its animation once a second rather than advancing across it.
+    let absorb = function_body(&source, "absorbModelReport");
+    assert!(
+        absorb.contains("ModelsJs.sameRows("),
+        "an unchanged answer does not replace the list: {absorb}"
+    );
+    assert!(
+        absorb.contains("root.modelBusyBytes = ModelsJs.partialOf("),
+        "the one number the poll moves rides beside the list: {absorb}"
+    );
+
+    // A poll run reads the directory when it starts, and a download answers
+    // only once it has hashed and renamed the `.part` file. So a poll that
+    // fired during the hash lands afterwards still calling the row `partial`,
+    // and taking it would leave a finished row reading "Part downloaded" for
+    // good. Every list run is stamped and an answer below the floor is dropped.
+    assert!(
+        absorb.contains("ModelsJs.absorbed(root.models, report, stamp, root.modelListFloor)"),
+        "an answer older than the last verb is dropped: {absorb}"
+    );
+    assert!(
+        source.contains("modelListProcess.startedSerial = root.modelListSerial"),
+        "every list run carries the stamp of the moment it started"
+    );
+    assert!(
+        source.contains("root.onModelListOutput(text, modelListProcess.startedSerial)"),
+        "the answer carries the stamp of the run that made it"
+    );
+    assert!(
+        function_body(&source, "onModelActionOutput")
+            .contains("root.modelListFloor = root.modelListSerial + 1"),
+        "a verb that has answered raises the floor over every run already out"
+    );
+    assert!(
+        read("ui/ModelsView.qml").contains("root.busyBytes"),
+        "the running row's bar and hint read that number rather than the list"
+    );
+
+    // It runs only while a download does.
+    assert!(
+        function_body(&source, "downloadModel").contains("modelPoll.start()"),
+        "a download starts the poll"
+    );
+    assert!(
+        function_body(&source, "finishModelAction").contains("modelPoll.stop()"),
+        "the verb ending stops the poll"
+    );
+}
+
+/// Spec section 5.3: one download at a time, and Cancel is a signal rather than
+/// a kill, because the CLI is what turns a SIGTERM into a kept `.part` file.
+#[test]
+fn one_download_runs_at_a_time_and_cancel_signals_it() {
+    let source = read("Overlay.qml");
+    let download = function_body(&source, "downloadModel");
+
+    assert!(
+        download.contains("root.modelBusy = name"),
+        "the row in flight is named, which is what gives it a bar and a Cancel: {download}"
+    );
+    // The running row's bar reads the live count rather than the list, so the
+    // press has to seed it. Otherwise a resumed download animates the bar down
+    // to empty and back up again when the first poll lands.
+    assert!(
+        download.contains("root.modelBusyBytes = ModelsJs.partialOf(root.models, name)"),
+        "a resumed download starts its bar where the part file already is: {download}"
+    );
+
+    // Every verb refuses on the one fact the buttons are drawn from, so a
+    // button is never live over a press that goes nowhere. Naming the states
+    // one at a time is what left a running remove drawing every row enabled.
+    for verb in ["downloadModel", "useModel", "removeModel"] {
+        let body = function_body(&source, verb);
+        assert!(
+            body.contains("root.modelsBusy") && body.contains("return"),
+            "{verb} starts nothing while any verb is in flight: {body}"
+        );
+    }
+
+    // That fact has to cover a running verb and an open question alike.
+    let busy = source
+        .split_once("readonly property bool modelsBusy:")
+        .expect("the overlay names the one busy fact")
+        .1
+        .split_once('\n')
+        .map(|(first, rest)| format!("{first}{}", rest.split_once('\n').unwrap_or((rest, "")).0))
+        .expect("the binding has a body");
+    assert!(
+        busy.contains("modelActionProcess.running") && busy.contains("root.modelConfirm.length"),
+        "a running verb and an open confirm both count as busy: {busy}"
+    );
+    assert!(
+        read("ui/SettingsView.qml").contains("working: root.modelsBusy"),
+        "the Models list draws its disabled buttons from that same fact"
+    );
+
+    let cancel = function_body(&source, "cancelModelDownload");
+    assert!(
+        cancel.contains("modelActionProcess.signal(15)"),
+        "Cancel sends SIGTERM: {cancel}"
+    );
+    for killed in ["running = false", "root.models = []"] {
+        assert!(
+            !cancel.contains(killed),
+            "Cancel must not reach {killed}: {cancel}"
+        );
+    }
+}
+
+/// Spec section 5.3: closing the overlay does not cancel a download, so a
+/// summon leaves the list and the process in flight alone.
+#[test]
+fn a_summon_never_touches_a_download_in_flight() {
+    let reset = function_body(&read("Overlay.qml"), "resetRun");
+
+    for kept in [
+        "root.models = []",
+        "root.modelBusy = \"\"",
+        "modelActionProcess.running = false",
+        "modelPoll.stop()",
+    ] {
+        assert!(
+            !reset.contains(kept),
+            "a summon must not reach {kept}: {reset}"
+        );
+    }
+}
+
+/// Spec section 7: Use is the setting and nothing else, and Remove never
+/// touches it, so the two cannot be confused.
+#[test]
+fn use_writes_the_setting_and_remove_leaves_it_alone() {
+    let source = read("Overlay.qml");
+    let use_model = function_body(&source, "useModel");
+
+    assert!(
+        use_model.contains("root.persistSetting(\"openaiModel\", name)"),
+        "Use writes the openaiModel setting: {use_model}"
+    );
+
+    for remover in ["removeModel", "confirmRemoveModel"] {
+        let body = function_body(&source, remover);
+        assert!(
+            !body.contains("persistSetting"),
+            "{remover} must not touch the setting: {body}"
+        );
+    }
+}
+
+/// Spec section 7: removing the model a Check would run on asks once, and that
+/// confirm is a phase with a key mode of its own.
+#[test]
+fn removing_the_model_in_use_asks_once_through_its_own_phase() {
+    let source = read("Overlay.qml");
+    let remove = function_body(&source, "removeModel");
+
+    assert!(
+        remove.contains("root.setting(\"openaiModel\")"),
+        "the question is asked only about the model the setting names: {remove}"
+    );
+    // A byte comparison against the row name is not what a Check resolves, so
+    // `qwen3-4b` would delete `qwen3-4b-instruct` with no question at all.
+    assert!(
+        remove.contains("ModelsJs.resolves("),
+        "the setting is resolved the way unit::model_file resolves it: {remove}"
+    );
+    assert!(
+        remove.contains("root.askRemoveModel(name)"),
+        "the model in use goes through the confirm: {remove}"
+    );
+    assert!(
+        function_body(&source, "askRemoveModel").contains("root.phase = \"confirmModel\""),
+        "the confirm is a phase of its own"
+    );
+
+    // A new phase that is not named in the key map silently inherits the review
+    // keys, which would make Enter accept an Issue that is not on screen.
+    let key_mode = function_body(&source, "keyMode");
+    assert!(
+        key_mode.contains("root.phase === \"confirmModel\"")
+            && key_mode.contains("Keymap.MODE_MODEL_CONFIRM"),
+        "the confirm phase has its own key mode: {key_mode}"
+    );
+
+    let keymap = read("ui/keymap.js");
+    assert!(
+        keymap.contains("MODE_MODEL_CONFIRM"),
+        "ui/keymap.js knows the mode"
+    );
+    let handler = function_body(&source, "handleKey");
+    assert!(
+        handler.contains("Keymap.REMOVE_MODEL") && handler.contains("Keymap.KEEP_MODEL"),
+        "both answers to the question are routed: {handler}"
+    );
+}
+
+/// A phase answers the keyboard whether or not its card is drawn, so the
+/// confirm has to go the moment the list stops being drawn. Otherwise Enter on
+/// a blank card deletes the weights a Check would load, with nothing on screen
+/// that asked.
+#[test]
+fn hiding_the_models_list_drops_the_confirm_rather_than_leaving_it_answerable() {
+    let source = read("Overlay.qml");
+    let handler = source
+        .split_once("onShowsModelsChanged:")
+        .expect("the overlay reacts to the list appearing and disappearing")
+        .1;
+    let body = handler
+        .split_once("\n  }")
+        .expect("the handler is closed")
+        .0;
+
+    assert!(
+        body.contains("root.closeModelConfirm()"),
+        "the list going away answers the question with Keep: {body}"
+    );
+    assert!(
+        body.contains("root.phase === \"confirmModel\""),
+        "only the confirm phase is dropped, so no other phase is disturbed: {body}"
+    );
+    assert!(
+        body.contains("root.refreshModels()"),
+        "the list still reads itself when it appears: {body}"
+    );
+}
+
+/// The two codes only `grammachy model` can answer have to reach a card, or a
+/// cancelled download would read as the companion tool being out of date.
+#[test]
+fn the_shell_knows_the_two_codes_only_the_model_verbs_answer() {
+    let source = read("ui/models.js");
+
+    for code in [ErrorCode::Cancelled, ErrorCode::DownloadFailed] {
+        let snake = serde_json::to_string(&code).expect("an error code serialises");
+        assert!(
+            source.contains(&snake),
+            "ui/models.js has a note for {snake}"
+        );
+    }
+}
+
+/// The three states of spec section 5.3 are the three the shell draws.
+#[test]
+fn the_shell_knows_every_state_a_row_can_be_in() {
+    let source = read("ui/models.js");
+    let states = read("cli/src/model/envelope.rs");
+    let block = states
+        .split_once("pub enum State {")
+        .expect("envelope.rs declares State")
+        .1
+        .split_once('}')
+        .expect("the State enum is closed")
+        .0;
+
+    let names: Vec<String> = block
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with("//") && !line.starts_with("///"))
+        .map(|line| line.trim_end_matches(',').to_ascii_lowercase())
+        .collect();
+
+    assert_eq!(names, ["absent", "partial", "ready"]);
+    for state in names {
+        assert!(
+            source.contains(&format!("\"{state}\"")),
+            "ui/models.js knows the {state} state"
+        );
+    }
+}
+
+/// The Models list is drawn only for the engine that has weights, spec
+/// section 7, and it is read only when it is drawn.
+#[test]
+fn the_list_belongs_to_the_local_llm_engine_alone() {
+    let source = read("Overlay.qml");
+
+    assert!(
+        source.contains("readonly property bool showsModels: root.settingsOpen")
+            && source.contains("String(root.setting(\"engine\")) === \"openai\""),
+        "the list is the Local LLM engine's alone"
+    );
+    assert!(
+        source.contains("onShowsModelsChanged:"),
+        "opening it is what reads it"
+    );
+    assert!(
+        read("ui/SettingsView.qml").contains("visible: root.showsOpenai"),
+        "the block it sits in is shown for the openai engine only"
+    );
+}

@@ -19,6 +19,9 @@ var COPY = "copy"
 var APPLY = "apply"
 var CHECK = "check"
 var BACK = "back"
+// The Remove confirm of the Models list, spec section 7.
+var REMOVE_MODEL = "removeModel"
+var KEEP_MODEL = "keepModel"
 
 // Which card the press landed on. The popup review keys are the whole map;
 // Compose reuses them in its own review mode and keeps almost nothing in edit
@@ -27,6 +30,10 @@ var MODE_IDLE = "idle"
 var MODE_REVIEW = "review"
 var MODE_COMPOSE_EDIT = "composeEdit"
 var MODE_COMPOSE_REVIEW = "composeReview"
+// The Remove confirm of the Models list, spec section 7. It sits over the
+// Settings view, which owns every other key, so this mode carries the two
+// answers to that one question and nothing else.
+var MODE_MODEL_CONFIRM = "modelConfirm"
 
 // The action a key press asks for, or NONE.
 //
@@ -45,6 +52,16 @@ function action(event, codes, mode) {
   // it down. Alt and Meta belong to the compositor, so they never land here.
   var foreign = (modifiers & (codes.alt | codes.meta)) !== 0
   var enter = key === codes.enter || key === codes.returnKey
+
+  // The confirm is a question, so Esc answers it rather than leaving the card
+  // with the question still open behind it. Only a bare Enter answers the
+  // other way: Ctrl + Enter is Apply on every other card, and a reader who
+  // pressed it out of habit did not ask for a model to be deleted.
+  if (mode === MODE_MODEL_CONFIRM) {
+    if (key === codes.escape) return KEEP_MODEL
+    if (foreign || control) return NONE
+    return enter ? REMOVE_MODEL : NONE
+  }
 
   if (key === codes.escape) return mode === MODE_COMPOSE_REVIEW ? BACK : CLOSE
   if (foreign) return NONE
@@ -83,9 +100,12 @@ if (typeof module !== "undefined" && module.exports) {
     APPLY: APPLY,
     CHECK: CHECK,
     BACK: BACK,
+    REMOVE_MODEL: REMOVE_MODEL,
+    KEEP_MODEL: KEEP_MODEL,
     MODE_IDLE: MODE_IDLE,
     MODE_REVIEW: MODE_REVIEW,
     MODE_COMPOSE_EDIT: MODE_COMPOSE_EDIT,
-    MODE_COMPOSE_REVIEW: MODE_COMPOSE_REVIEW
+    MODE_COMPOSE_REVIEW: MODE_COMPOSE_REVIEW,
+    MODE_MODEL_CONFIRM: MODE_MODEL_CONFIRM
   }
 }

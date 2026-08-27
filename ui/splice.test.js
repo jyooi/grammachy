@@ -1,5 +1,5 @@
 // Node tests for the Corrected text splice and the Chunk span math.
-// Spec sections 5.2, 5.3, 9, and 13.
+// Spec sections 5.2, 5.4, 9, and 13.
 // Run with `node --test ui/`.
 
 const test = require("node:test")

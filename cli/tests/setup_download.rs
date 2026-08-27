@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::thread;
 
-use grammachy::setup::model;
+use grammachy::model;
 
 /// What the stub serves in place of a 4.7 GB file.
 const FAKE_WEIGHTS: &[u8] = b"GGUF fake weights for the test suite";
