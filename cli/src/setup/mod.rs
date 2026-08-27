@@ -1,16 +1,21 @@
-//! `grammachy setup` and `grammachy setup --remove`, spec section 10.
+//! `grammachy setup`, `grammachy setup --openrouter-key`, and
+//! `grammachy setup --remove`, spec section 10.
 //!
 //! Setup does the parts of the install that need no password, and it does them
 //! idempotently: running it twice leaves exactly one binding block and exactly
 //! one menu row, and `--remove` puts both files back as they were. The model
 //! stays, because it is a slow download and the user may well install again.
+//! `--openrouter-key` is a run of its own: it writes the key file of section 4
+//! from stdin and touches neither configuration file.
 //!
 //! Every path this module touches is injectable, and so are the two side
 //! effects, `hyprctl reload` and the download. No test writes a real
-//! configuration file, reloads a real compositor, or fetches a real model.
+//! configuration file, reloads a real compositor, fetches a real model, or
+//! writes the real key.
 
 pub mod bindings;
 pub mod block;
+pub mod key;
 pub mod menu;
 
 use std::path::PathBuf;
@@ -55,7 +60,8 @@ impl Step {
 pub struct SetupReport {
     #[serde(rename = "contractVersion")]
     pub contract_version: u32,
-    /// `install` or `remove`, so the shell need not guess from the flags.
+    /// `install`, `key`, or `remove`, so the shell need not guess from the
+    /// flags.
     pub mode: &'static str,
     pub steps: Vec<Step>,
 }
@@ -100,11 +106,13 @@ impl SetupEnvelope {
     }
 }
 
-/// What one run works on: three paths and the two side effects.
+/// What one run works on: four paths and the two side effects.
 pub struct Setup {
     pub bindings_path: PathBuf,
     pub menu_path: PathBuf,
     pub models_directory: PathBuf,
+    /// The OpenRouter key file of spec section 4.
+    pub key_path: PathBuf,
     pub reload: bindings::Reloader,
     pub download: model::Downloader,
 }
@@ -116,6 +124,7 @@ impl Setup {
             bindings_path: bindings::path().ok_or_else(no_home)?,
             menu_path: menu::path().ok_or_else(no_home)?,
             models_directory: model::directory().ok_or_else(no_home)?,
+            key_path: key::path().ok_or_else(no_home)?,
             reload: bindings::reloader_from_env(),
             download: model::downloader(),
         })
@@ -160,9 +169,9 @@ impl Setup {
         SetupEnvelope::report("install", steps)
     }
 
-    /// The hotkeys and the menu entry, reversed. The model stays where it is.
+    /// The hotkeys, the menu entry, and the key, reversed. The model stays.
     pub fn remove(&self) -> SetupEnvelope {
-        let mut steps = Vec::with_capacity(4);
+        let mut steps = Vec::with_capacity(5);
 
         match bindings::remove(&self.bindings_path) {
             Ok(changed) => steps.push(Step::new(
@@ -187,6 +196,22 @@ impl Setup {
             Err(message) => return SetupEnvelope::error(message),
         }
 
+        // Spec section 10: the key goes with the install, because it is the
+        // one thing here that a later user of this machine could spend.
+        match key::remove(&self.key_path) {
+            Ok(true) => steps.push(Step::new(
+                "key",
+                State::Changed,
+                format!("{} was deleted.", self.key_path.display()),
+            )),
+            Ok(false) => steps.push(Step::new(
+                "key",
+                State::Unchanged,
+                format!("There is no key at {}.", self.key_path.display()),
+            )),
+            Err(message) => return SetupEnvelope::error(message),
+        }
+
         steps.push(Step::new(
             "model",
             State::Skipped,
@@ -197,6 +222,34 @@ impl Setup {
         ));
 
         SetupEnvelope::report("remove", steps)
+    }
+
+    /// The OpenRouter key of spec section 4, read from stdin.
+    ///
+    /// This run writes nothing else, and the report never carries the key: a
+    /// reader of the envelope learns the path and the mode and no more.
+    pub fn write_key(&self, stdin: &str) -> SetupEnvelope {
+        let parsed = match key::parse(stdin) {
+            Ok(parsed) => parsed,
+            Err(message) => return SetupEnvelope::error(message),
+        };
+
+        match key::write(&self.key_path, &parsed) {
+            Ok(changed) => SetupEnvelope::report(
+                "key",
+                vec![Step::new(
+                    "key",
+                    state_of(changed),
+                    format!(
+                        "{} is mode 0{:o} in a mode 0{:o} directory.",
+                        self.key_path.display(),
+                        key::FILE_MODE,
+                        key::DIRECTORY_MODE
+                    ),
+                )],
+            ),
+            Err(message) => SetupEnvelope::error(message),
+        }
     }
 
     /// The weights, and only when the engine setting asks for them.

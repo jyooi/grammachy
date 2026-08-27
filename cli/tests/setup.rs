@@ -24,6 +24,7 @@ struct Home {
     bindings: PathBuf,
     menu: PathBuf,
     models: PathBuf,
+    key: PathBuf,
     reloads: Arc<AtomicUsize>,
     downloads: Arc<AtomicUsize>,
 }
@@ -45,6 +46,10 @@ impl Home {
 
         Home {
             models: directory.join("models"),
+            key: directory
+                .join("config")
+                .join("grammachy")
+                .join("openrouter-key"),
             directory,
             bindings,
             menu,
@@ -62,6 +67,7 @@ impl Home {
             bindings_path: self.bindings.clone(),
             menu_path: self.menu.clone(),
             models_directory: self.models.clone(),
+            key_path: self.key.clone(),
             reload: Box::new(move || {
                 reloads.fetch_add(1, Ordering::SeqCst);
                 Ok(())
@@ -247,6 +253,7 @@ fn a_half_finished_download_never_becomes_the_model() {
         bindings_path: home.bindings.clone(),
         menu_path: home.menu.clone(),
         models_directory: home.models.clone(),
+        key_path: home.key.clone(),
         reload: Box::new(|| Ok(())),
         download: Box::new(|_url, path| {
             std::fs::write(path, b"half").expect("the partial file is written");
@@ -273,6 +280,7 @@ fn a_download_failure_still_writes_hotkeys_and_menu() {
         bindings_path: home.bindings.clone(),
         menu_path: home.menu.clone(),
         models_directory: home.models.clone(),
+        key_path: home.key.clone(),
         reload: Box::new(|| Ok(())),
         download: Box::new(|_url, _path| Err("the host refused".to_string())),
     };
@@ -296,4 +304,106 @@ fn the_hardware_tier_names_the_backend_packages() {
     assert_eq!(with, model::Tier::Vulkan);
     assert_eq!(without.backend_packages(), ["ggml-cpu"]);
     assert_eq!(with.backend_packages(), ["ggml-cpu", "ggml-vulkan"]);
+}
+
+/// The mode of one path, as the twelve low bits Unix keeps.
+fn mode_of(path: &Path) -> u32 {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::metadata(path)
+        .expect("the path exists")
+        .permissions()
+        .mode()
+        & 0o777
+}
+
+#[test]
+fn the_key_lands_in_a_private_file_inside_a_private_directory() {
+    let home = Home::new("key-write");
+    let setup = home.setup();
+
+    let envelope = setup.write_key("sk-or-v1-example\n");
+
+    assert_eq!(envelope.exit_code(), 0);
+    assert_eq!(report(&envelope).mode, "key");
+    assert_eq!(step(&envelope, "key").state, State::Changed);
+    assert_eq!(
+        std::fs::read_to_string(&home.key).expect("the key file is readable"),
+        "sk-or-v1-example\n"
+    );
+    assert_eq!(mode_of(&home.key), 0o600);
+    assert_eq!(
+        mode_of(home.key.parent().expect("the key has a directory")),
+        0o700
+    );
+}
+
+/// The key file is the one thing here a report could leak, so it never does.
+#[test]
+fn no_step_of_a_key_run_prints_the_key() {
+    let home = Home::new("key-secret");
+
+    let envelope = home.setup().write_key("sk-or-v1-secret");
+
+    assert!(
+        !envelope.to_json().contains("sk-or-v1-secret"),
+        "{envelope:?}"
+    );
+}
+
+#[test]
+fn writing_the_same_key_twice_changes_nothing_the_second_time() {
+    let home = Home::new("key-twice");
+    let setup = home.setup();
+
+    let first = setup.write_key("sk-or-v1-same");
+    let second = setup.write_key("sk-or-v1-same");
+    let third = setup.write_key("sk-or-v1-other");
+
+    assert_eq!(step(&first, "key").state, State::Changed);
+    assert_eq!(step(&second, "key").state, State::Unchanged);
+    assert_eq!(step(&third, "key").state, State::Changed);
+    assert_eq!(mode_of(&home.key), 0o600);
+}
+
+/// A key file made loose by hand becomes private again on the next write.
+#[test]
+fn a_rewrite_tightens_a_loose_key_file() {
+    use std::os::unix::fs::PermissionsExt;
+    let home = Home::new("key-loose");
+    let setup = home.setup();
+    setup.write_key("sk-or-v1-first");
+    std::fs::set_permissions(&home.key, std::fs::Permissions::from_mode(0o644))
+        .expect("the mode is loosened by hand");
+
+    setup.write_key("sk-or-v1-second");
+
+    assert_eq!(mode_of(&home.key), 0o600);
+}
+
+#[test]
+fn stdin_that_is_not_one_key_is_refused_and_writes_nothing() {
+    let home = Home::new("key-bad-stdin");
+    let setup = home.setup();
+
+    for stdin in ["", "   \n", "sk-or-v1-one sk-or-v1-two", "sk-or\nv1"] {
+        let envelope = setup.write_key(stdin);
+
+        assert_eq!(envelope.exit_code(), 1, "{stdin:?}");
+        assert!(!home.key.exists(), "{stdin:?}");
+    }
+}
+
+#[test]
+fn remove_deletes_the_key_and_says_so_once() {
+    let home = Home::new("key-remove");
+    let setup = home.setup();
+    setup.install(EngineSlug::Languagetool, "gemma-4-e4b-it");
+    setup.write_key("sk-or-v1-goes-away");
+
+    let first = setup.remove();
+    let second = setup.remove();
+
+    assert_eq!(step(&first, "key").state, State::Changed);
+    assert_eq!(step(&second, "key").state, State::Unchanged);
+    assert!(!home.key.exists());
 }

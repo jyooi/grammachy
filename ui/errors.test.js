@@ -181,6 +181,39 @@ test("every engine setting reaches its card by its display name", () => {
   }
 })
 
+// Spec section 8 and HUF-229: the cloud engine runs on nothing this machine
+// installs, so its card never asks for a `doctor` line. The CLI message under
+// the body carries the reason word instead.
+test("the cloud engine card carries the message and asks for no diagnosis", () => {
+  const model = card(ENGINE_UNAVAILABLE, {
+    engineLabel: "Cloud LLM",
+    engineSlug: "openrouter",
+    message: "OpenRouter credits are used up. Add credits on openrouter.ai, then retry. (reason: no_credit)"
+  })
+
+  assert.equal(model.title, "Cloud LLM could not run the check")
+  assert.equal(model.body, "Grammachy could not reach openrouter.ai.")
+  assert.equal(model.needsDiagnosis, false)
+  assert.ok(model.message.includes("no_credit"))
+  assert.deepEqual(model.buttons, languageToolCard(ENGINE_UNAVAILABLE).buttons)
+  assert.equal(model.primary, languageToolCard(ENGINE_UNAVAILABLE).primary)
+})
+
+// Every other engine still gets the `doctor` line, which is what tells the two
+// branches apart.
+test("only the cloud engine skips the doctor line", () => {
+  for (const slug of Object.keys(TIMEOUT_SECONDS)) {
+    const model = card(ENGINE_UNAVAILABLE, { engineLabel: "Engine", engineSlug: slug })
+    assert.equal(model.needsDiagnosis, slug !== "openrouter", slug)
+  }
+})
+
+test("the cloud engine waits thirty seconds", () => {
+  assert.equal(timeoutSeconds("openrouter"), 30)
+  assert.equal(card(ENGINE_TIMEOUT, { engineSlug: "openrouter" }).body,
+    "No answer within 30 s. A first start can take a moment.")
+})
+
 test("every card carries a title, a body, a meta line, and buttons", () => {
   for (const code of CODES) {
     if (code === TEXT_TOO_LONG) continue

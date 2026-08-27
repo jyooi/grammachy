@@ -12,7 +12,7 @@ use crate::args::EngineSlug;
 use crate::envelope::CONTRACT_VERSION;
 use crate::model;
 
-use super::facts::{Backend, Facts, HardwareTier, UnitState};
+use super::facts::{Backend, Facts, HardwareTier, KeyState, UnitState};
 
 /// One thing `doctor` looked at.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -72,11 +72,10 @@ impl Report {
     pub fn new(facts: &Facts, engine: EngineSlug) -> Self {
         let tier = facts.tier();
         let checks = build_checks(facts, tier);
-        let ready = unchecked(engine).is_none()
-            && checks
-                .iter()
-                .filter(|check| check.needed_by(engine))
-                .all(|check| check.ok);
+        let ready = checks
+            .iter()
+            .filter(|check| check.needed_by(engine))
+            .all(|check| check.ok);
         let diagnosis = diagnose(&checks, facts, engine);
 
         Report {
@@ -130,6 +129,7 @@ fn build_checks(facts: &Facts, tier: HardwareTier) -> Vec<Check> {
         backend_check(facts),
         model_check(facts),
         endpoint_check(facts),
+        key_check(facts),
         unit_check(
             "unit:languagetool",
             "LanguageTool unit",
@@ -156,7 +156,7 @@ fn binary_check(facts: &Facts) -> Check {
             ok: true,
             detail: format!("grammachy {version} at {}", path.display()),
             remedy: None,
-            engines: vec!["languagetool", "openai", "harper"],
+            engines: vec!["languagetool", "openai", "harper", "openrouter"],
         },
         None => Check {
             id: "binary",
@@ -164,7 +164,7 @@ fn binary_check(facts: &Facts) -> Check {
             ok: false,
             detail: format!("grammachy {version} runs, but its own path is not readable."),
             remedy: None,
-            engines: vec!["languagetool", "openai", "harper"],
+            engines: vec!["languagetool", "openai", "harper", "openrouter"],
         },
     }
 }
@@ -398,6 +398,59 @@ fn endpoint_check(facts: &Facts) -> Check {
     }
 }
 
+/// The OpenRouter key file, spec section 4.
+///
+/// The remedy is the one command that stores a key, and it takes the key on
+/// stdin, so no key ever reaches a process list or this report.
+fn key_check(facts: &Facts) -> Check {
+    let write = crate::setup::key::WRITE_COMMAND.to_string();
+    match &facts.openrouter_key {
+        KeyState::Ready(path) => Check {
+            id: "key",
+            name: "OpenRouter key",
+            ok: true,
+            detail: format!("{} is stored, mode 0600.", path.display()),
+            remedy: None,
+            engines: vec!["openrouter"],
+        },
+        KeyState::Missing(path) => Check {
+            id: "key",
+            name: "OpenRouter key",
+            ok: false,
+            detail: format!("No OpenRouter key: {} does not exist.", path.display()),
+            remedy: Some(write),
+            engines: vec!["openrouter"],
+        },
+        KeyState::Empty(path) => Check {
+            id: "key",
+            name: "OpenRouter key",
+            ok: false,
+            detail: format!("The OpenRouter key file {} is empty.", path.display()),
+            remedy: Some(write),
+            engines: vec!["openrouter"],
+        },
+        KeyState::Loose { path, mode } => Check {
+            id: "key",
+            name: "OpenRouter key",
+            ok: false,
+            detail: format!(
+                "The OpenRouter key {} is mode 0{mode:o}, which another user can read.",
+                path.display()
+            ),
+            remedy: Some(format!("chmod 600 {}", path.display())),
+            engines: vec!["openrouter"],
+        },
+        KeyState::NoHome => Check {
+            id: "key",
+            name: "OpenRouter key",
+            ok: false,
+            detail: "No OpenRouter key file: HOME is not set.".to_string(),
+            remedy: None,
+            engines: vec!["openrouter"],
+        },
+    }
+}
+
 /// A stopped unit is not a fault: the next Check starts it (spec section 4).
 fn unit_check(
     id: &'static str,
@@ -443,27 +496,7 @@ fn diagnose(checks: &[Check], facts: &Facts, engine: EngineSlug) -> String {
     {
         return failed.line();
     }
-    match unchecked(engine) {
-        Some(why) => why.to_string(),
-        None => ready_line(facts, engine),
-    }
-}
-
-/// Why `doctor` cannot say the cloud engine is ready.
-///
-/// The engine needs one piece, the key file, and no check reads it yet.
-const CLOUD_UNCHECKED: &str =
-    "Grammachy cannot check the cloud key yet. Put the OpenRouter key in ~/.config/grammachy/openrouter-key.";
-
-/// Why `doctor` cannot decide one engine's readiness, when it cannot.
-///
-/// An engine whose pieces no check reads is never reported ready, because a
-/// ready answer on no evidence is worse than no answer.
-fn unchecked(engine: EngineSlug) -> Option<&'static str> {
-    match engine {
-        EngineSlug::Openrouter => Some(CLOUD_UNCHECKED),
-        _ => None,
-    }
+    ready_line(facts, engine)
 }
 
 /// What to say when nothing is missing.
@@ -497,6 +530,13 @@ fn ready_line(facts: &Facts, engine: EngineSlug) -> String {
                 ),
             }
         }
-        EngineSlug::Openrouter => CLOUD_UNCHECKED.to_string(),
+        // The one engine that sends text off this machine, so the ready line
+        // says where the text goes.
+        EngineSlug::Openrouter => {
+            let model = &facts.openrouter_model;
+            format!(
+                "The key is in place and the model is {model}. Checks send text to openrouter.ai."
+            )
+        }
     }
 }

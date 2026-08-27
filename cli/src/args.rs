@@ -114,9 +114,15 @@ pub struct DoctorArgs {
 
 #[derive(Debug, Parser)]
 pub struct SetupArgs {
-    /// Take the hotkeys and the menu entry out again, keeping the weights.
+    /// Take the hotkeys, the menu entry, and the OpenRouter key out again,
+    /// keeping the weights.
     #[arg(long)]
     pub remove: bool,
+
+    /// Read one OpenRouter key from stdin and write it to the key file of
+    /// spec section 4. It writes nothing else and it prints no key.
+    #[arg(long = "openrouter-key", conflicts_with = "remove")]
+    pub openrouter_key: bool,
 }
 
 #[derive(Debug, Parser)]
@@ -137,6 +143,11 @@ pub struct CheckArgs {
     /// stored `localThinking`, then the default `on`.
     #[arg(long, value_enum)]
     pub thinking: Option<Thinking>,
+
+    /// The model id the `openrouter` engine asks for, such as
+    /// `deepseek/deepseek-v4-flash`. Omitted uses the stored entry.
+    #[arg(long = "openrouter-model", value_name = "ID")]
+    pub openrouter_model: Option<String>,
 }
 
 /// The `--thinking` flag of spec section 4, which wins over the Setting.
@@ -309,7 +320,8 @@ impl CheckOptions {
     ///
     /// `shell.json` holds no key for a flag the spec does not define, so the
     /// two OpenAI text fields and the API key resolve from the file and the
-    /// defaults only.
+    /// defaults only. The OpenRouter key is never a Setting at all: it lives
+    /// in its own 0600 file (spec section 4).
     pub fn resolve(args: &CheckArgs, stored: &StoredSettings) -> Self {
         let defaults = CheckOptions::default();
         CheckOptions {
@@ -325,9 +337,10 @@ impl CheckOptions {
                 .openai_api_key
                 .clone()
                 .unwrap_or(defaults.openai_api_key),
-            openrouter_model: stored
+            openrouter_model: args
                 .openrouter_model
                 .clone()
+                .or_else(|| stored.openrouter_model.clone())
                 .unwrap_or(defaults.openrouter_model),
             local_thinking: args
                 .thinking

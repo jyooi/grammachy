@@ -60,7 +60,8 @@ var BUTTON_LABELS = {
 var TIMEOUT_SECONDS = {
   languagetool: 10,
   openai: 90,
-  harper: 10
+  harper: 10,
+  openrouter: 30
 }
 
 // What an engine with no entry above would wait. Every slug the Settings layer
@@ -159,6 +160,16 @@ function card(code, options) {
   }
 
   if (settled === ENGINE_UNAVAILABLE) {
+    // The cloud engine runs on no piece of this machine, so `doctor` has
+    // nothing to add: the CLI message under the body is the whole diagnosis.
+    if (String(context.engineSlug) === "openrouter") {
+      model.title = engine + " could not run the check"
+      model.meta = "cloud engine not reachable"
+      model.body = "Grammachy could not reach openrouter.ai."
+      model.buttons = [CLOSE, RETRY, SETTINGS]
+      model.primary = RETRY
+      return model
+    }
     model.title = engine + " is not running"
     model.meta = "engine not reachable"
     model.body = "Grammachy could not reach it on this machine."

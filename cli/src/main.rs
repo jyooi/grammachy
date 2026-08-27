@@ -145,14 +145,16 @@ fn run() -> Option<Output> {
                     target: None,
                     engine: args.engine,
                     thinking: None,
+                    openrouter_model: None,
                 },
                 &StoredSettings::load(),
             );
             let facts = doctor::Facts::collect(&options);
             Some(doctor::run(&facts, options.engine, args.json).into())
         }
-        // Setup reads no stdin: the engine and the model name come from the
-        // Settings entry, the same source a Check uses (spec section 7).
+        // Setup reads stdin only for `--openrouter-key`: otherwise the engine
+        // and the model name come from the Settings entry, the same source a
+        // Check uses (spec section 7).
         Command::Setup(args) => {
             let defaults = CheckOptions::default();
             let stored = StoredSettings::load();
@@ -160,7 +162,14 @@ fn run() -> Option<Output> {
                 Ok(setup) => setup,
                 Err(message) => return Some(SetupEnvelope::error(message).into()),
             };
-            let envelope = if args.remove {
+            let envelope = if args.openrouter_key {
+                // The key comes on stdin and never on the command line, so no
+                // process list ever holds it (spec section 10).
+                match read_stdin() {
+                    Ok(text) => setup.write_key(&text),
+                    Err(message) => SetupEnvelope::error(message),
+                }
+            } else if args.remove {
                 setup.remove()
             } else {
                 setup.install(
@@ -190,6 +199,7 @@ fn engine_of(flag: Option<EngineSlug>) -> EngineSlug {
             target: None,
             engine: flag,
             thinking: None,
+            openrouter_model: None,
         },
         &StoredSettings::load(),
     )
