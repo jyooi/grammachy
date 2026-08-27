@@ -159,6 +159,8 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   The Chunk table is a gate, not a ranking: wall time, validity, and recall only.
   The Drafts run beside the fixture set alone, so `--eval-set` still checks them once and prints one table.
   `cli/tests/bench.rs` must seam every server the run can reach, LanguageTool and the OpenAI base URL both.
+  It must also seam `GRAMMACHY_BENCH_RESIDENT_BYTES`, which fixes what a server row measured.
+  The tier bar reads that number, so without the seam a recommended row would need a live `grammachy-llama` unit and CI would recommend nothing.
   The OpenAI default is a fixed loopback port, so a machine that already runs llama.cpp there answers a case meant to find nothing.
   `--eval-set` runs the 365-item eval set of `docs/spec/evals.md` section 2 beside the fixture tables, and only the eval set names a recommendation.
   ADR 0003 is the hard rule: the CLC FCE corpus is fetched at run time into the gitignored `cli/.eval-cache/`, and no part of it is committed.

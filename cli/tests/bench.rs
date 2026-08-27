@@ -607,6 +607,14 @@ fn empty_models_dir() -> PathBuf {
     dir
 }
 
+/// The resident memory every server row of the suite reports.
+///
+/// The real number comes from a live LanguageTool or llama.cpp unit, which no
+/// case may need. Evals spec section 5 bars a local row over the 8 GB tier from
+/// the recommendation, so a run that measured nothing recommends nothing. This
+/// is what a 4B model holds on a real machine, and it is inside that tier.
+const RESIDENT_BYTES: u64 = 2_200_000_000;
+
 /// Run `grammachy bench` with the seams that keep the suite off this machine.
 ///
 /// The cloud engine is seamed too, onto a dead address and a scratch key file,
@@ -617,6 +625,18 @@ fn bench(settings: &Path, arguments: &[&str]) -> Run {
 
 /// The same run with the cloud engine pointed at one stub endpoint.
 fn bench_cloud(settings: &Path, arguments: &[&str], openrouter_url: &str) -> Run {
+    bench_seamed(settings, arguments, openrouter_url, RESIDENT_BYTES)
+}
+
+/// The same run with the resident memory of every server row chosen.
+///
+/// A case that wants the tier bar to bite names a number over the tier here.
+fn bench_seamed(
+    settings: &Path,
+    arguments: &[&str],
+    openrouter_url: &str,
+    resident_bytes: u64,
+) -> Run {
     let output = Command::new(env!("CARGO_BIN_EXE_grammachy"))
         .arg("bench")
         .args(arguments)
@@ -627,6 +647,7 @@ fn bench_cloud(settings: &Path, arguments: &[&str], openrouter_url: &str) -> Run
         .env("GRAMMACHY_OPENROUTER_URL", openrouter_url)
         .env("GRAMMACHY_OPENROUTER_KEY_FILE", key_file(settings))
         .env("GRAMMACHY_MODELS_DIR", empty_models_dir())
+        .env("GRAMMACHY_BENCH_RESIDENT_BYTES", resident_bytes.to_string())
         .output()
         .expect("the binary runs");
 
@@ -760,6 +781,38 @@ fn a_named_model_is_evaluated_against_the_endpoint_of_the_settings() {
         run.stdout
             .contains("grammachy bench --engine openai --model qwen3-4b-instruct"),
         "the file names the command that produced it:\n{}",
+        run.stdout
+    );
+}
+
+/// Evals spec section 5: a local row over the 8 GB tier is a reference result
+/// and never the recommendation, however good its numbers are.
+#[test]
+fn a_local_row_over_the_memory_tier_is_shown_but_never_recommended() {
+    let settings = settings_file(
+        "over-tier.json",
+        &format!(
+            r#""openaiBaseUrl": "http://{}""#,
+            stub_server(answer_body(None))
+        ),
+    );
+
+    let run = bench_seamed(
+        &settings,
+        &["--engine", "openai", "--model", "qwen3-4b-instruct"],
+        &format!("http://{}", silent_address()),
+        9_000_000_000,
+    );
+
+    assert_eq!(run.status, 0, "{}", run.stdout);
+    let cost = cost_row(&run.stdout, "qwen3-4b-instruct");
+    assert!(cost.contains("| no, over the 8 GB tier |"), "{cost}");
+    // It is still a full row: the table shows every number it measured.
+    assert!(cost.contains("| 9.0 GB |"), "{cost}");
+    assert!(
+        run.stdout
+            .contains("No local row is eligible for the recommendation."),
+        "{}",
         run.stdout
     );
 }

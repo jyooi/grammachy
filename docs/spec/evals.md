@@ -170,6 +170,8 @@ Two lines, re-decided from the eval-set tables on every tag ([HUF-205](https://l
   A second line names the value cloud model: the cheapest row within 10 points of exact fix of the recommended one, when one exists, so the cost trade-off stays visible.
   A row inside that window that costs no less than the recommended one is no value line, because it saves the reader nothing.
   With no value line the file says so, rather than staying silent.
+  It also says why, because a reader must be able to tell "nothing was cheaper" from "nothing was priced".
+  The file claims a cost comparison only when the recommended row and at least one other eligible cloud row both reported a cost per 1,000 Checks.
 - Cloud is never the default engine.
 - `cli/src/bench/weights.rs` is the one place these bars live, and `cli/src/bench/report.rs` only ranks what clears them.
 

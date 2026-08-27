@@ -805,6 +805,46 @@ impl Report {
             .map(|(index, _)| index)
     }
 
+    /// Why this run names no value cloud model, in one sentence.
+    ///
+    /// A reader of a committed benchmark file must be able to tell "nothing was
+    /// cheaper" from "nothing was priced" (HUF-232). So the comparison sentence
+    /// prints only when the run really compared two costs. Every other reason
+    /// gets a sentence of its own, and each sentence is true whenever it prints.
+    fn no_value_line(&self, set: &SetTables, default_fp: Option<usize>) -> String {
+        let recommended = self.winner(set, true, default_fp);
+        let priced = recommended
+            .and_then(|index| set.models.get(index))
+            .and_then(|row| row.outcome.tally())
+            .and_then(Tally::cost_per_1000);
+        let rivals: Vec<Option<f64>> = set
+            .models
+            .iter()
+            .enumerate()
+            .filter(|(index, row)| row.is_cloud() && Some(*index) != recommended)
+            .filter(|(_, row)| self.objection(row, default_fp).is_none())
+            .filter_map(|(_, row)| row.outcome.tally())
+            .map(Tally::cost_per_1000)
+            .collect();
+
+        let reason = if priced.is_none() {
+            "The recommended cloud row reported no cost".to_string()
+        } else if rivals.is_empty() {
+            match set.models.iter().filter(|row| row.is_cloud()).count() {
+                1 => "Only one cloud row ran".to_string(),
+                _ => "No other cloud row is eligible for the comparison".to_string(),
+            }
+        } else if rivals.iter().all(Option::is_none) {
+            "No other cloud row reported a cost".to_string()
+        } else {
+            format!(
+                "No cloud row is cheaper than the recommended one within {:.0} points of exact fix",
+                weights::VALUE_WINDOW_POINTS
+            )
+        };
+        format!("{reason}, so this run names no value cloud model.\n")
+    }
+
     /// The false positives of the default engine on this set, when it ran.
     fn default_engine_false_positives(&self, set: &SetTables) -> Option<usize> {
         set.engines
@@ -866,10 +906,7 @@ impl Report {
                 named("recommended cloud model").map(cost_cell).unwrap_or_default(),
             ));
         } else if named("recommended cloud model").is_some() {
-            out.push_str(&format!(
-                "No cloud row is cheaper than the recommended one within {:.0} points of exact fix, so this run names no value cloud model.\n",
-                weights::VALUE_WINDOW_POINTS
-            ));
+            out.push_str(&self.no_value_line(set, default_fp));
         }
         out.push_str(&format!(
             "Ranking: {}, then F0.5, then lower p50 (HUF-205). Floors: validity at least {VALIDITY_FLOOR:.0}% and no more false positives than the default engine, `{}`{}.\n",
@@ -1200,6 +1237,18 @@ mod tests {
     fn priced_cloud(id: &str, exact: usize, cost_per_1000: f64) -> ModelRow {
         let mut numbers = tally(30, exact, 0, 40);
         numbers.cost_usd = cost_per_1000 * numbers.priced as f64 / 1_000.0;
+        model(id, "openrouter", weights::HOSTED, measured(numbers, None))
+    }
+
+    /// One cloud row whose answers reported no cost, the `n/a` Cost cell.
+    ///
+    /// A provider that files no `usage.cost` leaves the run nothing to compare,
+    /// which is the recorded state of the cloud row of
+    /// `docs/benchmarks/pilot-2026-08-thinking-on.md`.
+    fn unpriced_cloud(id: &str, exact: usize) -> ModelRow {
+        let mut numbers = tally(30, exact, 0, 40);
+        numbers.cost_usd = 0.0;
+        numbers.priced = 0;
         model(id, "openrouter", weights::HOSTED, measured(numbers, None))
     }
 
@@ -1904,6 +1953,122 @@ mod tests {
         assert!(
             rendered.contains(
                 "No cloud row is cheaper than the recommended one within 10 points of exact fix"
+            ),
+            "{rendered}"
+        );
+    }
+
+    /// HUF-232: a run that never compared two costs must not say nothing was
+    /// cheaper. `docs/benchmarks/pilot-2026-08-thinking-on.md` is the recorded
+    /// run of this case, where the cloud row's Cost cell is `n/a`.
+    #[test]
+    fn a_recommended_cloud_row_with_no_cost_says_so_rather_than_claiming_a_comparison() {
+        let mut report = report();
+        report.max_cost = Some(10.0);
+        only(&mut report).models = vec![
+            unpriced_cloud("google/gemini-3.7-flash", 28),
+            priced_cloud("deepseek/deepseek-v4-flash-0731", 23, 0.02),
+        ];
+
+        let rendered = report.render();
+
+        assert!(
+            rendered.contains("| n/a | hosted | recommended cloud model |"),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains(
+                "The recommended cloud row reported no cost, so this run names no value cloud model."
+            ),
+            "{rendered}"
+        );
+        assert!(
+            !rendered.contains("No cloud row is cheaper than the recommended one"),
+            "no cost was compared, so the file claims no comparison: {rendered}"
+        );
+    }
+
+    /// A run with one cloud row compared nothing either, and says which of the
+    /// two reasons applies.
+    #[test]
+    fn a_run_with_one_cloud_row_says_so_rather_than_claiming_a_comparison() {
+        let mut report = report();
+        report.max_cost = Some(10.0);
+        only(&mut report).models = vec![priced_cloud("google/gemini-3.7-flash", 28, 0.34)];
+
+        let rendered = report.render();
+
+        assert!(
+            rendered.contains("| 0.34 USD | hosted | recommended cloud model |"),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains("Only one cloud row ran, so this run names no value cloud model."),
+            "{rendered}"
+        );
+        assert!(
+            !rendered.contains("No cloud row is cheaper than the recommended one"),
+            "{rendered}"
+        );
+    }
+
+    /// The recommended row is priced and the other cloud row is not, so the
+    /// window was never applied to a second figure.
+    #[test]
+    fn a_second_cloud_row_with_no_cost_is_named_as_the_reason() {
+        let mut report = report();
+        report.max_cost = Some(10.0);
+        only(&mut report).models = vec![
+            priced_cloud("google/gemini-3.7-flash", 28, 0.34),
+            unpriced_cloud("deepseek/deepseek-v4-flash-0731", 27),
+        ];
+
+        let rendered = report.render();
+
+        assert!(
+            rendered.contains("| n/a | hosted | eligible |"),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains(
+                "No other cloud row reported a cost, so this run names no value cloud model."
+            ),
+            "{rendered}"
+        );
+        assert!(
+            !rendered.contains("No cloud row is cheaper than the recommended one"),
+            "{rendered}"
+        );
+    }
+
+    /// A cheaper cloud row the floors keep out is no comparison either, so the
+    /// file names the eligibility rather than the cost.
+    #[test]
+    fn a_cheaper_cloud_row_the_floors_keep_out_is_no_comparison() {
+        let mut report = report();
+        report.max_cost = Some(10.0);
+        let mut invalid = tally(30, 27, 0, 30);
+        invalid.cost_usd = 0.02 * 30.0 / 1_000.0;
+        invalid.priced = 30;
+        only(&mut report).models = vec![
+            priced_cloud("google/gemini-3.7-flash", 28, 0.34),
+            model(
+                "deepseek/deepseek-v4-flash-0731",
+                "openrouter",
+                weights::HOSTED,
+                measured(invalid, None),
+            ),
+        ];
+
+        let rendered = report.render();
+
+        assert!(
+            rendered.contains("| hosted | no, validity under 95% |"),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains(
+                "No other cloud row is eligible for the comparison, so this run names no value cloud model."
             ),
             "{rendered}"
         );

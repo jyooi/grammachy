@@ -209,6 +209,31 @@ fn size_bytes(value: &str) -> Option<u64> {
     Some(amount * scale)
 }
 
+/// The seam that fixes what a server row measured, for tests.
+///
+/// A server reading comes from a live process on this machine, so a case that
+/// wants a measured row would otherwise need LanguageTool or llama.cpp
+/// installed and running. A test sets this variable to a byte count, and every
+/// server row reports that number instead of reading the machine. The value is
+/// what the row measured, so it also decides the tier bar of
+/// `bench::weights::tier_objection`.
+///
+/// Only a test may set it. The in-process engine reads its own peak RSS, which
+/// every machine answers, so this seam leaves that row alone. A cloud row
+/// measures nothing here and keeps `None`.
+pub const RESIDENT_SEAM: &str = "GRAMMACHY_BENCH_RESIDENT_BYTES";
+
+/// The byte count [`RESIDENT_SEAM`] names, or `None` when no test set one.
+pub fn seam_bytes() -> Option<u64> {
+    parse_seam(std::env::var(RESIDENT_SEAM).ok().as_deref())
+}
+
+/// A seam value is a plain byte count. Anything else reads as no seam at all,
+/// so a stray empty variable never turns a real reading into a wrong number.
+fn parse_seam(value: Option<&str>) -> Option<u64> {
+    value?.trim().parse().ok()
+}
+
 /// The main process of one systemd user unit, or `None` when it does not run.
 pub fn unit_main_pid(unit: &str) -> Option<u32> {
     let output = Command::new("systemctl")
@@ -322,6 +347,15 @@ mod tests {
         let peak = peak_resident_bytes().expect("this platform has /proc/self/status");
 
         assert!(peak > 0, "a running process holds resident memory");
+    }
+
+    #[test]
+    fn only_a_plain_byte_count_seams_a_server_reading() {
+        assert_eq!(parse_seam(Some("2200000000")), Some(2_200_000_000));
+        assert_eq!(parse_seam(Some(" 8000000000 ")), Some(8_000_000_000));
+        assert_eq!(parse_seam(None), None);
+        assert_eq!(parse_seam(Some("")), None);
+        assert_eq!(parse_seam(Some("2.2 GB")), None);
     }
 
     #[test]

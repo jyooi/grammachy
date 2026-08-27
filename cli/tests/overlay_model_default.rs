@@ -6,7 +6,8 @@
 //! a Check: `ui/settings.js` holds the descriptor fallback, `ui/SettingsView.qml`
 //! holds the property the view draws, and `manifest.json` holds the two the
 //! shell stores. `Overlay.qml` cannot be instantiated outside the shell's
-//! plugin loader, so reading the source is what keeps every copy in step.
+//! plugin loader, so reading the QML source is what keeps those copies in step.
+//! The manifest is a document the shell parses, so it is parsed here too.
 //!
 //! The case at the end is the other half: the name has to be a row the rules
 //! of `bench::weights` allow. A default nobody may recommend would be a
@@ -35,13 +36,25 @@ fn every_copy_of_the_local_model_default_names_the_same_row() {
         "ui/SettingsView.qml names {model}"
     );
 
-    let manifest = read("manifest.json");
-    assert!(
-        manifest.contains(&format!(r#""openaiModel": "{model}""#)),
+    // The manifest is a machine-consumed document, so it is read as one rather
+    // than as text: a reformat or a reordered key must not change what passes.
+    let manifest: serde_json::Value =
+        serde_json::from_str(&read("manifest.json")).expect("manifest.json is JSON");
+    assert_eq!(
+        manifest["barWidget"]["defaults"]["openaiModel"],
+        serde_json::json!(model),
         "the manifest defaults name {model}"
     );
-    assert!(
-        manifest.contains(&format!(r#""defaultValue": "{model}""#)),
+    let schema = manifest["barWidget"]["schema"]
+        .as_array()
+        .expect("the manifest schema is a list of descriptors");
+    let descriptor = schema
+        .iter()
+        .find(|entry| entry["key"] == serde_json::json!("openaiModel"))
+        .expect("the manifest schema holds an openaiModel descriptor");
+    assert_eq!(
+        descriptor["defaultValue"],
+        serde_json::json!(model),
         "the manifest schema names {model}"
     );
 }
