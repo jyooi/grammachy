@@ -12,9 +12,6 @@ use serde_json::Value;
 /// (spec sections 4 and 5.2).
 const MAX_CHUNK_UTF16_UNITS: usize = EngineSlug::Languagetool.check_limit_utf16();
 
-/// The same limit on the local LLM engine, which reads less per Check.
-const LOCAL_CHUNK_UTF16_UNITS: usize = EngineSlug::Openai.check_limit_utf16();
-
 struct Run {
     status: i32,
     stdout: String,
@@ -110,37 +107,22 @@ fn a_draft_at_the_limit_succeeds_and_one_unit_over_is_text_too_long() {
     assert_eq!(envelope(&over)["error"]["code"], "text_too_long");
 }
 
-/// Spec section 4: the local engine packs to 2,000 units, so a 20,000-unit
-/// Draft is ten Chunks rather than four.
+/// Every remaining engine reads the same number of units, so a Draft packs to
+/// the same tiling whichever engine the flag names.
 #[test]
-fn the_local_engine_packs_a_twenty_thousand_unit_draft_into_ten_chunks() {
+fn every_remaining_engine_packs_a_draft_to_the_same_tiling() {
     let draft = "a".repeat(20_000);
 
-    let local = run(&["chunk", "--engine", "openai"], &draft);
-    assert_eq!(local.status, 0);
-    let chunks = envelope(&local)["chunks"]
-        .as_array()
-        .expect("chunks is an array")
-        .clone();
-    assert_eq!(chunks.len(), 10);
-    for chunk in &chunks {
-        let span = chunk["end"].as_u64().unwrap() - chunk["start"].as_u64().unwrap();
-        assert!(
-            span <= LOCAL_CHUNK_UTF16_UNITS as u64,
-            "a Chunk fits one Check"
-        );
-    }
-
     for slug in ["languagetool", "harper"] {
-        let wide = run(&["chunk", "--engine", slug], &draft);
-        assert_eq!(wide.status, 0);
+        let result = run(&["chunk", "--engine", slug], &draft);
+        assert_eq!(result.status, 0);
         assert_eq!(
-            envelope(&wide)["chunks"]
+            envelope(&result)["chunks"]
                 .as_array()
                 .expect("chunks is an array")
                 .len(),
             4,
-            "{slug} packs to its own wider limit"
+            "{slug} packs to the shared limit"
         );
     }
 }
@@ -149,11 +131,7 @@ fn the_local_engine_packs_a_twenty_thousand_unit_draft_into_ten_chunks() {
 /// ones the CLI enforces for a Check.
 #[test]
 fn the_engine_flag_packs_to_that_engine_limit() {
-    for slug in [
-        EngineSlug::Openai,
-        EngineSlug::Languagetool,
-        EngineSlug::Harper,
-    ] {
+    for slug in [EngineSlug::Languagetool, EngineSlug::Harper] {
         let limit = slug.check_limit_utf16();
         let draft = "a".repeat(limit + 1);
         let result = run(&["chunk", "--engine", slug.as_str()], &draft);

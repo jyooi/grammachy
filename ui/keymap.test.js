@@ -38,8 +38,7 @@ const reviewing = inMode(Keymap.MODE_REVIEW)
 const idle = inMode(Keymap.MODE_IDLE)
 const editing = inMode(Keymap.MODE_COMPOSE_EDIT)
 const composeReview = inMode(Keymap.MODE_COMPOSE_REVIEW)
-const confirming = inMode(Keymap.MODE_MODEL_CONFIRM)
-const consenting = inMode(Keymap.MODE_CLOUD_CONSENT)
+const confirming = inMode(Keymap.MODE_ENGINE_CONFIRM)
 const quickClear = inMode(Keymap.MODE_QUICK_CLEAR)
 
 test("every key of the map answers its own action", () => {
@@ -180,17 +179,17 @@ test("Esc in Compose review goes back to the Draft rather than closing", () => {
   assert.equal(composeReview(CODES.escape, CODES.alt), Keymap.BACK)
 })
 
-// Spec section 7: the Remove confirm of the Models list is one question, so
-// the mode carries the two answers to it and nothing else.
-test("the model confirm answers Remove and Keep and nothing else", () => {
-  assert.equal(confirming(CODES.returnKey), Keymap.REMOVE_MODEL)
-  assert.equal(confirming(CODES.enter), Keymap.REMOVE_MODEL)
-  assert.equal(confirming(CODES.escape), Keymap.KEEP_MODEL)
+// Spec sections 5.4 and 7: the Remove confirm of the Engines list is one
+// question, so the mode carries the two answers to it and nothing else.
+test("the engine confirm answers Remove and Keep and nothing else", () => {
+  assert.equal(confirming(CODES.returnKey), Keymap.REMOVE_ENGINE)
+  assert.equal(confirming(CODES.enter), Keymap.REMOVE_ENGINE)
+  assert.equal(confirming(CODES.escape), Keymap.KEEP_ENGINE)
 })
 
 // The confirm sits over the Settings view, so a review key must not reach the
 // card behind it: Enter would otherwise accept an Issue nobody can see.
-test("no review key reaches the card behind the model confirm", () => {
+test("no review key reaches the card behind the engine confirm", () => {
   for (const key of [CODES.space, CODES.up, CODES.down, CODES.a, CODES.c]) {
     assert.equal(confirming(key), Keymap.NONE)
   }
@@ -199,7 +198,7 @@ test("no review key reaches the card behind the model confirm", () => {
 
 // Ctrl + Enter is Apply everywhere else, and it must not become a Remove that
 // the reader did not mean. Only a plain Enter answers the question.
-test("a modified Enter does not answer the model confirm", () => {
+test("a modified Enter does not answer the engine confirm", () => {
   assert.equal(confirming(CODES.returnKey, CODES.control), Keymap.NONE)
   assert.equal(confirming(CODES.returnKey, CODES.alt), Keymap.NONE)
   assert.equal(confirming(CODES.returnKey, CODES.meta), Keymap.NONE)
@@ -209,35 +208,5 @@ test("a modified Enter does not answer the model confirm", () => {
 // overlay, so a mistaken bin press costs one key.
 test("Esc answers the confirm rather than closing the overlay", () => {
   assert.notEqual(confirming(CODES.escape), Keymap.CLOSE)
-  assert.equal(confirming(CODES.escape, CODES.alt), Keymap.KEEP_MODEL)
-})
-
-// The cloud consent card, `docs/spec/evals.md` section 7. It is one question,
-// so it answers the keyboard the way the Remove confirm does.
-test("the consent card takes Esc as Cancel and a bare Enter as Continue", () => {
-  assert.equal(consenting(CODES.escape), Keymap.CLOUD_CANCEL)
-  assert.equal(consenting(CODES.returnKey), Keymap.CLOUD_CONTINUE)
-  assert.equal(consenting(CODES.enter), Keymap.CLOUD_CONTINUE)
-})
-
-// Ctrl + Enter is Apply on every other card, so it must never be the key that
-// sends the text to a cloud.
-test("Ctrl + Enter never continues a cloud check", () => {
-  assert.equal(consenting(CODES.returnKey, CODES.control), Keymap.NONE)
-  assert.equal(consenting(CODES.enter, CODES.control), Keymap.NONE)
-})
-
-test("the consent card answers nothing else", () => {
-  for (const key of [CODES.space, CODES.up, CODES.down, CODES.a, CODES.c]) {
-    assert.equal(consenting(key), Keymap.NONE)
-  }
-  assert.equal(consenting(CODES.c, CODES.control), Keymap.NONE)
-  assert.equal(consenting(CODES.a, CODES.alt), Keymap.NONE)
-})
-
-// Esc leaves the popup everywhere else, and here it answers the question. A
-// card that closed the overlay instead would leave the question open behind it.
-test("Esc on the consent card is Cancel and never Close", () => {
-  assert.notEqual(consenting(CODES.escape), Keymap.CLOSE)
-  assert.equal(idle(CODES.escape), Keymap.CLOSE)
+  assert.equal(confirming(CODES.escape, CODES.alt), Keymap.KEEP_ENGINE)
 })

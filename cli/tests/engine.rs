@@ -10,8 +10,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use grammachy::engines::install::{EngineEnvelope, EngineRow, Engines};
+use grammachy::engines::install::{Failure, State, Stopper, Transfer};
 use grammachy::engines::languagetool;
-use grammachy::model::{Failure, State, Stopper, Transfer};
 
 /// The archive name the `languagetool` row pins, so a test can put a part file
 /// of the right name in place.
@@ -199,7 +199,7 @@ fn a_unit_that_was_not_running_does_not_keep_the_tree() {
         directory,
         format!(
             "systemctl could not stop x: {}",
-            grammachy::model::NOT_LOADED
+            grammachy::engines::install::NOT_LOADED
         ),
     );
 
@@ -267,7 +267,7 @@ fn remove_stops_the_languagetool_unit_by_name() {
 fn an_engine_that_has_nothing_to_install_is_refused_by_name() {
     let (engines, _) = engines(scratch("unknown"));
 
-    for slug in ["harper", "openai", "openrouter", "something-else"] {
+    for slug in ["harper", "gector", "something-else"] {
         let failure = engines
             .remove(slug)
             .err()

@@ -1,43 +1,14 @@
-//! What `doctor` sees of this machine, and the hardware tier it reads from it.
+//! What `doctor` sees of this machine.
 //!
 //! Every field here is a recorded fact rather than a call, so the report is a
 //! pure function of [`Facts`] and every test runs against facts it wrote
 //! itself. [`Facts::collect`] is the one place that touches the real machine.
 
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crate::args::CheckOptions;
 use crate::engines::install;
 use crate::engines::languagetool;
-use crate::engines::openai::{self, endpoint};
-use crate::engines::openrouter;
-
-/// Where `/sys` exposes the graphics devices of this machine.
-const DRM_CLASS: &str = "/sys/class/drm";
-
-/// Where the `ggml-cpu` and `ggml-vulkan` packages drop their backend
-/// libraries. `llama-cpp` carries no compute backend of its own, so a
-/// `llama-server` beside an empty directory here starts and then answers
-/// nothing (spec section 4).
-const GGML_BACKENDS: &str = "/usr/lib/ggml";
-
-/// DRM drivers that drive no real graphics processor.
-///
-/// `simpledrm` is the framebuffer the kernel sets up before a driver loads,
-/// and the rest are virtual devices. A machine that has only these runs
-/// llama.cpp on the CPU, because no Vulkan device is there to use.
-const SOFTWARE_DRIVERS: [&str; 8] = [
-    "simpledrm",
-    "offb",
-    "vkms",
-    "vgem",
-    "bochs-drm",
-    "qxl",
-    "vmwgfx",
-    "virtio_gpu",
-];
 
 /// Whether a transient unit runs right now.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -46,151 +17,6 @@ pub enum UnitState {
     Stopped,
     /// `systemctl --user` could not be asked, so the CLI cannot start the unit.
     Unknown,
-}
-
-/// What the OpenRouter key file is, spec section 4.
-///
-/// The key text never lands here: `doctor` records the state of the file and
-/// nothing of its contents, so no report and no log can leak the key.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum KeyState {
-    /// HOME is not set, so the key file has no path at all.
-    NoHome,
-    /// The path is free: no key is stored.
-    Missing(PathBuf),
-    /// The file exists, but a group or another user can read it.
-    Loose { path: PathBuf, mode: u32 },
-    /// The file exists and holds no key.
-    Empty(PathBuf),
-    /// A key is stored, and no group or other user can read it.
-    Ready { path: PathBuf, mode: u32 },
-}
-
-impl KeyState {
-    /// The path the state is about, when one exists.
-    pub fn path(&self) -> Option<&Path> {
-        match self {
-            KeyState::NoHome => None,
-            KeyState::Missing(path)
-            | KeyState::Loose { path, .. }
-            | KeyState::Empty(path)
-            | KeyState::Ready { path, .. } => Some(path),
-        }
-    }
-}
-
-/// Read one key file. Only [`Facts::collect`] calls this.
-fn key_state(path: Option<PathBuf>) -> KeyState {
-    let Some(path) = path else {
-        return KeyState::NoHome;
-    };
-    let Ok(metadata) = std::fs::metadata(&path) else {
-        return KeyState::Missing(path);
-    };
-    let mode = metadata.permissions().mode() & 0o777;
-    // Anything a group or another user can reach is a key this machine no
-    // longer keeps to itself, so it fails the check even when it works.
-    if mode & 0o077 != 0 {
-        return KeyState::Loose { path, mode };
-    }
-    match std::fs::read_to_string(&path) {
-        Ok(text) if !text.trim().is_empty() => KeyState::Ready { path, mode },
-        _ => KeyState::Empty(path),
-    }
-}
-
-/// One graphics device, as `/sys/class/drm` records it.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DrmCard {
-    /// Basename of `card<N>/device/driver`, such as `amdgpu`.
-    pub driver: String,
-    /// Basename of the `card<N>/device` link, such as `0000:65:00.0`.
-    /// `None` for a card that hangs off no PCI address.
-    pub pci_address: Option<String>,
-}
-
-impl DrmCard {
-    /// Whether the device is a graphics processor at all.
-    fn is_gpu(&self) -> bool {
-        !self.driver.is_empty() && !SOFTWARE_DRIVERS.contains(&self.driver.as_str())
-    }
-
-    /// Whether the device sits on its own PCIe bus rather than on the CPU
-    /// package. Every integrated processor answers bus `00`, so a card that
-    /// answers anything else came in through a slot.
-    fn is_discrete(&self) -> bool {
-        match self.pci_address.as_deref().and_then(pci_bus) {
-            Some(bus) => bus != "00",
-            None => false,
-        }
-    }
-}
-
-/// The bus part of a PCI address: `0000:65:00.0` answers `65`.
-fn pci_bus(address: &str) -> Option<&str> {
-    address.split(':').nth(1)
-}
-
-/// What llama.cpp runs on, which is the one thing hardware decides.
-///
-/// Spec section 4: hardware tiers affect only the install step, where `doctor`
-/// names the ggml backend packages this machine wants beside `llama-cpp`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum HardwareTier {
-    /// A graphics card on its own PCIe bus.
-    DiscreteGpu,
-    /// A graphics processor on the CPU package.
-    IntegratedGpu,
-    /// No graphics processor, so llama.cpp runs on the CPU alone.
-    Cpu,
-}
-
-impl HardwareTier {
-    /// The backends this tier wants, in the order `doctor` names them.
-    ///
-    /// Every tier wants `ggml-cpu`, because llama.cpp runs on the CPU the
-    /// parts no other backend takes. A graphics processor wants `ggml-vulkan`
-    /// beside it, which is the accelerator rather than the requirement.
-    pub fn wanted_backends(self) -> Vec<Backend> {
-        match self {
-            HardwareTier::Cpu => vec![Backend::Cpu],
-            HardwareTier::DiscreteGpu | HardwareTier::IntegratedGpu => {
-                vec![Backend::Cpu, Backend::Vulkan]
-            }
-        }
-    }
-
-    /// The pacman packages that carry those backends.
-    ///
-    /// This is the one rule the llama.cpp remedy, the backend remedy, the
-    /// human footer, and the envelope all read, so no two of them can drift.
-    pub fn backend_packages(self) -> Vec<&'static str> {
-        self.wanted_backends()
-            .into_iter()
-            .map(Backend::package)
-            .collect()
-    }
-
-    /// The value the JSON envelope carries.
-    pub fn as_str(self) -> &'static str {
-        match self {
-            HardwareTier::DiscreteGpu => "discrete-gpu",
-            HardwareTier::IntegratedGpu => "integrated-gpu",
-            HardwareTier::Cpu => "cpu",
-        }
-    }
-}
-
-/// Read the tier from the graphics devices of one machine.
-pub fn tier_of(cards: &[DrmCard]) -> HardwareTier {
-    let gpus: Vec<&DrmCard> = cards.iter().filter(|card| card.is_gpu()).collect();
-    if gpus.is_empty() {
-        return HardwareTier::Cpu;
-    }
-    if gpus.iter().any(|card| card.is_discrete()) {
-        return HardwareTier::DiscreteGpu;
-    }
-    HardwareTier::IntegratedGpu
 }
 
 /// Everything one `doctor` run knows about this machine.
@@ -210,76 +36,12 @@ pub struct Facts {
     pub java: Option<PathBuf>,
     /// The address the `languagetool` adapter talks to.
     pub languagetool_address: String,
-    /// The llama.cpp server the `llama-cpp` package installs.
-    pub llama_server: Option<PathBuf>,
-    /// Where `grammachy setup` keeps the weights.
-    pub models_directory: Option<PathBuf>,
-    /// The model name the Settings ask for.
-    pub model: String,
-    /// The weights file that model name stands for.
-    pub model_file: Option<PathBuf>,
-    /// The chat endpoint address, or why the base URL is not usable at all
-    /// (spec section 4: the host must stay on this machine).
-    pub openai_endpoint: Result<String, String>,
     pub languagetool_unit: UnitState,
-    pub llama_unit: UnitState,
-    /// The state of the OpenRouter key file, never its contents.
-    pub openrouter_key: KeyState,
-    /// The model id the `openrouter` engine asks for.
-    pub openrouter_model: String,
-    /// The graphics devices, which decide the tier.
-    pub cards: Vec<DrmCard>,
-    /// The backend library file names under [`GGML_BACKENDS`], such as
-    /// `libggml-cpu-zen4.so` and `libggml-vulkan.so`.
-    pub ggml_backends: Vec<String>,
-}
-
-/// One compute backend `llama-server` can load.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Backend {
-    Cpu,
-    Vulkan,
-}
-
-impl Backend {
-    /// The package that installs it.
-    pub fn package(self) -> &'static str {
-        match self {
-            Backend::Cpu => "ggml-cpu",
-            Backend::Vulkan => "ggml-vulkan",
-        }
-    }
-
-    /// Whether `llama-server` needs this backend to answer at all.
-    ///
-    /// `ggml-cpu` is the requirement and `ggml-vulkan` is the accelerator: a
-    /// machine with the CPU backend alone runs the engine, only on the CPU.
-    pub fn required(self) -> bool {
-        matches!(self, Backend::Cpu)
-    }
-
-    /// Whether one library file name belongs to this backend.
-    fn owns(self, library: &str) -> bool {
-        match self {
-            Backend::Cpu => library.starts_with("libggml-cpu"),
-            Backend::Vulkan => library.starts_with("libggml-vulkan"),
-        }
-    }
-}
-
-/// Whether one backend is installed, from the library file names alone.
-pub fn has_backend(libraries: &[String], backend: Backend) -> bool {
-    libraries.iter().any(|library| backend.owns(library))
 }
 
 impl Facts {
     /// Read this machine. The one function here that is not a pure value.
-    pub fn collect(options: &CheckOptions) -> Self {
-        let models_directory = openai::unit::models_directory();
-        let model_file = models_directory
-            .as_deref()
-            .and_then(|directory| openai::unit::model_file(directory, &options.openai_model).ok());
-
+    pub fn collect() -> Self {
         Facts {
             binary: std::env::current_exe().ok(),
             version: env!("CARGO_PKG_VERSION").to_string(),
@@ -289,24 +51,8 @@ impl Facts {
                 .ok()
                 .map(|home| PathBuf::from(home).join("bin/java")),
             languagetool_address: languagetool::Config::from_env().address,
-            llama_server: existing_file(openai::unit::PACKAGE_SERVER),
-            models_directory,
-            model: options.openai_model.clone(),
-            model_file,
-            openai_endpoint: endpoint::parse(&options.openai_base_url)
-                .map(|endpoint| endpoint.address()),
             languagetool_unit: unit_state(languagetool::unit::UNIT_NAME),
-            llama_unit: unit_state(openai::unit::UNIT_NAME),
-            openrouter_key: key_state(openrouter::Config::from_env().key_file),
-            openrouter_model: options.openrouter_model.clone(),
-            cards: drm_cards(Path::new(DRM_CLASS)),
-            ggml_backends: ggml_backends(Path::new(GGML_BACKENDS)),
         }
-    }
-
-    /// The tier these facts put the machine in.
-    pub fn tier(&self) -> HardwareTier {
-        tier_of(&self.cards)
     }
 
     /// Where LanguageTool is on this machine, whichever route put it there.
@@ -317,19 +63,6 @@ impl Facts {
         self.languagetool_tree
             .as_deref()
             .or(self.languagetool_launcher.as_deref())
-    }
-
-    /// The backends the tier of this machine wants.
-    pub fn wanted_backends(&self) -> Vec<Backend> {
-        self.tier().wanted_backends()
-    }
-
-    /// The wanted backends this machine does not have.
-    pub fn missing_backends(&self) -> Vec<Backend> {
-        self.wanted_backends()
-            .into_iter()
-            .filter(|backend| !has_backend(&self.ggml_backends, *backend))
-            .collect()
     }
 }
 
@@ -353,194 +86,5 @@ fn unit_state(unit: &str) -> UnitState {
             _ => UnitState::Stopped,
         },
         Err(_) => UnitState::Unknown,
-    }
-}
-
-/// The backend library file names under one `ggml` directory.
-///
-/// A missing directory reads as no backend at all, which is what a machine
-/// with `llama-cpp` and neither ggml package looks like.
-fn ggml_backends(directory: &Path) -> Vec<String> {
-    let Ok(entries) = std::fs::read_dir(directory) else {
-        return Vec::new();
-    };
-    let mut libraries: Vec<String> = entries
-        .filter_map(|entry| entry.ok())
-        .map(|entry| entry.file_name().to_string_lossy().to_string())
-        .filter(|name| name.starts_with("libggml-") && name.contains(".so"))
-        .collect();
-    libraries.sort();
-    libraries
-}
-
-/// The graphics devices under one `/sys/class/drm` directory.
-///
-/// The directory holds one entry per card and one per connector, such as
-/// `card1-HDMI-A-1`. Only the bare `card<N>` entries are devices.
-fn drm_cards(class: &Path) -> Vec<DrmCard> {
-    let Ok(entries) = std::fs::read_dir(class) else {
-        return Vec::new();
-    };
-
-    let mut cards: Vec<(String, DrmCard)> = entries
-        .filter_map(|entry| entry.ok())
-        .filter_map(|entry| {
-            let name = entry.file_name().to_string_lossy().to_string();
-            is_card(&name).then(|| (name, read_card(&entry.path())))
-        })
-        .collect();
-    cards.sort_by(|left, right| left.0.cmp(&right.0));
-    cards.into_iter().map(|(_, card)| card).collect()
-}
-
-/// `card1` is a device; `card1-DP-1` is one of its connectors.
-fn is_card(name: &str) -> bool {
-    match name.strip_prefix("card") {
-        Some(rest) => !rest.is_empty() && rest.bytes().all(|byte| byte.is_ascii_digit()),
-        None => false,
-    }
-}
-
-fn read_card(path: &Path) -> DrmCard {
-    let device = path.join("device");
-    DrmCard {
-        driver: link_name(&device.join("driver")).unwrap_or_default(),
-        pci_address: link_name(&device),
-    }
-}
-
-/// The last component of what one symlink points at.
-fn link_name(path: &Path) -> Option<String> {
-    let target = std::fs::read_link(path).ok()?;
-    Some(target.file_name()?.to_string_lossy().to_string())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn card(driver: &str, pci_address: Option<&str>) -> DrmCard {
-        DrmCard {
-            driver: driver.to_string(),
-            pci_address: pci_address.map(str::to_string),
-        }
-    }
-
-    #[test]
-    fn a_card_on_its_own_bus_is_the_discrete_tier() {
-        // This machine: an amdgpu card at 0000:65:00.0.
-        let cards = [card("amdgpu", Some("0000:65:00.0"))];
-
-        assert_eq!(tier_of(&cards), HardwareTier::DiscreteGpu);
-        assert_eq!(
-            tier_of(&cards).backend_packages(),
-            ["ggml-cpu", "ggml-vulkan"]
-        );
-    }
-
-    #[test]
-    fn a_card_on_the_cpu_package_is_the_integrated_tier() {
-        // An Intel laptop: the graphics processor answers bus 00.
-        let cards = [card("i915", Some("0000:00:02.0"))];
-
-        assert_eq!(tier_of(&cards), HardwareTier::IntegratedGpu);
-        assert_eq!(
-            tier_of(&cards).backend_packages(),
-            ["ggml-cpu", "ggml-vulkan"]
-        );
-    }
-
-    #[test]
-    fn only_a_framebuffer_is_the_cpu_tier() {
-        // A headless server: the kernel framebuffer and nothing else.
-        let cards = [card("simpledrm", None)];
-
-        assert_eq!(tier_of(&cards), HardwareTier::Cpu);
-        assert_eq!(tier_of(&cards).backend_packages(), ["ggml-cpu"]);
-    }
-
-    #[test]
-    fn no_card_at_all_is_the_cpu_tier() {
-        assert_eq!(tier_of(&[]), HardwareTier::Cpu);
-        assert_eq!(HardwareTier::Cpu.backend_packages(), ["ggml-cpu"]);
-    }
-
-    #[test]
-    fn a_discrete_card_beside_an_integrated_one_wins() {
-        // A laptop with switchable graphics lists both.
-        let cards = [
-            card("i915", Some("0000:00:02.0")),
-            card("nvidia", Some("0000:01:00.0")),
-        ];
-
-        assert_eq!(tier_of(&cards), HardwareTier::DiscreteGpu);
-    }
-
-    #[test]
-    fn a_virtual_card_does_not_earn_the_vulkan_backend() {
-        let cards = [card("virtio_gpu", Some("0000:07:00.0"))];
-
-        assert_eq!(tier_of(&cards), HardwareTier::Cpu);
-    }
-
-    #[test]
-    fn every_tier_has_its_own_envelope_value() {
-        let values = [
-            HardwareTier::DiscreteGpu.as_str(),
-            HardwareTier::IntegratedGpu.as_str(),
-            HardwareTier::Cpu.as_str(),
-        ];
-
-        assert_eq!(values, ["discrete-gpu", "integrated-gpu", "cpu"]);
-    }
-
-    #[test]
-    fn connectors_are_not_devices() {
-        assert!(is_card("card0"));
-        assert!(is_card("card12"));
-        assert!(!is_card("card1-HDMI-A-1"));
-        assert!(!is_card("card1-Writeback-1"));
-        assert!(!is_card("renderD128"));
-        assert!(!is_card("card"));
-    }
-
-    #[test]
-    fn a_missing_drm_directory_reads_as_no_card() {
-        assert!(drm_cards(Path::new("/sys/class/no-such-drm-class")).is_empty());
-    }
-
-    #[test]
-    fn a_missing_ggml_directory_reads_as_no_backend() {
-        let libraries = ggml_backends(Path::new("/usr/lib/no-such-ggml"));
-
-        assert!(libraries.is_empty());
-        assert!(!has_backend(&libraries, Backend::Cpu));
-        assert!(!has_backend(&libraries, Backend::Vulkan));
-    }
-
-    #[test]
-    fn a_cpu_backend_is_read_from_any_of_its_microarchitecture_libraries() {
-        // ggml-cpu ships one library per microarchitecture, never a bare name.
-        let libraries = ["libggml-cpu-zen4.so".to_string()];
-
-        assert!(has_backend(&libraries, Backend::Cpu));
-        assert!(!has_backend(&libraries, Backend::Vulkan));
-    }
-
-    #[test]
-    fn the_vulkan_backend_is_one_library() {
-        let libraries = ["libggml-vulkan.so".to_string()];
-
-        assert!(has_backend(&libraries, Backend::Vulkan));
-        assert!(!has_backend(&libraries, Backend::Cpu));
-    }
-
-    #[test]
-    fn every_backend_names_its_package() {
-        assert_eq!(Backend::Cpu.package(), "ggml-cpu");
-        assert_eq!(Backend::Vulkan.package(), "ggml-vulkan");
-        // ggml-cpu is what llama-server needs. ggml-vulkan only makes it fast.
-        assert!(Backend::Cpu.required());
-        assert!(!Backend::Vulkan.required());
     }
 }

@@ -12,7 +12,7 @@ The Compose walkthrough later on this page is here for the same reason: spec sec
 - A Rust toolchain, to build the companion CLI.
 - Nothing else, to start with.
   The default engine is `harper`, which is compiled into the binary, so a bare machine checks on the first try.
-- For LanguageTool, smoke item 18 installs it from Settings with no password.
+- For LanguageTool, smoke item 11 installs it from Settings with no password.
   It needs a Java runtime beside it: `sudo pacman -S jre-openjdk`.
   The Arch `languagetool` package works too, and Grammachy never installs or removes it.
 
@@ -241,10 +241,6 @@ Clear the Draft and repeat: with an empty Draft the selection lands straight awa
 
 The Compose button in the popup header carries the selection the same way, even a short one.
 
-The limit moves with the engine, so repeat the first half with the local LLM.
-Set Engine to `Local LLM` in Settings and select about 3,000 characters.
-Expected: the same too-long card, now reading `2,000 units per check` and `Check the first 2,000 only`.
-
 ## 9. Smoke item 5: a 20,000 unit Draft, with progress, Cancel, and a failure
 
 This is the item chunked checking exists for: a Draft that takes several Chunks, spec section 9.
@@ -269,7 +265,7 @@ The number climbs, the elapsed time counts up, and the bar under `Checking chunk
 python3 -c "print(('I has two book and she go home every day. ' * 500)[:20000], end='')" | bin/grammachy chunk --engine languagetool | jq '.chunks | length'
 ```
 
-The Chunks are packed to the selected engine's limit, so `--engine openai` answers ten Chunks for the same Draft.
+The Chunks are packed to the selected engine's limit.
 Without the flag the CLI reads the engine from the Settings entry, which is what the shell relies on.
 
 3. Let it finish.
@@ -323,7 +319,7 @@ The transient unit dies with the session, so nothing here is permanent.
 Stop it with `systemctl --user`, never from a test: only this manual run may touch the unit the live shell uses.
 
 1. Set `Engine` to `LanguageTool` in Settings.
-   The row is offered only once LanguageTool is on this machine, so run smoke item 18 first if it is not.
+   The row is offered only once LanguageTool is on this machine, so run smoke item 11 first if it is not.
 2. Run one Check so the unit is up, then stop it:
 
 ```bash
@@ -377,7 +373,7 @@ This item proves the Settings view of spec section 7: the gear, the storage, and
    Read the hero meta line and note the engine it names, which is `harper` by default.
 2. Click the gear on the trailing edge of the hero.
    The card flips to Settings; the Issues stay behind it.
-3. Set `Engine` to `LanguageTool`, which needs smoke item 18 to have run.
+3. Set `Engine` to `LanguageTool`, which needs smoke item 11 to have run.
    Nothing is saved by hand: the choice is in `~/.config/omarchy/shell.json` the moment the row is picked.
    Confirm it with `jq '.bar.layout.right[] | select(.id == "io.github.jyooi.grammachy")' ~/.config/omarchy/shell.json`.
 4. Click `Back`, or the gear again.
@@ -387,17 +383,14 @@ This item proves the Settings view of spec section 7: the gear, the storage, and
 Expected: the new Check runs through LanguageTool, and the meta line now names `languagetool`.
 Switch back to `Harper` in Settings and run one more Check; the meta line names `harper` again.
 
-Three more Settings checks belong to the same session:
+Two more Settings checks belong to the same session:
 
-- **The openai fields.** Set `Engine` to `Local LLM`.
-  The `Local LLM server` row appears with the base URL and the model.
-  Set it back to `Harper` and the row goes away.
 - **Scripting.** With the popup open on Settings, run `omarchy-shell shell setBarWidget io.github.jyooi.grammachy engine '"harper"'` from a terminal.
   The Engine dropdown moves to `Harper` without a click.
 - **An unknown stored value.** Stop the shell, hand-edit the entry to `"engine": "claude"`, and start it again.
   The dropdown shows `Harper`, the default.
   Open Settings, change nothing, and close the popup: `"engine": "claude"` is still in the file, because nothing is rewritten until the user changes it.
-  Pick `Local LLM` and the file finally reads `"engine": "openai"`.
+  Pick `LanguageTool` and the file finally reads `"engine": "languagetool"`.
 
 ## 12. Smoke item 8: auto-replace in a terminal and a browser field
 
@@ -444,7 +437,7 @@ omarchy restart shell
 
 Expected: `Malay`, `Harper`, and `Auto-replace` on, all as they were left.
 The plugin keeps no state of its own: the values come back because `~/.config/omarchy/shell.json` holds them, and the shell reads that file at start.
-`targetEnglish` and `openaiApiKey` have no control, so check by hand that an edit of those two keys in the file also survives a round trip through the Settings view.
+`targetEnglish` has no control, so check by hand that an edit of that key in the file also survives a round trip through the Settings view.
 
 ## 14. The Compose card
 
@@ -553,248 +546,13 @@ Esc closes the card and keeps the Draft, the same as `Keep the draft`.
 
 The gear flips Compose to the same Settings view as the popup, and `Back` returns to whichever mode was on screen.
 
-## 15. Smoke items 11 to 17: the Models list
+## 15. Smoke items 11 to 14: the Engines list
 
-Spec sections 5.3 and 7.
-The list lives in Settings and is drawn for the Local LLM engine only, so open the gear and set Engine to Local LLM first.
-
-Every step here downloads real weights of about 2.5 GB.
-Run it on a machine with room and a connection you do not mind using.
-
-### The list
-
-1. Press SUPER + G on any selection, then click the gear.
-2. Set Engine to Local LLM.
-   A Models block appears under the two server fields.
-3. Check that each row says what the directory really holds:
-
-```bash
-ls -la ~/.local/share/grammachy/models/
-~/.config/omarchy/plugins/io.github.jyooi.grammachy/bin/grammachy model list | python3 -m json.tool
-```
-
-A row is Ready only when the whole `.gguf` is there.
-A `.part` file makes it part downloaded.
-Nothing else makes it either.
-
-The last line names the free space of that directory.
-Compare it with `df -h ~/.local/share/grammachy/models/`.
-
-### Download, Cancel, and resume
-
-4. Press the download arrow on `phi-4-mini-instruct`.
-   The hint line turns into a byte count and a bar appears under it.
-   The bar steps once a second, because the shell polls `grammachy model list` and reads the `.part` file.
-5. While it runs, check that every other row's buttons are dimmed and do nothing.
-   Only the cross on the running row stays live.
-6. Press the cross on the running row.
-   The bar stops and the note says what arrived is kept.
-
-```bash
-ls -la ~/.local/share/grammachy/models/*.part
-```
-
-The `.part` file is there and it holds the bytes that arrived.
-
-7. Press the download arrow again on the same row.
-   The bar starts from where it stopped, not from zero.
-   Watch the `.part` file grow rather than restart:
-
-```bash
-watch -n 1 'ls -l ~/.local/share/grammachy/models/'
-```
-
-8. Let it finish.
-   The row turns Ready only after the digest matched, and the `.part` file is gone.
-   A file whose digest did not match is deleted, and the note says the next download starts over.
-   Only a cancel keeps a `.part` file.
-
-9. Close the overlay while a download runs, then summon it again and open Settings.
-   The bar is still moving.
-   Closing the overlay never cancels a download.
-
-### Use and Remove
-
-10. Press the tick on a Ready row that is not the one in use.
-    The `in use` mark moves to it and the tick goes, because picking the model that is already picked does nothing.
-
-```bash
-python3 -c "import json;print(json.load(open('$HOME/.config/omarchy/shell.json')))" | grep -o "openaiModel[^,]*"
-```
-
-11. Run a Check on the Local LLM engine and watch the unit load the model you picked:
-
-```bash
-systemctl --user show grammachy-llama -p ExecStart --value
-```
-
-12. Press the bin on a Ready row that is not in use.
-    It goes at once, with no question.
-13. Press the bin on the row marked `in use`.
-    One question appears on that row.
-    Press Esc, or Keep, and nothing is deleted.
-14. Press the bin again and answer Remove, or press Enter.
-    The row turns Not downloaded, the file is gone, and the unit is stopped:
-
-```bash
-systemctl --user is-active grammachy-llama
-```
-
-It answers `inactive`.
-The setting is not touched: `openaiModel` still names the model that is now absent, and the next Check answers the `engine_unavailable` card.
-
-15. Press the tick on another Ready row, then press the bin on that same row to open the question again.
-    Press the gear to close Settings, then press Enter.
-    Nothing is removed, because a question that leaves the screen is answered with Keep:
-
-```bash
-ls -la ~/.local/share/grammachy/models/
-```
-
-The file the question asked about is still there.
-
-16. Press the bin on the row in use again to open the question once more.
-    Every row draws its buttons dimmed, and the download arrow on any other row starts nothing.
-    One verb runs at a time, so no press may go under an open question.
-    Answer Keep, and the buttons come back.
-
-## 16. The cloud engine and its consent card
-
-`docs/spec/evals.md` section 7.
-The cloud engine is the one engine that sends text off this machine, so this walkthrough is about what leaves and what does not.
-
-You need an OpenRouter key with a small credit on it.
-Nothing here spends more than a fraction of a cent.
-
-### The Settings entries
-
-1. Press SUPER + G on any selection, then click the gear.
-2. Open the Engine dropdown.
-   The fourth row says `Cloud LLM (OpenRouter)`.
-3. Pick it.
-   The Local LLM block goes and a Cloud model block takes its place.
-   The field is empty and its placeholder says `google/gemini-3.7-flash`.
-   Under it a line says the engine sends the text to openrouter.ai.
-4. Read the key hint at the bottom of the block.
-   With no key file it says `key: missing` and names the command that writes one:
-
-```bash
-~/.config/omarchy/plugins/io.github.jyooi.grammachy/bin/grammachy doctor --engine openrouter --json | python3 -m json.tool
-```
-
-The hint is the `key` check of that report.
-The Settings view never reads the key file itself.
-
-5. Write a key, then close and reopen Settings on this engine:
-
-```bash
-printf '%s' "$OPENROUTER_KEY" | ~/.config/omarchy/plugins/io.github.jyooi.grammachy/bin/grammachy setup --openrouter-key
-ls -l ~/.config/grammachy/openrouter-key
-```
-
-The file is mode 0600 and the hint now says `key: present`.
-
-6. Check that the model id and the consent never reach the same place:
-
-```bash
-python3 -c "import json;print(json.load(open('$HOME/.config/omarchy/shell.json')))" | grep -o "openrouter[^,]*"
-grep -r "$OPENROUTER_KEY" ~/.config/omarchy/shell.json ; echo "exit $?"
-```
-
-`shell.json` carries `openrouterModel` and never the key.
-The grep finds nothing and exits 1.
-
-### The bar glyph
-
-7. Look at the bar button.
-   Beside the `G` there is a cloud glyph.
-   Hover it: the tooltip says `Grammachy: cloud engine, text is sent to OpenRouter`.
-8. Set Engine back to Harper.
-   The glyph goes at once and the tooltip is the plain one again.
-   Set Engine to Cloud LLM (OpenRouter) again before the next step.
-
-### Cancel sends nothing
-
-9. Leave the Cloud model field empty and press the gear to leave Settings.
-10. Press Esc, then run a Check on a sentence with a mistake.
-    The card says `Send text to OpenRouter?` and names the model, or says no model is set.
-11. Watch the wire while you answer, in another terminal:
-
-```bash
-sudo tcpdump -n -c 5 host openrouter.ai
-```
-
-12. Press Cancel, or press Esc.
-    The card says nothing was sent, `tcpdump` catches no packet, and the Engine setting is still Cloud LLM (OpenRouter):
-
-```bash
-python3 -c "import json;print(json.load(open('$HOME/.config/omarchy/shell.json')))" | grep -o "cloudConsent[^,]*"
-```
-
-Nothing is stored: the grep finds no `cloudConsent`.
-
-### Continue runs every later check
-
-13. Open Settings, type `google/gemini-3.7-flash` into the Cloud model field, and leave Settings.
-14. Run the Check again and press Continue, or press Enter.
-    The Check runs and the marked text arrives.
-
-```bash
-python3 -c "import json;print(json.load(open('$HOME/.config/omarchy/shell.json')))" | grep -o "cloudConsent[^,]*"
-```
-
-It now says `cloudConsent': True`.
-
-15. Run a second Check.
-    No card stands in front of it.
-
-### The card asks once for a whole Draft
-
-Two answers keep the card away: the stored `cloudConsent` and the session answer the overlay holds.
-The session answer outlives every summon, so this part needs both cleared.
-
-16. Open `~/.config/omarchy/shell.json` in an editor.
-    Find the `io.github.jyooi.grammachy` entry and delete its `cloudConsent` key.
-    Save the file.
-17. Restart the shell, which drops the session answer with the old overlay:
-
-```bash
-omarchy restart shell
-```
-
-18. Press SUPER + SHIFT + G, paste a few paragraphs into the Draft, and press Ctrl + Enter.
-    The card stands in front of the first Chunk.
-    Wait about half a minute before you answer.
-19. Press Continue.
-    The progress line walks every Chunk and the card never comes back between two Chunks of the same run.
-    The time on that line starts at the Continue, so the wait of step 18 is not in it.
-
-### An unset cloud model names the field
-
-This part goes back to the quick popup, because the two surfaces answer a failed Check with different buttons.
-Compose wraps every failure in the Chunk card of spec section 9, which offers `Retry remaining` in place of `Retry`.
-
-20. Press Esc to leave Compose.
-    Open Settings, empty the Cloud model field, and leave Settings.
-21. Highlight a sentence with a mistake and press SUPER + G.
-    The card reads `No cloud model is set` over `The Cloud model field in Settings is empty. Type a model id there, then run the check again.`
-    Its buttons are `Close`, `Retry`, and `Settings`, and `Settings` is the primary one.
-    No `Setup` button is on this card, because that field has no built-in default and no install step fills it.
-22. Press `Settings`, type a model id, and leave Settings.
-    The same card is still behind it.
-    Press `Retry`.
-    The Check runs on the sentence already in hand, so no second capture happens and the marked text arrives.
-23. Run the same failure from Compose to see the other button set.
-    Empty the Cloud model field again, press SUPER + SHIFT + G, paste a Draft, and press Ctrl + Enter.
-    The title and the body are the same, and the buttons are `Close`, `Retry remaining`, and `Settings`, with `Retry remaining` the primary one.
-
-## 17. Smoke items 18 to 21: the Engines list
-
-These items prove spec sections 5.4 and 7 on a live desktop: LanguageTool is something the user adds and takes away, with no password.
+These items prove spec sections 5.3 and 7 on a live desktop: LanguageTool is something the user adds and takes away, with no password.
 
 The install fetches about 250 MB and unpacks about 390 MB, both under HOME, so nothing here touches a system directory and nothing here needs `sudo`.
 
-### 18. Install LanguageTool from Settings
+### 11. Install LanguageTool from Settings
 
 1. Start with nothing installed.
    Confirm it from a terminal:
@@ -804,11 +562,11 @@ bin/grammachy engine list | jq '.engines[] | {slug, state, fromPackage, sizeByte
 ```
 
    A fresh machine answers `"state": "absent"` and `"fromPackage": false`.
-   A machine that already has the Arch package answers `"fromPackage": true`; remove it with `sudo pacman -R languagetool` to see this item, or skip to item 21.
+   A machine that already has the Arch package answers `"fromPackage": true`; remove it with `sudo pacman -R languagetool` to see this item, or skip to item 14.
 2. Highlight a sentence and click `G`, then open Settings with the gear.
 3. Read the `Engine` dropdown.
 
-Expected: it offers `Local LLM`, `Harper`, and `Cloud LLM (OpenRouter)` and no `LanguageTool` row, because that engine is not on this machine.
+Expected: it offers `Harper` and no `LanguageTool` row, because that engine is not on this machine.
 
 4. Read the `Engines` list under the dropdown.
 
@@ -841,9 +599,9 @@ bin/grammachy engine list | jq -r '.engines[0].state, .engines[0].path'
 Expected: the marked text of smoke item 1, and the hero meta line names `languagetool`.
 The first Check of a session starts the unit, which takes a moment.
 
-### 19. Cancel an install, then resume it
+### 12. Cancel an install, then resume it
 
-1. Remove what item 18 installed, then press the download button again.
+1. Remove what item 11 installed, then press the download button again.
 2. Press Cancel a few seconds in.
 
 Expected: a notice under the list, `Download of languagetool stopped` over `What arrived is kept. Install resumes it.`
@@ -857,7 +615,7 @@ ls -l ~/.local/share/grammachy/engines/LanguageTool-6.6.zip.part
 
 Expected: the bar starts where it stopped, not at zero. `curl --continue-at -` resumes the transfer.
 
-### 20. Remove the engine a Check would run on
+### 13. Remove the engine a Check would run on
 
 1. With LanguageTool installed and `Engine` set to `LanguageTool`, run one Check so the unit is up:
 
@@ -891,7 +649,7 @@ jq '.bar.layout.right[] | select(.id == "io.github.jyooi.grammachy") | .engine' 
 
 Expected: the Check runs on Harper and answers. Nothing is left pointing at an engine that is not there.
 
-### 21. The pacman package is an alternative, never a thing to remove
+### 14. The pacman package is an alternative, never a thing to remove
 
 1. `sudo pacman -S languagetool`, with nothing installed from Settings.
 2. Open Settings.
@@ -909,14 +667,14 @@ bin/grammachy doctor --json | jq -r '.checks[] | select(.id == "languagetool") |
 Expected: the line names the launcher and says it came from the package, and the state word is `package`.
 With nothing installed at all the state word is `absent`, the line reads `optional` rather than `missing`, and its remedy is `grammachy engine install languagetool` with no `sudo` in it.
 
-## 18. Running the automated checks
+## 16. Running the automated checks
 
 The same three plugin checks CI runs, against the shell installed on this machine:
 
 ```bash
 for file in $(find . -name '*.qml' | sort); do qmllint -I /usr/share/omarchy/shell "$file" || echo "FAILED $file"; done
 omarchy-plugin-validate .
-node --test ui/splice.test.js ui/tokens.test.js ui/settings.test.js ui/keymap.test.js ui/errors.test.js ui/format.test.js ui/anchor.test.js ui/limits.test.js ui/models.test.js ui/capture.test.js ui/engines.test.js
+node --test ui/splice.test.js ui/tokens.test.js ui/settings.test.js ui/keymap.test.js ui/errors.test.js ui/format.test.js ui/anchor.test.js ui/limits.test.js ui/capture.test.js ui/engines.test.js
 ```
 
 The `qmllint` on `PATH` reports a syntax error through its exit status alone and prints nothing.
@@ -937,38 +695,11 @@ cargo clippy --all-targets -- -D warnings
 cargo test
 ```
 
-No case reaches the network, and `cargo test` needs no corpus.
-The one case that reads the eval-set corpus skips itself when the cache is empty.
+No case reaches the network.
 
-### The eval set
+## 17. Removing it
 
-`grammachy bench --eval-set` ranks models on 365 items, spec `docs/spec/evals.md` section 2.
-It fetches the CLC FCE corpus into `cli/.eval-cache/`, which git ignores.
-ADR 0003 is the licence stance, so no part of that corpus may be committed.
-
-The first run fills the cache and prints the licence path on stderr.
-A machine that cannot fill it prints the eval tables as skipped with a reason.
-To fill the cache by hand, run the command once:
-
-```bash
-grammachy bench --eval-set > /dev/null
-```
-
-The committed selection is `cli/tests/fixtures/eval-set.sidecar.json`.
-It holds ids, essay and sentence index, offsets, and error codes only.
-Redraw it from a filled cache with:
-
-```bash
-cargo test --test evalset_sidecar -- --ignored --nocapture
-```
-
-The draw is seeded, so the same release redraws the same 325 items.
-The run adds the 40 fixture items to them, which the sidecar never holds.
-A different answer means the conversion rules changed.
-
-## 19. Removing it
-
-Remove the hotkeys, the menu entry, and the OpenRouter key first (spec section 10):
+Remove the hotkeys and the menu entry first (spec section 10):
 
 ```bash
 ~/.config/omarchy/plugins/io.github.jyooi.grammachy/bin/grammachy setup --remove

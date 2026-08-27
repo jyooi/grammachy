@@ -236,7 +236,6 @@ test("an engine that is not on this machine is not offered", () => {
   assert.ok(isAvailable([PACKAGE_ROW], "languagetool"))
   // An engine with nothing to install is never in the list and is always there.
   assert.ok(isAvailable([ABSENT_ROW], "harper"))
-  assert.ok(isAvailable([ABSENT_ROW], "openai"))
 })
 
 test("the dropdown drops the engines the list says are absent", () => {
@@ -244,7 +243,7 @@ test("the dropdown drops the engines the list says are absent", () => {
   assert.deepEqual(unavailable([READY_ROW]), [])
 
   const offered = engineOptions(unavailable([ABSENT_ROW]), "harper").map(option => option.value)
-  assert.deepEqual(offered, ["openai", "harper", "openrouter"])
+  assert.deepEqual(offered, ["harper"])
 
   const whole = engineOptions(unavailable([READY_ROW]), "harper").map(option => option.value)
   assert.deepEqual(whole, ENGINE_OPTIONS.map(option => option.value))
@@ -256,7 +255,7 @@ test("the engine the reader is on stays in the list whatever the disk says", () 
   const offered = engineOptions(unavailable([ABSENT_ROW]), "languagetool")
     .map(option => option.value)
 
-  assert.deepEqual(offered, ["languagetool", "openai", "harper", "openrouter"])
+  assert.deepEqual(offered, ["languagetool", "harper"])
 })
 
 // The acceptance criterion: removing the selected engine leaves Settings
@@ -264,7 +263,6 @@ test("the engine the reader is on stays in the list whatever the disk says", () 
 test("removing the selected engine falls back to the built in one", () => {
   assert.equal(BUILT_IN_ENGINE, "harper")
   assert.equal(engineAfterRemoval("languagetool", "languagetool"), "harper")
-  assert.equal(engineAfterRemoval("openai", "languagetool"), null)
   assert.equal(engineAfterRemoval("harper", "languagetool"), null)
 })
 

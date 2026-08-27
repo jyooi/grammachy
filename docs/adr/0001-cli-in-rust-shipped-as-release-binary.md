@@ -21,5 +21,5 @@ Developers replace the download with `cargo build --release` and a copy.
 
 - Harper runs in process through `harper-core`, loaded only when the engine setting is `harper` (500 ms dictionary load).
 - HTTP is blocking through `ureq`, no async runtime. Compose checks Chunks in sequence, so one Check at a time fits that model.
-- LanguageTool and llama.cpp run as transient user units through `systemd-run --user`, so plugin removal leaves no unit files behind.
+- LanguageTool runs as a transient user unit through `systemd-run --user`, so plugin removal leaves no unit files behind.
 - Every release needs two commits: the tag that CI builds, then the `cli.lock` bump with the new hash.

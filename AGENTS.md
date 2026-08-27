@@ -6,9 +6,8 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   Section 5.1 fixes the `grammachy check` JSON envelope.
   Section 5.2 fixes the `grammachy chunk` JSON envelope.
   Section 10 is the packaging, section 11 the repository layout, section 13 the test plan.
-  `docs/spec/evals.md` is the authority on the eval sets, the metrics, the `bench` runner, the `openrouter` cloud engine, and the recommendation rules.
-  It amends v1 sections 1, 4, 5.2, 6, 7, 10, 11, and 13.1.
   `CONTEXT.md` holds the domain glossary; `docs/adr/` records the settled decisions.
+  Grammachy shipped a Local LLM engine (`openai`, backed by llama-server) and a Cloud LLM engine (`openrouter`), plus the eval and benchmark programme that picked and ranked models for them, and removed all of it (HUF-240): a two-sentence check took 17 s on a CPU-only laptop with thinking on, and 1.6 s with thinking off at a higher false-positive rate. `git log` before that removal has the code if it is ever needed again.
 - The Rust CLI lives in `cli/` and is its own cargo package.
   Run `cargo test`, `cargo clippy --all-targets -- -D warnings`, and `cargo fmt --check` from `cli/`.
   CI runs the same three commands.
@@ -20,131 +19,37 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 - Engine adapters plug into the `Engine` trait in `cli/src/engine.rs` and live under `cli/src/engines/`.
   `engine::resolve` answers `None` for a slug with no adapter, which surfaces as `engine_unavailable`.
   Every adapter maps its own engine answer to Issues and then hands the list to `issues::normalise`, which owns the sort, overlap, and no-op guarantees of spec section 5.1.
+  Only `languagetool` and `harper` are `EngineSlug` variants; a stored `engine` of `openai` or `openrouter` in an existing user's `shell.json` fails `EngineSlug::from_stored` and falls back to the default (`cli/tests/settings.rs`, `cli/tests/cli.rs`).
 - The `harper` adapter runs `harper-core` 2.8 in process and needs no server. Debug builds time out at 60 s so CI can load the dictionary. The shipped binary keeps the spec limit of 10 s.
   Harper counts `char`s and the contract counts UTF-16 code units, so `lints.rs` converts through `text::utf16_offsets`.
   The dictionary and rule set are built inside `Harper::check` only, so the default path never pays for them; `cli/tests/harper_lazy.rs` guards that with a counter.
   `harper-core` is edition 2024, which is why the crate `rust-version` is 1.85.
-- `languagetool` and `openai` both run a local server in a transient unit, and `cli/src/engines/local.rs` holds what that costs them in common.
-  Each `unit.rs` documents its own server command and its sharp edges: LanguageTool has two routes onto the machine (see the `grammachy engine` entry below); `/usr/bin/llama-server` comes from `llama-cpp` plus a separate `ggml-cpu` or `ggml-vulkan` backend package.
+- `languagetool` runs a local server in a transient unit, and `cli/src/engines/local.rs` holds that plumbing: starting the unit, the runtime directory, and telling an unreachable-port error from a real failure.
+  `unit.rs` documents the server command and its sharp edges: LanguageTool has two routes onto the machine (see the `grammachy engine` entry below).
   Tests must never reach a real server or a real unit.
-  The seams are `GRAMMACHY_LANGUAGETOOL_ADDRESS`, `GRAMMACHY_LANGUAGETOOL_START=never`, and `GRAMMACHY_LLAMA_START=never`; `cli/tests/cli.rs` sets all three.
-  `GRAMMACHY_LLAMA_START=never` stops a start and never a connection.
-  The default `openaiBaseUrl` is `127.0.0.1:8080`, which is a real llama-server on a developer machine.
-  Every test settings file must name a silent `openaiBaseUrl` of its own.
-  `cli/tests/bench.rs` adds one for any entry body that does not.
-  The `openai` adapter takes its starter as a value, so `cli/tests/openai_stub.rs` covers the start behaviour with no systemd at all.
-  A test that runs the binary must also point `openaiBaseUrl` away from the default `127.0.0.1:8080`, because a developer machine may answer there.
-  `cli/tests/bench.rs` writes a dead address into every settings file for that reason.
-  Live tests in `languagetool_live.rs`, `openai_live.rs`, and `interference_catch_rate.rs` skip when their port is silent, which keeps CI green without the packages.
-- llama.cpp binds its port before it has read the weights.
-  Until they are loaded it answers HTTP 503, which is minutes for a 5 GB file.
-  `openai/mod.rs` maps that one status to `engine_unavailable`.
-  `start_and_retry` then waits it out rather than failing the first Check of a session.
-- llama-server ignores the `model` field of the request, so the weights it already holds answer every Check.
-  `cli/src/engines/openai/served.rs` is the whole guard against that (HUF-236): the adapter reads `GET /v1/models` and then `GET /props` once, before its first Check, and `served::matches` compares what the server named with `openaiModel` on the prefix rule `unit::model_file` uses.
-  A named mismatch stops the unit through the `Stopper` value and lets the start path load the right weights.
-  The stop runs only when `unit::served_address` says the unit serves the base URL, because that URL may name an Ollama or an LM Studio on another port and no disagreement about weights may take down a server the run was not asked about.
-  Every port the guard cannot reload is one `bad_arguments` naming both models, and `Unreloadable` gives each its own remedy: the start is forbidden, the unit does not serve the address, the stop did not run, the port still holds the wrong weights, or this adapter started that unit itself.
-  A hand-run server, an Ollama, and an LM Studio all end on the address rule, because the unit holds no address for their port.
-  A transient unit is collected the moment it ends, so one that ends between the address question and the stop is no longer loaded and the stop fails on it.
-  A server that names no model is checked as before, because `openaiBaseUrl` accepts any OpenAI-compatible server.
-  `served::from_models` reads the whole `data` list and prefers an entry that matches, and `Openai::probe` prefers a route that matches, because Ollama and LM Studio list every model and `llama-server --alias` renames what `/v1/models` reports while `/props` stays truthful.
-  `served::file_name` cuts the directory off every value that leaves the adapter, because a llama.cpp `--model` path holds a home directory and one bench run is a committed file.
-  Only a named answer settles the question: a silent port and a port that answers HTTP 503 while it reads its weights both leave it open.
-  So `Openai::confirm_started` asks again after the start path has a server up, and `local::Started` decides what a mismatch earns there: a unit this adapter built is refused, and one an earlier session left is reloaded and the Check re-run, which is the HUF-236 recovery.
-  That second question takes no short cut on a settled answer, because reaching it means the server left the port and something brought it back, which is the one event a settled answer cannot survive.
-  A row whose server holds the port for its whole life never reaches it, so the guard still costs one probe there.
-  `Openai::confirm` answers from the record after the first probe, and only a reload drops that record.
-  One adapter is built per bench row and per `check` run, so a 365-item row pays a small constant number of probes.
-  `Engine::served_model` carries it to `Measurement::served`, which is the "Weights served for" line under both bench tables.
-  Every stub of `cli/tests/bench.rs` and `cli/tests/openai_stub.rs` therefore has to route on the request line: a probe is not a Check and must not reach the counters.
-  The guard also gave `cli/tests/openai_live.rs` a way onto the real unit, because a reload runs `systemctl`, so every case there but the `#[ignore]` cold start sets `GRAMMACHY_LLAMA_START=never` and `GRAMMACHY_LLAMA_STOP=never`.
-  `Openai::with_starter` holds no working stopper for the same reason; `with_server_control` is the only route that takes one.
-- The `openai` base URL host must be loopback, and `cli/src/engines/openai/endpoint.rs` is the only place that decides it.
-  A remote host is `bad_arguments` and no request is made; that is a product guarantee, so keep it tested.
-  Its prompt in `prompt.rs` is the wording HUF-181 measured, and the "shortest exact substring" rule is what makes the spans usable rather than whole-sentence rewrites.
-  That wording is one prompt for every engine, so a change to it moves the cloud rows too.
-  `prompt::request_body` takes a `Force`: the raw GBNF of `prompt::GRAMMAR`, which no rule lets emit whitespace between tokens, or the `json_schema` response format (HUF-219, evals spec section 6).
-  A raw grammar bounds the whole generation, so it leaves a thinking model no room to think.
-  `openai::force_of` is the one place that picks the route, from the Local thinking Setting: thinking off takes the grammar and thinking on keeps the response format.
-  `openrouter` always passes `Force::JsonSchema`, because no cloud provider reads a grammar.
-  On the thinking-off route the grammar is the only thing that makes the answer compact, which is what drops a local Issue from about 56 output tokens to about 30.
-  Thinking (spec section 4) travels on the request as `chat_template_kwargs.enable_thinking` and never on the unit.
-  That is what makes a change of the Setting need no restart.
-  The unit only bounds and routes the think, with `--reasoning-budget` and `--reasoning-format deepseek`.
-  That format keeps the think in `message.reasoning_content`.
-  `--reasoning-budget` bounds the think alone: a probe measured a grammar-forced answer arriving in `content` with `reasoning_content` empty, so `prompt::MAX_TOKENS` is what bounds it.
-  `response::parse_array` drops a leading think anyway, because `openaiBaseUrl` may name a server this adapter did not start.
-  `response::answer_of` falls back to `message.reasoning_content` for a server that filed the answer there, but only when the whole trimmed field parses as the Issue array.
-  That reader is shared with `openrouter`, where no grammar rules out a rejected draft, so prose around a draft must never qualify (HUF-224).
-  The default lives twice, in `settings::DEFAULT_LOCAL_THINKING` and in the `localThinking` descriptor of `ui/settings.js`.
-  `cli/tests/overlay_thinking.rs` keeps the two equal and keeps the Toggle inside the group the engine hides.
-- `grammachy model` lives in `cli/src/model/`, spec section 5.3: `list`, `download`, and `remove` for the Local LLM weights, plus the `ensure` that `setup` still calls.
-  `cli/src/engines/install/` is the same module for engine components and borrows most of this one; see its entry below.
-  `setup/model.rs` moved here.
-  `setup/mod.rs` calls `model::ensure` and owns nothing about weights any more.
-  The catalogue is `mod.rs` and every row is pinned twice, by sha256 and by byte size.
-  Both numbers are the `x-linked-etag` and `x-linked-size` of an unauthenticated Hugging Face request.
-  A row belongs there only when that request answers 200 without a token.
-  A row name must also name the start of the row file name, ignoring case, because `unit::model_file` resolves the `openaiModel` setting on that prefix.
-  A name that breaks the rule downloads and lists, and then no engine and no bench row can run it.
-  The three verbs agree on one pair of paths, the row's pinned file name and its `.part`.
-  So a hand-placed `.gguf` is never listed and never deleted.
-  The licence of a row comes from `bench::weights::of`, the one product rule of spec section 13.1.
-  `remove` stops the unit only for the file the setting resolves to, and `model::stop_found_nothing_to_stop` is what lets a unit that was not running through: a transient unit is collected when it stops, so `systemctl` exits 5 on it, and that is the outcome the Remove wanted.
-  `cancel.rs` is the whole cancel.
-  The SIGTERM handler only sets a flag, and `curl` polls it so the child dies and the `.part` file stays.
-  Seams are `GRAMMACHY_MODELS_DIR`, `GRAMMACHY_MODEL_BASE_URL`, `GRAMMACHY_MODEL_SHA256`, `GRAMMACHY_MODEL_SIZE_BYTES`, `GRAMMACHY_LLAMA_STOP`, plus the `Downloader` and `Stopper` values.
-  `GRAMMACHY_MODEL_SIZE_BYTES` is what lets a test drive the transfer without the gigabytes of free disk the pinned size asks for.
-  `cli/tests/model_download.rs` and `cli/tests/model_cancel.rs` each own their whole binary, because one sets a digest for the process and the other takes the signal disposition over.
-- `openrouter` in `cli/src/engines/openrouter/` is the one engine that sends text off the machine, and only to `openrouter.ai`.
-  Its endpoint is a constant, so no setting can point it anywhere else.
-  `GRAMMACHY_OPENROUTER_URL` is the test seam and nothing else may use it.
-  It reuses the `openai` request and prompt, and adds `usage.include`, the `X-Title` header, and the reasoning rule of `reasoning()`.
-  `honours_temperature` names the id families that refuse a `temperature` field, so a new vendor prefix belongs there.
-  The key lives only in `~/.config/grammachy/openrouter-key`, mode 0600, written from stdin by `grammachy setup --openrouter-key` and deleted by `setup --remove`.
-  It never reaches `shell.json`, a process list, a log, or a `doctor` report: `cli/src/setup/key.rs` and `doctor::facts::KeyState` both record the state of the file and never its contents.
-  Every cloud failure carries its reason word in the message, and `cli/tests/openrouter_stub.rs` maps each one from a recorded response.
-  `ui/errors.js` parses that trailing `(reason: <word>)` to pick the card body, so a change to the message wording moves the card too.
-  The unset-model `bad_arguments` carries `(reason: no_model)` in that same shape, and it is the one `bad_arguments` whose card names the Settings field rather than the companion tool.
-  The arm is picked from the message and never from the engine slug, so a cloud failure for any other reason keeps the general card.
-  The `engine_unavailable` card sets `needsDiagnosis` false for this slug alone, because `doctor` reads no piece of this machine that a cloud failure is about.
-  `openrouterModel` has no built-in default: `settings::DEFAULT_OPENROUTER_MODEL` is the empty string, so a blank field, a blank flag, and an absent entry all answer `bad_arguments` in the adapter.
-  `settings::non_empty` is the one fallback rule the file reader and the flags share, and `settings::OPENROUTER_MODEL_PLACEHOLDER` is what the empty field shows and never a value.
-  The cloud surface of `docs/spec/evals.md` section 7 lives in `ui/settings.js`: the `Cloud LLM (OpenRouter)` row, the `openrouterModel` and `cloudConsent` descriptors, `needsCloudConsent`, `cloudConsentCard`, and the `keyState`/`keyHint` pair the Settings hint draws.
-  The consent gate sits on `Overlay.launchCheck`, the one route out to the CLI, so the quick popup, every Chunk of a Draft, and every retry pass through it and the card can never be gone round.
-  `Overlay.cloudConsentGiven` answers for the session beside the stored key, because `updateEntryInline` comes back a moment later and a chunked run must not ask twice.
-  Neither card draws the consent over the Settings view, so `onSettingsOpenChanged` cancels the pending Check and `keyMode` answers for `settingsOpen` before the `cloudConsent` phase.
-  That is the same rule `onShowsModelsChanged` keeps for the Models Remove confirm: a question that is off the screen must never still be answerable.
-  `Overlay.pauseChunkClock` and `Overlay.resumeChunkClock` keep the reader's decision time out of the compose progress line, because a chunked Check reaches the card with that clock already running.
-  Cancel keeps a partial chunked review: `Overlay.stopChunkRun` leaves the Chunk list and the index for `Retry remaining`, and `Overlay.chunkResume` is the failure `retryRemaining` cleared, which `backToChunkStop` puts back.
-  `Overlay.refreshCloudKey` is the only reader of the key state, through `doctor --engine openrouter --json`; no QML may open the key file.
-  The `key` check of the `doctor` envelope carries a `state` word, documented in `docs/doctor.md`, and `ui/settings.js` reads that rather than the prose of `detail`.
-  A key file that exists but cannot be used reads as `loose` or `empty`, which the hint labels apart from a missing key.
-  `BarWidget.qml` draws the cloud glyph from `settings`, the inline entry the bar host re-assigns on every write, so the glyph moves with no reload.
-  `cli/tests/overlay_cloud.rs` keeps `Overlay.qml`, both cards, `ui/SettingsView.qml`, and the bar widget on those calls, and `ui/settings.test.js` runs the rules and the gate against a counting stub.
-- `grammachy engine` lives in `cli/src/engines/install/`, spec section 5.4: `list`, `install`, and `remove` for the optional engine components.
-  It is `cli/src/model/` for engines rather than for weights and reuses that module's `Downloader`, `Transfer`, `Stopper`, `promote`, `disk`, `digest`, `cancel`, `State`, and `Failure` wholesale, because an install is the same download with one more step.
-  `archive.rs` is that step: `bsdtar`, which reads a zip and is in the Arch base group, behind an `Extractor` value so no test unpacks a real archive.
-  `languagetool` is the only component (HUF-237); `harper` is in the binary, `openai` is a server the user runs, and `openrouter` is a URL.
+  The seams are `GRAMMACHY_LANGUAGETOOL_ADDRESS` and `GRAMMACHY_LANGUAGETOOL_START=never`; `cli/tests/cli.rs` sets both.
+  The live test in `languagetool_live.rs` skips when its port is silent, which keeps CI green without the package.
+- `grammachy engine` lives in `cli/src/engines/install/`, spec section 5.3: `list`, `install`, and `remove` for the optional engine components.
+  Only `languagetool` is a component; `harper` is compiled into the binary and has nothing to install (HUF-237).
+  `transfer.rs`, `digest.rs`, `disk.rs`, and `cancel.rs` are its own generic download and unit-stop machinery: HUF-240 retired the `grammachy model` command that used to own this and share it, so it lives here now, reused wholesale because an install is a download with one more step.
+  `archive.rs` is the unpack step: `bsdtar`, which reads a zip and is in the Arch base group, behind an `Extractor` value so no test unpacks a real archive.
   Its row is pinned twice, by the sha256 the Arch `languagetool` package pins for the same file and by the byte size an unauthenticated HEAD reports, plus `installed_bytes` from the package's installed size, so the free-space check measures the peak of the install rather than the archive alone.
   The install unpacks into `<dir>/<slug>.unpack` and renames into `<dir>/<slug>` only once the row's `entry` file is there, because a `bsdtar` that died half way leaves a directory behind and `install::installed` must never call that an engine.
   `install::installed` is the one reader the adapter, `doctor`, and the row state share.
-  Seams are `GRAMMACHY_ENGINES_DIR`, `GRAMMACHY_ENGINE_BASE_URL`, `GRAMMACHY_ENGINE_SHA256`, `GRAMMACHY_ENGINE_SIZE_BYTES`, plus the three values.
+  `STOP_ENV` (`GRAMMACHY_ENGINE_STOP`) keeps a stop from reaching the real unit; tests and CI set it to `never`. `NOT_LOADED` is what `stop_unit` reports for a unit that was not running, and `stop_found_nothing_to_stop` is the reader that lets a transient unit already collected through as success rather than failure.
+  Seams are `GRAMMACHY_ENGINES_DIR`, `GRAMMACHY_ENGINE_BASE_URL`, `GRAMMACHY_ENGINE_SHA256`, `GRAMMACHY_ENGINE_SIZE_BYTES`, plus `STOP_ENV`.
   `cli/tests/engine_install.rs` owns its whole binary, because it pins a digest for the process.
 - The default engine is `harper` (spec section 4, HUF-237), so a fresh install runs no download and no pacman command.
   It lives in `args::CheckOptions::default`, the `engine` descriptor of `ui/settings.js`, `Settings.BUILT_IN_ENGINE`, and `ui/SettingsView.qml`; `cli/tests/overlay_engines.rs` keeps the four equal.
-  `bench::Report::default_engine` reads `CheckOptions::default()`, so the regression rule follows the default rather than naming an engine.
-  A test that runs the binary with no `--engine` now gets a Harper result envelope rather than an `engine_unavailable` error.
+  A test that runs the binary with no `--engine` gets a Harper result envelope rather than an `engine_unavailable` error.
 - `languagetool::unit::server_command` reads two routes in order: the tree `engine install` unpacked, run as `java -cp <tree>/languagetool-server.jar:<tree>/libs/*`, then `/usr/bin/languagetool --http` from the pacman package.
   The tree wins, because a user who added it from Settings asked for the release this build pins.
   Neither being there is not a fault of the machine: `doctor` calls that `optional` rather than `missing`.
   `Check::optional` is that word, and only `languagetool` and `java` ever set it, `java` only while LanguageTool is absent.
   `ok` still answers the engine question, so `doctor --engine languagetool` on such a machine still exits 1.
-  The `languagetool` check carries a `state` word (`installed`, `package`, `absent`) the way the `key` check does, documented in `docs/doctor.md` and held by `cli/tests/overlay_engines.rs`.
+  The `languagetool` check carries a `state` word (`installed`, `package`, `absent`) documented in `docs/doctor.md` and held by `cli/tests/overlay_engines.rs`.
   `report::LANGUAGETOOL_INSTALL_COMMAND` is the one command every line that offers it names, and it carries no `sudo`.
-- The Engines list of spec sections 5.4 and 7 is `ui/engines.js` plus `ui/EnginesView.qml`, embedded by `SettingsView.qml` and drawn for every engine, because the whole point is to add one the dropdown cannot offer yet.
-  `engines.js` is `models.js` with the row swapped and carries its own `bytes()`, because QML gives a `.js` no import a node `require` also understands.
+- The Engines list of spec sections 5.3 and 7 is `ui/engines.js` plus `ui/EnginesView.qml`, embedded by `SettingsView.qml` and drawn for every engine.
   `Engines.unavailable` feeds `Settings.engineOptions`, which drops an absent engine from the dropdown and always keeps the value the reader is on, so the box is never blank while the file says otherwise.
   `Settings.engineAfterRemoval` is the fallback rule and `Overlay.fallBackFromRemovedEngine` is its one caller; a component the pacman package still supplies moves no setting, which `Engines.isAvailable` decides.
   `confirmEngine` is a `phase` with its own `Keymap.MODE_ENGINE_CONFIRM`, and `resetRun` leaves `engines`, `engineBusy`, `engineActionProcess`, and `enginePoll` alone so closing the overlay never cancels an install.
@@ -155,118 +60,18 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   `block.rs` owns the marked block both configuration files carry and the rule that makes `--remove` byte exact: the region always carries the newline on each side, so insertion and removal are the same substring.
   `bindings.rs` holds the two `hl.unbind` plus `o.bind` pairs of spec section 2 and the `hyprctl reload`; the file is `bindings.lua`, because Omarchy answers `configProvider: lua` and never reads the `.conf` files beside it.
   `menu.rs` holds the `grammachy.compose` row, which names `"parent": "root"` because nothing else creates a `grammachy` submenu.
-  The weights step calls `model::ensure`, which downloads with `curl`, the tool `bin/bootstrap.sh` uses, because `curl` resumes an interrupted multi-gigabyte transfer.
-  A failed model step still writes the hotkeys and menu.
-  Hardware tiers only name the llama.cpp backend packages, because the weights file is the same on both (spec section 4).
-  Every path and both side effects are seams: `GRAMMACHY_BINDINGS_LUA`, `GRAMMACHY_MENU_JSONC`, `GRAMMACHY_HYPRCTL_RELOAD=never`, plus the `Reloader` value and the `cli/src/model/` seams above.
-  No test may touch a real config file, a real compositor, or the real weights host.
+  `Setup` holds only `bindings_path`, `menu_path`, and `reload`; `install()` writes the hotkeys, then reloads, then the menu entry, and `remove()` reverses both.
+  Every path and the one side effect are seams: `GRAMMACHY_BINDINGS_LUA`, `GRAMMACHY_MENU_JSONC`, `GRAMMACHY_HYPRCTL_RELOAD=never`, plus the `Reloader` value.
+  No test may touch a real config file or a real compositor.
 - Settings resolve in `cli/src/settings.rs`: flags, then the plugin entry in `$HOME/.config/omarchy/shell.json`, then the defaults of spec section 7.
   The product path is that HOME path only. The CLI does not read `$XDG_CONFIG_HOME`.
   The entry is looked up by plugin id in `bar.layout.{left,center,right}` first and in the top level `plugins` array next, the order `shell.qml` writes them in.
   `GRAMMACHY_SHELL_JSON` is the test seam; no test may read or write the real file.
-- `grammachy bench` in `cli/src/bench/` is the one subcommand that prints Markdown on stdout rather than a JSON envelope; arguments that describe no run still print the error envelope.
-  A `--record` write that fails after the rows ran prints the report and exits 1, because the run already paid for those numbers.
-  One run is the whole benchmark file: `grammachy bench ... > docs/benchmarks/<version>.md`, nothing added by hand.
-  `--engine openai --model <name>` fills the Models table and does not narrow the Engines table.
-  An engine the machine cannot reach is a skipped row, never an error, so a machine without llama.cpp still produces a valid file.
-  `cli/src/bench/weights.rs` is the product rule for which models may be recommended (`docs/spec/evals.md` section 5).
-  It holds every bar and `report.rs` only ranks what clears them: Apache-2.0 or MIT, a weights file at or under 4 GB, inside the 8 GB tier by measured resident memory, and thinking on.
-  A row that fails one still prints every number it measured, so `gemma-4-e4b-it` at 4.98 GB stays a reference row and never a default.
-  `ModelRow::file_bytes` is where that size comes from, filled by `model::file_bytes`: the file on disk first, the pinned catalogue size next.
-  A test that drives a transfer through `GRAMMACHY_MODEL_SIZE_BYTES` must not move it, which is why `model::catalogue_size_bytes` reads no seam.
-  The cloud line takes the best `openrouter` row with no cost ceiling, and the value line names the cheapest cloud row within 10 points of exact fix that also costs less.
-  The recommended local model is the `openaiModel` default, which lives in four files.
-  `cli/tests/overlay_model_default.rs` keeps them equal and proves the name clears the bars.
-  A cloud row runs on the `openrouter` engine of `cli/src/engines/openrouter/`, described in its own entry above.
-  It is why the binary carries a TLS stack: `ureq` runs with the `rustls` feature for it.
-  A cloud row needs `--max-cost <usd>`, the cap on the whole run, and the flag is refused when no cloud row runs.
-  `Spend` in `cli/src/bench/mod.rs` owns both ways a cloud row ends and what the report prints as the run's spend, because a row the cap ended carries no tally.
-  A cloud answer with no `usage.cost` ends its row and every later cloud row, because a run that cannot measure its spend cannot hold the cap.
-  `--thinking off|on|both` owns the mode of every local row, and the default is the product default `on`.
-  The flag, not the stored `localThinking`, is what a row's request carries, so a benchmark file is the output of the Command line it prints.
-  `both` expands each local model into two rows, kept next to each other so the two share one llama.cpp server start.
-  The bench never starts that server: the `openai` adapter starts it, and only when a request finds the port silent.
-  So no wall time claims a server start, because a hand-run server on the port means no start happened.
-  `bench::server_use` is the one rule for what a row may say, and the run loop carries its `ServerUse` onto the row.
-  Only the Cost table names a mode, so the prose under the tables names the mode too when a run holds both.
-  The Engines table keeps its four columns, so its `openai` row runs once, in the mode `--thinking` names.
-  Only `both` leaves that row on the product default, because the flag names two modes and the table holds one.
-  `--record <dir>` writes `checks.json`, one entry per engine, model, thinking mode, and item.
-  Every entry carries the item beside the answer, because that pair is the whole input of the judge.
-  `Plan::of` proves the directory holds that file before the first row, so a directory the run cannot write never discards a report it already paid for.
-  The run writes `checks.json.pending` and renames it, so the record of an earlier run stays whole until this run has one of its own.
-  That file is gitignored, and so is `judgements.json` beside it, because they are the only place model output text and eval-set text land.
-  Every sentence prints one stderr progress line naming its row, its item, and both its times, because a silent forty-minute command is unacceptable.
-  Cloud rows each run their own thread beside each other and beside the local rows.
-  Local rows stay on the main thread, because they share one llama.cpp server and one in-process Harper.
-  Every row is placed back at its plan index, so the tables and `checks.json` print in plan order whatever order the rows end in.
-  `Spend` sits behind one `Mutex`, so a run may pass `--max-cost` by at most one Check for each cloud row in flight.
-  The one retry of an HTTP 429 or a 5xx lives in the `openrouter` adapter behind `Config::retry_after`, which is `None` everywhere but `bench::adapter`.
-  The shell must never retry for the user: its card carries the Retry button (`docs/spec/evals.md` section 4.1).
-  `cli/src/bench/memory.rs` decides what Resident memory means per row and the report names that source under each table.
-  A llama.cpp row on a graphics device holds its weights where RSS cannot see them.
-  So `server_reading` reads the DRM fdinfo of the server process first and falls back to RSS.
-  A card reports the weights as card memory and an integrated processor reports them as the system memory it maps.
-  Those are two pools, so `device_reading` names one of them per row and never adds them together.
-  llama.cpp `/metrics` is not that source: it is off by default and carries no memory gauge.
-  `cli/src/bench/fixture.rs` is the one loader and `cli/src/bench/metrics.rs` is the one metrics module.
-  Both sets share the item shape `{ id, native, text, edits[], expected_text }` of the evals spec.
-  Every metric of that spec has a unit test in `metrics.rs` that runs from recorded answers, so no test needs a live model.
-  The Chunk fixture of evals spec section 1 shares that shape too: `cli/tests/fixtures/chunks/<native>.json`, one Draft per native language, loaded by `cli/src/bench/chunks.rs`.
-  Each Draft is a few paragraphs at the `openai` Check size limit.
-  The fixture unit tests hold every Draft under that limit and in the item shape, and prove that its edits rebuild its `expected_text`.
-  The Drafts are the project's own writing, so they are committed while the eval set is not.
-  Every local Models row runs the sentences and then the Drafts, and `Pass` is what tells the two apart on stderr.
-  A Chunk pass reuses the server the sentence pass of that row already started.
-  A skipped sentence pass skips the Drafts with the same reason.
-  The Chunk Checks never reach `--record`, because that file is the input of a judge that grades one sentence against one reference correction.
-  The Chunk table is a gate, not a ranking: wall time, validity, and recall only.
-  The Drafts run beside the fixture set alone, so `--eval-set` still checks them once and prints one table.
-  `cli/tests/bench.rs` must seam every server the run can reach, LanguageTool and the OpenAI base URL both.
-  It must also seam `GRAMMACHY_BENCH_RESIDENT_BYTES`, which fixes what a server row measured.
-  The tier bar reads that number, so without the seam a recommended row would need a live `grammachy-llama` unit and CI would recommend nothing.
-  The OpenAI default is a fixed loopback port, so a machine that already runs llama.cpp there answers a case meant to find nothing.
-  `--eval-set` runs the 365-item eval set of `docs/spec/evals.md` section 2 beside the fixture tables, and only the eval set names a recommendation.
-  ADR 0003 is the hard rule: the CLC FCE corpus is fetched at run time into the gitignored `cli/.eval-cache/`, and no part of it is committed.
-  `cli/src/bench/evalset/` owns that route, one file per step.
-  `cache.rs` fetches the sha256-pinned tarball and prints the licence notice on the first fill.
-  `corpus.rs` pairs each M2 sentence with the essay that carries the writer's language.
-  `convert.rs` joins the tokens back into a sentence and places the edit in UTF-16 offsets.
-  `draw.rs` draws with a fixed seed, and `sidecar.rs` is the committed text-free selection.
-  A cache the machine cannot fill is a skipped table with a reason, never an error.
-  Redraw `cli/tests/fixtures/eval-set.sidecar.json` with `cargo test --test evalset_sidecar -- --ignored`, which needs a filled cache.
-  `docs/dev.md` section 18 has the steps.
-  No test may fetch the corpus: the seams are `GRAMMACHY_EVAL_CACHE`, `GRAMMACHY_EVAL_FETCH=never`, `GRAMMACHY_EVAL_BASE_URL`, and `GRAMMACHY_EVAL_SHA256`.
-- The judge of `docs/spec/evals.md` section 4.4 is two halves that must agree on one rule.
-  `cli/bench/judge.py` grades a recorded run, and `cli/src/bench/judge.rs` reads the answer into the Useful fix column.
-  Both select nearly the same sample: a valid Check on an item with edits, where an Issue touches an expected span.
-  The applied Fixes of that Check must also not reproduce `expected_text`.
-  Both drop a thinking-off local row, because `RecordedCheck::hit` answers `None` for one.
-  The Useful fix cell of that row then says it is not the product default rather than printing a count.
-  `judge::RowKey` carries the mode, so the two rows of one model never share a Useful fix count.
-  An item nothing touched is a plain miss and is never judged, because the writer is offered nothing to accept.
-  Both files nest the key, item id then result text, which needs no delimiter and folds two models that answered alike onto one judgement.
-  `cli/tests/fixtures/judge-labels.json` holds the 17 committed hand labels of HUF-210 and is compiled in.
-  Every label must name a fixture item, because a label on a fetched eval-set item would commit FCE text against section 2.1.
-  The gate is 80% agreement on the labels one set matched, over at least `judge::MINIMUM_LABELLED` of them.
-  Below the gate, under that sample, or with no label matched, the column still prints and the file says it does not rank.
-  `Report::rank_score` is the one place the ranking swaps to exact fix plus useful non-exact fixes.
-  One `Assessment` is built per set, in `bench::assessment`, because the Useful fix cell sits beside cells measured over that set alone.
-  `Report::judge_covers_measured_rows` is the second condition of that swap, and the score, the ranking sentence, and the regression rule all read it.
-  It needs one measured row with a judged hit, so a table of skipped rows never claims a measure that ranked nothing.
-  One measured row the file covers no hit of drops the swap for the whole table, and the report names that row.
-  A skipped row keeps the Checks it ran, so its hits reach the judge, but it never decides what the measured rows are ranked on.
-  `Assessment::lines` reports what the judge measured and `Report::ranking_sentence` is the one claim about the ranking, so the two never disagree.
-  `judge.py` adds its answers to the judgements file rather than replacing it, and `--replace` is the one way to empty it.
-  It proves the output path before the first call and writes what it graded on an interrupt, because every call costs money.
-  No test may call Claude: `judge.py` is smoke-tested by hand, and the Rust side is tested from a recorded judgements file.
+  Unknown stored keys are ignored without error, and a stored `engine` the CLI does not recognise falls back to the default engine the same way (`cli/tests/settings.rs`), which is what keeps an old user's `shell.json` from breaking after HUF-240.
 - `doctor` reports the install state and the one-line engine diagnosis the `engine_unavailable` card shows.
-  `docs/doctor.md` documents its envelope, exit code, and hardware tiers.
+  `docs/doctor.md` documents its envelope and exit code.
   `cli/src/doctor/facts.rs` is the only place that reads the machine, so the report is a pure function of recorded `Facts` and no test reads real hardware.
-  The `backend` check reads the library names under `/usr/lib/ggml`, because `llama-cpp` carries no compute backend of its own.
-  A server without one starts and then answers nothing, which reads as a broken engine rather than a missing package.
-  `ggml-cpu` is the requirement and `ggml-vulkan` is the accelerator, so a missing `ggml-cpu` fails the check and a missing `ggml-vulkan` is only a note.
-  `HardwareTier::backend_packages` is the single rule the llama.cpp remedy, the backend remedy, the human footer, and the `backendPackages` field all read.
+  `Facts` carries only `binary`, `version`, `languagetool_tree`, `languagetool_launcher`, `java`, `languagetool_address`, and `languagetool_unit`; the checks are `binary`, `languagetool`, `java`, and `unit:languagetool`.
 - Compose (spec section 9) keeps the Draft in `Overlay.draftText` and nowhere else: no file, no clipboard, no setting.
   `ui/DraftField.qml` is the text area; it forwards key presses to the overlay's key catcher through `Keys.forwardTo` with `Keys.priority: Keys.BeforeItem`, which is what lets Ctrl + Enter run the Check while every printable key still types.
   `Overlay.restoreFocus` is the one place that decides whether the Draft or the key catcher holds the keyboard.
@@ -283,7 +88,7 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 - Every Compose trigger that carries a text lands on `Overlay.composeWith`, which is the only route to the replace confirm of spec section 2; `showCompose` is the kept-Draft route that SUPER + SHIFT + G and the menu entry take.
   `ui/CardHero.qml` takes an `actions` list for its trailing edge, which is how the popup gets its Compose button and Compose gets its Cancel without the hero knowing either.
 - `manifest.json` version must equal the crate version; `cli/tests/manifest.rs` enforces that.
-  The Check size limit belongs to the Engine: `EngineSlug::check_limit_utf16` in `cli/src/args.rs` is the Rust authority and `ui/limits.js` is the shell copy.
+  The Check size limit belongs to the Engine: `EngineSlug::check_limit_utf16` in `cli/src/args.rs` is the Rust authority and `ui/limits.js` is the shell copy. Both remaining engines share one limit, 5,000 UTF-16 code units.
   `check` and `chunk` both take that limit as an argument, so `chunk` has its own `--engine` and packs to the same number the Check will refuse at.
   The Draft cap `chunk::MAX_DRAFT_UTF16_UNITS` is one number and lives twice, in Rust and in the QML that refuses an oversize Draft.
   `cli/tests/overlay_limit.rs` keeps every copy equal.
@@ -292,8 +97,8 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   Every QML file in `ui/` only draws.
   `root.surface` is `"quick"` or `"compose"` and is what routes a summon (spec section 2); both surfaces share one `phase`, one Check, one review state, and one key map, so a change to either belongs in `Overlay.qml` rather than in a card.
   `Overlay.keyMode` is where a new `phase` has to be named, or its card silently inherits the review keys.
-  `ui/QuickCard.qml` and `ui/ComposeCard.qml` are the two surfaces; `ui/CardHero.qml`, `ui/Inspector.qml`, `ui/ReviewCounts.qml`, `ui/MarkedText.qml`, `ui/ErrorCard.qml`, `ui/SettingsView.qml`, and `ui/ModelsView.qml` are shared parts, so a change to the hero, the inspector, or the counts reaches both at once.
-  `ui/splice.js`, `ui/tokens.js`, `ui/keymap.js`, `ui/format.js`, `ui/settings.js`, `ui/errors.js`, `ui/models.js`, `ui/anchor.js`, `ui/capture.js`, and `ui/limits.js` are loaded by QML and by node, so they may use neither's API.
+  `ui/QuickCard.qml` and `ui/ComposeCard.qml` are the two surfaces; `ui/CardHero.qml`, `ui/Inspector.qml`, `ui/ReviewCounts.qml`, `ui/MarkedText.qml`, `ui/ErrorCard.qml`, and `ui/SettingsView.qml` are shared parts, so a change to the hero, the inspector, or the counts reaches both at once.
+  `ui/splice.js`, `ui/tokens.js`, `ui/keymap.js`, `ui/format.js`, `ui/settings.js`, `ui/errors.js`, `ui/anchor.js`, `ui/capture.js`, and `ui/limits.js` are loaded by QML and by node, so they may use neither's API.
   Their `*.test.js` siblings run under `node --test`; add a new one to `.github/workflows/ci.yml` and to `docs/dev.md`.
   `keymap.js` takes the Qt key codes as an argument, which is what lets node run it, and a mode string that says which card the press landed on.
   Anything worth a test belongs in one of those rather than in QML, because the repo has no QML test harness: `Overlay.qml` cannot be instantiated outside the shell's plugin loader, so a standalone Quickshell config hangs on it.
@@ -303,17 +108,6 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   `docs/dev.md` is the only route onto a live desktop, including the manual smoke items and the Compose walkthrough.
   A plugin folder that is a symlink reloads as `docs/dev.md` step 4 says.
   A leaf card does run outside the shell: a scratch Quickshell config whose root directory holds `Commons` and `Ui` symlinks into `/usr/share/omarchy/shell` plus a `ui` symlink into the repo can instantiate `ComposeCard` or `QuickCard` in a `FloatingWindow`, which is the fastest way to see a layout change without installing the plugin.
-- The Models list of spec sections 5.3 and 7 is `ui/models.js` plus `ui/ModelsView.qml`, embedded by `SettingsView.qml` and shown for the `openai` engine only.
-  `models.js` owns the envelope reader, the row state rule, the byte formatting, the hint line, and the row buttons.
-  `ui/models.test.js` runs the whole route against a stub binary that answers all three verbs.
-  `Overlay.qml` owns the two processes and the one-second `modelPoll`.
-  The CLI prints nothing while curl runs, so the `.part` length `model list` reports is the only progress there is.
-  Cancel is `modelActionProcess.signal(15)` and never `running = false`, which would orphan curl.
-  `resetRun` leaves `models`, `modelBusy`, `modelActionProcess`, and `modelPoll` alone, because closing the overlay must not cancel a download.
-  It does drop an open confirm, the spec section 7 rule that hiding the list answers the question with Keep.
-  `Overlay.modelsBusy` is the one fact the list draws its disabled buttons from: any verb in flight, including an open confirm.
-  `confirmModel` is a `phase` with its own `Overlay.keyMode` entry, and `cli/tests/overlay_models.rs` keeps all of that in step.
-  [ADR 0004](docs/adr/0004-model-downloads-run-through-the-cli.md) records why the download lives in the CLI.
 - `ui/anchor.js` owns both answers the source window of spec section 3 gives: where the quick popup opens (`placeCard`) and where Replace types (`focusCommand`, `isFocused`).
   `Overlay.sourceWindow` is that one recorded fact, read by `hyprctl activewindow -j` before the capture, because the popup window itself takes the answer away.
   Omarchy answers `configProvider: lua`, so `hyprctl dispatch` reads Lua: the focus is `hl.dsp.focus({ window = "address:0x..." })` and never the `focuswindow address:<addr>` line of the `.conf` provider.

@@ -1,10 +1,10 @@
 //! Unpacking one downloaded engine archive.
 //!
-//! The transfer of [`crate::model`] lands one file and is done. An engine is a
-//! tree, so there is a second step, and it is the one that can leave a half
+//! The transfer of [`super::transfer`] lands one file and is done. An engine is
+//! a tree, so there is a second step, and it is the one that can leave a half
 //! written directory behind. So the unpack goes into a staging directory
 //! beside the final one and the tree is renamed into place only when it is
-//! whole, the way the `.part` file of a weights download is renamed only when
+//! whole, the way the `.part` file of the archive itself is renamed only when
 //! its digest matches.
 //!
 //! The tool is `bsdtar`, which reads a zip as readily as a tar and is in the

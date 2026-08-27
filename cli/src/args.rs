@@ -2,7 +2,7 @@
 
 use clap::{Parser, Subcommand, ValueEnum};
 
-use crate::settings::{self, StoredSettings};
+use crate::settings::StoredSettings;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -23,18 +23,11 @@ pub enum Command {
     /// Split the Draft on stdin into Chunks that each fit one Check.
     Chunk(ChunkArgs),
 
-    /// Run the interference fixture through every engine this machine reaches
-    /// and print the benchmark file on stdout (spec section 13.1).
-    Bench(BenchArgs),
-
     /// Report what this machine still needs, one line per piece.
     Doctor(DoctorArgs),
 
-    /// Install the hotkeys, the menu entry, and the weights, without a password.
+    /// Install the hotkeys and the menu entry, without a password.
     Setup(SetupArgs),
-
-    /// See, fetch, and delete the Local LLM weights this machine keeps.
-    Model(ModelArgs),
 
     /// See, install, and remove the optional engine components, without sudo.
     Engine(EngineArgs),
@@ -65,30 +58,6 @@ pub struct EngineNameArgs {
 }
 
 #[derive(Debug, Parser)]
-pub struct ModelArgs {
-    #[command(subcommand)]
-    pub verb: ModelVerb,
-}
-
-#[derive(Debug, Subcommand)]
-pub enum ModelVerb {
-    /// One row per catalogue model, with what it has on disk.
-    List,
-
-    /// Fetch one catalogue model, resuming a part file it already has.
-    Download(ModelNameArgs),
-
-    /// Delete one catalogue model's weights file and its part file.
-    Remove(ModelNameArgs),
-}
-
-#[derive(Debug, Parser)]
-pub struct ModelNameArgs {
-    /// The catalogue name, as `grammachy model list` prints it.
-    pub name: String,
-}
-
-#[derive(Debug, Parser)]
 pub struct ChunkArgs {
     /// The engine whose Check size limit the Chunks are packed to.
     ///
@@ -96,104 +65,6 @@ pub struct ChunkArgs {
     /// Check resolves in (spec section 7).
     #[arg(long, value_enum)]
     pub engine: Option<EngineSlug>,
-}
-
-#[derive(Debug, Parser)]
-pub struct BenchArgs {
-    /// The engine the named models run on: openai (the default) or openrouter.
-    ///
-    /// This does not narrow the Engines table: one run prints the whole file.
-    #[arg(long, value_enum)]
-    pub engine: Option<EngineSlug>,
-
-    /// A model to evaluate on --engine, repeatable, one Models row each.
-    #[arg(long = "model", value_name = "NAME")]
-    pub models: Vec<String>,
-
-    /// A model to evaluate through openrouter, repeatable, one Models row
-    /// each, so one run holds local and cloud rows side by side.
-    #[arg(long = "cloud-model", value_name = "ID")]
-    pub cloud_models: Vec<String>,
-
-    /// A bound on what the whole run may spend on openrouter, in USD. The run
-    /// weighs it between Checks and ends a cloud row before the next Check
-    /// would pass it. Required when any row runs through openrouter, refused
-    /// otherwise.
-    #[arg(long = "max-cost", value_name = "USD")]
-    pub max_cost: Option<f64>,
-
-    /// Write every Check's answer to <DIR>/checks.json, the input of the judge.
-    #[arg(long = "record", value_name = "DIR")]
-    pub record: Option<std::path::PathBuf>,
-
-    /// Add the Useful fix column from a judgements file, the output of
-    /// `cli/bench/judge.py`. The column counts in the ranking only when the
-    /// judge agrees with the committed hand labels on at least 80% of them.
-    #[arg(long = "judgements", value_name = "FILE")]
-    pub judgements: Option<std::path::PathBuf>,
-
-    /// Run the 365-item eval set beside the fixture and rank the models on it.
-    ///
-    /// The corpus is fetched at run time into a gitignored cache and no part
-    /// of it is committed (ADR 0003). A machine that cannot fill the cache
-    /// prints the eval tables as skipped with a reason, never an error.
-    #[arg(long = "eval-set")]
-    pub eval_set: bool,
-
-    /// The thinking mode the local rows run in: `off`, `on`, or `both`.
-    ///
-    /// It decides the mode of every local row, so a benchmark file is the
-    /// output of its own Command line and the stored `localThinking` never
-    /// moves the numbers. `both` runs every local row twice and prints both.
-    #[arg(long, value_enum, default_value = "on")]
-    pub thinking: BenchThinking,
-}
-
-/// The `bench --thinking` flag of `docs/spec/evals.md` section 4.1.
-///
-/// It is the run's own choice rather than one Check's, so it holds a third
-/// value the Check flag has no meaning for: `both`, one benchmark file that
-/// carries every local model in each mode.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, ValueEnum)]
-pub enum BenchThinking {
-    Off,
-    #[default]
-    On,
-    Both,
-}
-
-impl BenchThinking {
-    /// The modes every local Models row runs in, in the order they print.
-    ///
-    /// `on` comes first under `both`, because it is the product default and
-    /// the row a reader looks for.
-    pub fn modes(self) -> &'static [bool] {
-        match self {
-            BenchThinking::Off => &[false],
-            BenchThinking::On => &[true],
-            BenchThinking::Both => &[true, false],
-        }
-    }
-
-    /// The mode the Engines table's `openai` row runs in.
-    ///
-    /// That table keeps its four columns (evals spec section 4.2), so it has
-    /// nowhere to name a mode and runs once. Under `both` it takes the product
-    /// default, which is the engine a release is measured as shipping.
-    pub fn engine_mode(self) -> bool {
-        match self {
-            BenchThinking::Off => false,
-            BenchThinking::On | BenchThinking::Both => true,
-        }
-    }
-
-    pub fn as_str(self) -> &'static str {
-        match self {
-            BenchThinking::Off => "off",
-            BenchThinking::On => "on",
-            BenchThinking::Both => "both",
-        }
-    }
 }
 
 #[derive(Debug, Parser)]
@@ -210,15 +81,9 @@ pub struct DoctorArgs {
 
 #[derive(Debug, Parser)]
 pub struct SetupArgs {
-    /// Take the hotkeys, the menu entry, and the OpenRouter key out again,
-    /// keeping the weights.
+    /// Take the hotkeys and the menu entry out again.
     #[arg(long)]
     pub remove: bool,
-
-    /// Read one OpenRouter key from stdin and write it to the key file of
-    /// spec section 4. It writes nothing else and it prints no key.
-    #[arg(long = "openrouter-key", conflicts_with = "remove")]
-    pub openrouter_key: bool,
 }
 
 #[derive(Debug, Parser)]
@@ -234,30 +99,6 @@ pub struct CheckArgs {
     /// The engine that performs the Check.
     #[arg(long, value_enum)]
     pub engine: Option<EngineSlug>,
-
-    /// Whether the local engine thinks before it answers. Omitted uses the
-    /// stored `localThinking`, then the default `on`.
-    #[arg(long, value_enum)]
-    pub thinking: Option<Thinking>,
-
-    /// The model id the `openrouter` engine asks for, such as
-    /// `google/gemini-3.7-flash`. Omitted or blank uses the stored entry,
-    /// which has no built-in default of its own (spec section 7).
-    #[arg(long = "openrouter-model", value_name = "ID")]
-    pub openrouter_model: Option<String>,
-}
-
-/// The `--thinking` flag of spec section 4, which wins over the Setting.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
-pub enum Thinking {
-    On,
-    Off,
-}
-
-impl Thinking {
-    pub fn is_on(self) -> bool {
-        self == Thinking::On
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -281,9 +122,7 @@ pub enum TargetEnglish {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum EngineSlug {
     Languagetool,
-    Openai,
     Harper,
-    Openrouter,
 }
 
 impl NativeLanguage {
@@ -339,9 +178,7 @@ impl EngineSlug {
     pub fn from_stored(value: &str) -> Option<Self> {
         match value {
             "languagetool" => Some(EngineSlug::Languagetool),
-            "openai" => Some(EngineSlug::Openai),
             "harper" => Some(EngineSlug::Harper),
-            "openrouter" => Some(EngineSlug::Openrouter),
             _ => None,
         }
     }
@@ -349,27 +186,17 @@ impl EngineSlug {
     pub fn as_str(self) -> &'static str {
         match self {
             EngineSlug::Languagetool => "languagetool",
-            EngineSlug::Openai => "openai",
             EngineSlug::Harper => "harper",
-            EngineSlug::Openrouter => "openrouter",
         }
-    }
-
-    /// Whether the engine sends the text off the machine (spec section 4).
-    pub fn is_cloud(self) -> bool {
-        matches!(self, EngineSlug::Openrouter)
     }
 
     /// The size limit of one Check on this Engine, in UTF-16 code units.
     ///
-    /// The limit belongs to the Engine (spec section 4): the local LLM reads
-    /// 2,000 units, because a longer Chunk cannot be answered inside the
-    /// timeout, and every other Engine reads 5,000. The match is exhaustive on
-    /// purpose, so a new slug has to name its own limit.
+    /// The match is exhaustive on purpose, so a new slug has to name its own
+    /// limit.
     pub const fn check_limit_utf16(self) -> usize {
         match self {
-            EngineSlug::Openai => 2_000,
-            EngineSlug::Languagetool | EngineSlug::Harper | EngineSlug::Openrouter => 5_000,
+            EngineSlug::Languagetool | EngineSlug::Harper => 5_000,
         }
     }
 }
@@ -383,19 +210,6 @@ pub struct CheckOptions {
     pub native: NativeLanguage,
     pub target: TargetEnglish,
     pub engine: EngineSlug,
-    /// The chat endpoint of the `openai` engine. Its host must be loopback
-    /// (spec section 4); the adapter, not this layer, enforces that.
-    pub openai_base_url: String,
-    pub openai_model: String,
-    pub openai_api_key: String,
-    /// The model id the `openrouter` engine asks for. It has no built-in
-    /// default (spec section 7), so empty is `bad_arguments`.
-    pub openrouter_model: String,
-    /// Whether the local engine thinks before it answers (spec section 4).
-    /// The adapter sends it per request, so a change needs no unit restart.
-    /// It also picks the forcing route of the `openai` request; see
-    /// `engines::openai::force_of`.
-    pub local_thinking: bool,
 }
 
 impl Default for CheckOptions {
@@ -404,52 +218,19 @@ impl Default for CheckOptions {
             native: NativeLanguage::None,
             target: TargetEnglish::EnUs,
             engine: EngineSlug::Harper,
-            openai_base_url: settings::DEFAULT_OPENAI_BASE_URL.to_string(),
-            openai_model: settings::DEFAULT_OPENAI_MODEL.to_string(),
-            openai_api_key: String::new(),
-            openrouter_model: settings::DEFAULT_OPENROUTER_MODEL.to_string(),
-            local_thinking: settings::DEFAULT_LOCAL_THINKING,
         }
     }
 }
 
 impl CheckOptions {
-    /// Layer the flags over the stored Settings over the built-in defaults.
-    ///
-    /// `shell.json` holds no key for a flag the spec does not define, so the
-    /// two OpenAI text fields and the API key resolve from the file and the
-    /// defaults only. The OpenRouter key is never a Setting at all: it lives
-    /// in its own 0600 file (spec section 4).
+    /// Layer the flags over the stored Settings over the built-in defaults
+    /// (spec section 7).
     pub fn resolve(args: &CheckArgs, stored: &StoredSettings) -> Self {
         let defaults = CheckOptions::default();
         CheckOptions {
             native: args.native.or(stored.native).unwrap_or(defaults.native),
             target: args.target.or(stored.target).unwrap_or(defaults.target),
             engine: args.engine.or(stored.engine).unwrap_or(defaults.engine),
-            openai_base_url: stored
-                .openai_base_url
-                .clone()
-                .unwrap_or(defaults.openai_base_url),
-            openai_model: stored.openai_model.clone().unwrap_or(defaults.openai_model),
-            openai_api_key: stored
-                .openai_api_key
-                .clone()
-                .unwrap_or(defaults.openai_api_key),
-            // One `non_empty` rule for the flag and for the file, so a blank
-            // `--openrouter-model` reads the way a blank field does rather
-            // than winning as an empty model id.
-            openrouter_model: args
-                .openrouter_model
-                .as_deref()
-                .and_then(settings::non_empty)
-                .map(str::to_string)
-                .or_else(|| stored.openrouter_model.clone())
-                .unwrap_or(defaults.openrouter_model),
-            local_thinking: args
-                .thinking
-                .map(Thinking::is_on)
-                .or(stored.local_thinking)
-                .unwrap_or(defaults.local_thinking),
         }
     }
 }

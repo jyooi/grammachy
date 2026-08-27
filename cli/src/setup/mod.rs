@@ -1,30 +1,22 @@
-//! `grammachy setup`, `grammachy setup --openrouter-key`, and
-//! `grammachy setup --remove`, spec section 10.
+//! `grammachy setup` and `grammachy setup --remove`, spec section 10.
 //!
 //! Setup does the parts of the install that need no password, and it does them
 //! idempotently: running it twice leaves exactly one binding block and exactly
-//! one menu row, and `--remove` puts both files back as they were. The model
-//! stays, because it is a slow download and the user may well install again.
-//! `--openrouter-key` is a run of its own: it writes the key file of section 4
-//! from stdin and touches neither configuration file.
+//! one menu row, and `--remove` puts both files back as they were.
 //!
-//! Every path this module touches is injectable, and so are the two side
-//! effects, `hyprctl reload` and the download. No test writes a real
-//! configuration file, reloads a real compositor, fetches a real model, or
-//! writes the real key.
+//! Every path this module touches is injectable, and so is the one side
+//! effect, `hyprctl reload`. No test writes a real configuration file or
+//! reloads a real compositor.
 
 pub mod bindings;
 pub mod block;
-pub mod key;
 pub mod menu;
 
 use std::path::PathBuf;
 
 use serde::Serialize;
 
-use crate::args::EngineSlug;
 use crate::envelope::{CheckError, ErrorBody, ErrorCode, CONTRACT_VERSION};
-use crate::model;
 
 /// What one step of a run did.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -60,8 +52,7 @@ impl Step {
 pub struct SetupReport {
     #[serde(rename = "contractVersion")]
     pub contract_version: u32,
-    /// `install`, `key`, or `remove`, so the shell need not guess from the
-    /// flags.
+    /// `install` or `remove`, so the shell need not guess from the flags.
     pub mode: &'static str,
     pub steps: Vec<Step>,
 }
@@ -106,15 +97,11 @@ impl SetupEnvelope {
     }
 }
 
-/// What one run works on: four paths and the two side effects.
+/// What one run works on: two paths and the one side effect.
 pub struct Setup {
     pub bindings_path: PathBuf,
     pub menu_path: PathBuf,
-    pub models_directory: PathBuf,
-    /// The OpenRouter key file of spec section 4.
-    pub key_path: PathBuf,
     pub reload: bindings::Reloader,
-    pub download: model::Downloader,
 }
 
 impl Setup {
@@ -123,17 +110,13 @@ impl Setup {
         Ok(Setup {
             bindings_path: bindings::path().ok_or_else(no_home)?,
             menu_path: menu::path().ok_or_else(no_home)?,
-            models_directory: model::directory().ok_or_else(no_home)?,
-            key_path: key::path().ok_or_else(no_home)?,
             reload: bindings::reloader_from_env(),
-            download: model::downloader(),
         })
     }
 
-    /// Hotkeys and the menu first, then the model. A failed download still
-    /// leaves the bindings and the compose row in place.
-    pub fn install(&self, engine: EngineSlug, model_name: &str) -> SetupEnvelope {
-        let mut steps = Vec::with_capacity(4);
+    /// Hotkeys, then the menu entry.
+    pub fn install(&self) -> SetupEnvelope {
+        let mut steps = Vec::with_capacity(3);
 
         match bindings::install(&self.bindings_path) {
             Ok(changed) => steps.push(Step::new(
@@ -161,17 +144,12 @@ impl Setup {
             Err(message) => return SetupEnvelope::error(message),
         }
 
-        match self.model_step(engine, model_name) {
-            Ok(step) => steps.push(step),
-            Err(message) => return SetupEnvelope::error(message),
-        }
-
         SetupEnvelope::report("install", steps)
     }
 
-    /// The hotkeys, the menu entry, and the key, reversed. The model stays.
+    /// The hotkeys and the menu entry, reversed.
     pub fn remove(&self) -> SetupEnvelope {
-        let mut steps = Vec::with_capacity(5);
+        let mut steps = Vec::with_capacity(3);
 
         match bindings::remove(&self.bindings_path) {
             Ok(changed) => steps.push(Step::new(
@@ -196,86 +174,7 @@ impl Setup {
             Err(message) => return SetupEnvelope::error(message),
         }
 
-        // Spec section 10: the key goes with the install, because it is the
-        // one thing here that a later user of this machine could spend.
-        match key::remove(&self.key_path) {
-            Ok(true) => steps.push(Step::new(
-                "key",
-                State::Changed,
-                format!("{} was deleted.", self.key_path.display()),
-            )),
-            Ok(false) => steps.push(Step::new(
-                "key",
-                State::Unchanged,
-                format!("There is no key at {}.", self.key_path.display()),
-            )),
-            Err(message) => return SetupEnvelope::error(message),
-        }
-
-        steps.push(Step::new(
-            "model",
-            State::Skipped,
-            format!(
-                "The weights in {} are kept.",
-                self.models_directory.display()
-            ),
-        ));
-
         SetupEnvelope::report("remove", steps)
-    }
-
-    /// The OpenRouter key of spec section 4, read from stdin.
-    ///
-    /// This run writes nothing else, and the report never carries the key: a
-    /// reader of the envelope learns the path and the mode and no more.
-    pub fn write_key(&self, stdin: &str) -> SetupEnvelope {
-        let parsed = match key::parse(stdin) {
-            Ok(parsed) => parsed,
-            Err(message) => return SetupEnvelope::error(message),
-        };
-
-        match key::write(&self.key_path, &parsed) {
-            Ok(changed) => SetupEnvelope::report(
-                "key",
-                vec![Step::new(
-                    "key",
-                    state_of(changed),
-                    format!(
-                        "{} is mode 0{:o} in a mode 0{:o} directory.",
-                        self.key_path.display(),
-                        key::FILE_MODE,
-                        key::DIRECTORY_MODE
-                    ),
-                )],
-            ),
-            Err(message) => SetupEnvelope::error(message),
-        }
-    }
-
-    /// The weights, and only when the engine setting asks for them.
-    fn model_step(&self, engine: EngineSlug, model_name: &str) -> Result<Step, String> {
-        if engine != EngineSlug::Openai {
-            return Ok(Step::new(
-                "model",
-                State::Skipped,
-                format!("The engine is {}, which needs no weights.", engine.as_str()),
-            ));
-        }
-
-        let backend = model::tier().backend_packages().join(" and ");
-        let outcome = model::ensure(model_name, &self.models_directory, &self.download)?;
-        Ok(match outcome {
-            model::Outcome::Present(path) => Step::new(
-                "model",
-                State::Unchanged,
-                format!("{} is already here. Backend: {backend}.", path.display()),
-            ),
-            model::Outcome::Downloaded(path) => Step::new(
-                "model",
-                State::Changed,
-                format!("{} was downloaded. Backend: {backend}.", path.display()),
-            ),
-        })
     }
 }
 

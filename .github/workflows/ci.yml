@@ -69,4 +69,4 @@ jobs:
           "$RUNNER_TEMP/omarchy/bin/omarchy-plugin-validate" .
 
       - name: Test the shared plugin JavaScript
-        run: node --test ui/splice.test.js ui/tokens.test.js ui/settings.test.js ui/keymap.test.js ui/errors.test.js ui/format.test.js ui/anchor.test.js ui/limits.test.js ui/models.test.js ui/capture.test.js ui/engines.test.js
+        run: node --test ui/splice.test.js ui/tokens.test.js ui/settings.test.js ui/keymap.test.js ui/errors.test.js ui/format.test.js ui/anchor.test.js ui/limits.test.js ui/capture.test.js ui/engines.test.js

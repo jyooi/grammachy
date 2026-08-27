@@ -1,10 +1,10 @@
-//! How much room is left for a weights file, spec section 5.3.
+//! How much room is left for an engine component, spec section 5.3.
 //!
-//! A model is gigabytes, so the Models list says what the disk has before the
-//! user asks for one, and `model download` refuses rather than filling the disk
-//! and failing on the last byte.
+//! A component is hundreds of megabytes, so the Engines list says what the
+//! disk has before the user asks for one, and `engine install` refuses rather
+//! than filling the disk and failing on the last byte.
 //!
-//! The models directory may not exist yet, and `statvfs` answers only for a
+//! The engines directory may not exist yet, and `statvfs` answers only for a
 //! path that does. So the walk goes up to the nearest ancestor that is there,
 //! which is on the same file system as the directory that will be created.
 

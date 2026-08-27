@@ -2,18 +2,16 @@
 //!
 //! The report is a pure function of the facts, so a test writes the machine it
 //! wants and reads the exact lines back. Spec section 10 fixes what is
-//! checked: the binary, LanguageTool, llama.cpp, the model file, and the two
-//! transient units. Spec section 8 asks for the one-line diagnosis the
-//! `engine_unavailable` card shows under its body, which is `diagnosis` here.
+//! checked: the binary, LanguageTool, and its transient unit. Spec section 8
+//! asks for the one-line diagnosis the `engine_unavailable` card shows under
+//! its body, which is `diagnosis` here.
 
 use serde::Serialize;
 
 use crate::args::EngineSlug;
 use crate::envelope::CONTRACT_VERSION;
-use crate::model;
-use crate::settings;
 
-use super::facts::{Backend, Facts, HardwareTier, KeyState, UnitState};
+use super::facts::{Facts, UnitState};
 
 /// One thing `doctor` looked at.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -39,8 +37,9 @@ pub struct Check {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub remedy: Option<String>,
     /// The stable word for which state this piece is in, for a check whose
-    /// states the shell must tell apart. Only the `key` check carries one.
-    /// `detail` is prose and no contract, so nothing may read that instead.
+    /// states the shell must tell apart. Only the `languagetool` check
+    /// carries one. `detail` is prose and no contract, so nothing may read
+    /// that instead.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub state: Option<&'static str>,
     /// The engine slugs that need this piece.
@@ -73,20 +72,13 @@ pub struct Report {
     pub ready: bool,
     /// The one line the `engine_unavailable` card shows under its body.
     pub diagnosis: String,
-    #[serde(rename = "hardwareTier")]
-    pub hardware_tier: &'static str,
-    /// The ggml packages that tier wants beside `llama-cpp`, in the order the
-    /// install lines name them. Every tier wants `ggml-cpu`.
-    #[serde(rename = "backendPackages")]
-    pub backend_packages: Vec<&'static str>,
     pub checks: Vec<Check>,
 }
 
 impl Report {
     /// Read one machine for one engine.
     pub fn new(facts: &Facts, engine: EngineSlug) -> Self {
-        let tier = facts.tier();
-        let checks = build_checks(facts, tier);
+        let checks = build_checks(facts);
         let ready = checks
             .iter()
             .filter(|check| check.needed_by(engine))
@@ -98,8 +90,6 @@ impl Report {
             engine: engine.as_str().to_string(),
             ready,
             diagnosis,
-            hardware_tier: tier.as_str(),
-            backend_packages: tier.backend_packages(),
             checks,
         }
     }
@@ -120,7 +110,7 @@ impl Report {
     /// Exit 0 when the chosen engine can run, exit 1 when it cannot.
     ///
     /// A piece another engine needs never fails the run, because a user who
-    /// checks with LanguageTool owes nothing to llama.cpp.
+    /// checks with Harper owes nothing to LanguageTool.
     pub fn exit_code(&self) -> i32 {
         if self.ready {
             0
@@ -135,29 +125,17 @@ impl Report {
 }
 
 /// Every piece spec section 10 names, in the order the report prints them.
-fn build_checks(facts: &Facts, tier: HardwareTier) -> Vec<Check> {
+fn build_checks(facts: &Facts) -> Vec<Check> {
     vec![
         binary_check(facts),
         languagetool_check(facts),
         java_check(facts),
-        llama_check(facts, tier),
-        backend_check(facts),
-        model_check(facts),
-        endpoint_check(facts),
-        key_check(facts),
         unit_check(
             "unit:languagetool",
             "LanguageTool unit",
             "grammachy-languagetool",
             facts.languagetool_unit,
             vec!["languagetool"],
-        ),
-        unit_check(
-            "unit:llama",
-            "llama.cpp unit",
-            "grammachy-llama",
-            facts.llama_unit,
-            vec!["openai"],
         ),
     ]
 }
@@ -173,7 +151,7 @@ fn binary_check(facts: &Facts) -> Check {
             detail: format!("grammachy {version} at {}", path.display()),
             remedy: None,
             state: None,
-            engines: vec!["languagetool", "openai", "harper", "openrouter"],
+            engines: vec!["languagetool", "harper"],
         },
         None => Check {
             id: "binary",
@@ -183,7 +161,7 @@ fn binary_check(facts: &Facts) -> Check {
             detail: format!("grammachy {version} runs, but its own path is not readable."),
             remedy: None,
             state: None,
-            engines: vec!["languagetool", "openai", "harper", "openrouter"],
+            engines: vec!["languagetool", "harper"],
         },
     }
 }
@@ -196,8 +174,8 @@ fn binary_check(facts: &Facts) -> Check {
 /// of the two answered, because only the installed tree is one
 /// `grammachy engine remove languagetool` can take away again.
 ///
-/// The state word is the contract the Settings row reads, the way the `key`
-/// check's word is: `detail` is prose and nothing may parse it.
+/// The state word is the contract the Settings row reads: `detail` is prose
+/// and nothing may parse it.
 fn languagetool_check(facts: &Facts) -> Check {
     match (&facts.languagetool_tree, &facts.languagetool_launcher) {
         (Some(path), _) => Check {
@@ -242,7 +220,7 @@ fn languagetool_check(facts: &Facts) -> Check {
 }
 
 /// The state words the `languagetool` check carries, one per route onto the
-/// machine, the way the `key` check carries one.
+/// machine.
 ///
 /// `docs/doctor.md` documents them and `cli/tests/overlay_engines.rs` holds
 /// them, because `detail` is prose and no contract: a reader that needs to
@@ -285,274 +263,6 @@ fn java_check(facts: &Facts) -> Check {
             state: None,
             engines: vec!["languagetool"],
         },
-    }
-}
-
-fn llama_check(facts: &Facts, tier: HardwareTier) -> Check {
-    match &facts.llama_server {
-        Some(path) => Check {
-            id: "llama.cpp",
-            name: "llama.cpp server",
-            ok: true,
-            optional: false,
-            detail: path.display().to_string(),
-            remedy: None,
-            state: None,
-            engines: vec!["openai"],
-        },
-        // The llama-cpp package carries no compute backend of its own, so the
-        // tier of this machine decides every other package on the line.
-        None => Check {
-            id: "llama.cpp",
-            name: "llama.cpp server",
-            ok: false,
-            optional: false,
-            detail: format!(
-                "llama.cpp is not installed: {} does not exist.",
-                crate::engines::openai::unit::PACKAGE_SERVER
-            ),
-            remedy: Some(format!(
-                "sudo pacman -S llama-cpp {}",
-                tier.backend_packages().join(" ")
-            )),
-            state: None,
-            engines: vec!["openai"],
-        },
-    }
-}
-
-/// The compute backend, spec section 4.
-///
-/// `llama-cpp` carries none of its own, so a machine with the server and no
-/// ggml package starts the unit and then gets no answer. That reads as a
-/// broken engine rather than as a missing package, which is why `doctor` looks
-/// at the backend libraries and not only at `/usr/bin/llama-server`.
-///
-/// `ggml-cpu` is the requirement and `ggml-vulkan` is the accelerator. A GPU
-/// machine that has the CPU backend alone runs the engine, only on the CPU, so
-/// that machine passes the check and reads the install line as advice. Failing
-/// it would hide the real cause, such as weights that are not downloaded yet.
-///
-/// Every line names what is missing and never what is present, because a
-/// machine can carry the accelerator and still lack the backend the server
-/// needs. That is the state the old install line of `llama-cpp ggml-vulkan`
-/// left behind.
-fn backend_check(facts: &Facts) -> Check {
-    let missing = facts.missing_backends();
-    let installed: Vec<&str> = facts
-        .wanted_backends()
-        .into_iter()
-        .filter(|backend| !missing.contains(backend))
-        .map(Backend::package)
-        .collect();
-
-    if missing.iter().any(|backend| backend.required()) {
-        let packages: Vec<&str> = missing.iter().copied().map(Backend::package).collect();
-        let required: Vec<&str> = missing
-            .iter()
-            .copied()
-            .filter(|backend| backend.required())
-            .map(Backend::package)
-            .collect();
-        let detail = if packages.len() == 1 {
-            format!(
-                "llama.cpp is missing the {} backend, which it needs to answer at all.",
-                packages[0]
-            )
-        } else {
-            format!(
-                "llama.cpp is missing the {} backends. It needs {} to answer at all.",
-                packages.join(" and "),
-                required.join(" and ")
-            )
-        };
-        return Check {
-            id: "backend",
-            name: "llama.cpp backend",
-            ok: false,
-            optional: false,
-            detail,
-            remedy: Some(format!("sudo pacman -S {}", packages.join(" "))),
-            state: None,
-            engines: vec!["openai"],
-        };
-    }
-
-    if missing.is_empty() {
-        return Check {
-            id: "backend",
-            name: "llama.cpp backend",
-            ok: true,
-            optional: false,
-            detail: installed.join(", "),
-            remedy: None,
-            state: None,
-            engines: vec!["openai"],
-        };
-    }
-
-    let accelerators: Vec<&str> = missing.iter().copied().map(Backend::package).collect();
-    Check {
-        id: "backend",
-        name: "llama.cpp backend",
-        ok: true,
-        optional: false,
-        detail: format!(
-            "{} is installed, so llama.cpp runs on the CPU. {} runs it on the graphics processor.",
-            installed.join(", "),
-            accelerators.join(" and ")
-        ),
-        remedy: Some(format!("sudo pacman -S {}", accelerators.join(" "))),
-        state: None,
-        engines: vec!["openai"],
-    }
-}
-
-fn model_check(facts: &Facts) -> Check {
-    let model = &facts.model;
-    match (&facts.model_file, &facts.models_directory) {
-        (Some(path), _) => Check {
-            id: "model",
-            name: "Model weights",
-            ok: true,
-            optional: false,
-            detail: path.display().to_string(),
-            remedy: None,
-            state: None,
-            engines: vec!["openai"],
-        },
-        // Only a catalogue name has a download. The `openaiModel` field takes
-        // any name, and `unit::model_file` resolves a hand-placed `.gguf`, so
-        // naming the verb for such a name would hand the reader a line that
-        // always answers `bad_arguments`. The detail says what helps instead.
-        (None, Some(directory)) if model::weights(model).is_none() => Check {
-            id: "model",
-            name: "Model weights",
-            ok: false,
-            optional: false,
-            detail: format!(
-                "No weights for {model} in {}. Grammachy cannot fetch {model}, so put its .gguf file there yourself, or pick a catalogue model in Settings, Models.",
-                directory.display()
-            ),
-            remedy: None,
-            state: None,
-            engines: vec!["openai"],
-        },
-        (None, Some(directory)) => Check {
-            id: "model",
-            name: "Model weights",
-            ok: false,
-            optional: false,
-            detail: format!("No weights for {model} in {}.", directory.display()),
-            // Spec section 5.3: the weights are the one missing piece a user
-            // fixes without a terminal, so the remedy names the verb the
-            // Settings Models list runs rather than the whole install step.
-            remedy: Some(format!("grammachy model download {model}")),
-            state: None,
-            engines: vec!["openai"],
-        },
-        (None, None) => Check {
-            id: "model",
-            name: "Model weights",
-            ok: false,
-            optional: false,
-            detail: "No model directory: HOME is not set.".to_string(),
-            remedy: None,
-            state: None,
-            engines: vec!["openai"],
-        },
-    }
-}
-
-fn endpoint_check(facts: &Facts) -> Check {
-    match &facts.openai_endpoint {
-        Ok(address) => Check {
-            id: "endpoint",
-            name: "Local LLM endpoint",
-            ok: true,
-            optional: false,
-            detail: address.clone(),
-            remedy: None,
-            state: None,
-            engines: vec!["openai"],
-        },
-        // Spec section 4: a base URL off this machine is bad_arguments and no
-        // Check is ever sent, so it is a broken setting, not a missing piece.
-        Err(message) => Check {
-            id: "endpoint",
-            name: "Local LLM endpoint",
-            ok: false,
-            optional: false,
-            detail: message.clone(),
-            remedy: None,
-            state: None,
-            engines: vec!["openai"],
-        },
-    }
-}
-
-/// The stable state word the `key` check carries, one per [`KeyState`].
-///
-/// `detail` is prose and no contract, so the shell tells a missing key from a
-/// key it found but cannot use by this word alone. A word never names the path
-/// or the mode, so no key state line can carry the key itself.
-fn key_state_word(state: &KeyState) -> &'static str {
-    match state {
-        KeyState::Ready { .. } => "ready",
-        KeyState::Missing(_) => "missing",
-        KeyState::Empty(_) => "empty",
-        KeyState::Loose { .. } => "loose",
-        KeyState::NoHome => "noHome",
-    }
-}
-
-/// The OpenRouter key file, spec section 4.
-///
-/// The remedy is the one command that stores a key, and it takes the key on
-/// stdin, so no key ever reaches a process list or this report.
-fn key_check(facts: &Facts) -> Check {
-    let write = crate::setup::key::WRITE_COMMAND.to_string();
-    let state = &facts.openrouter_key;
-    let (ok, detail, remedy) = match state {
-        KeyState::Ready { path, mode } => (
-            true,
-            format!("{} is stored, mode 0{mode:o}.", path.display()),
-            None,
-        ),
-        KeyState::Missing(path) => (
-            false,
-            format!("No OpenRouter key: {} does not exist.", path.display()),
-            Some(write),
-        ),
-        KeyState::Empty(path) => (
-            false,
-            format!("The OpenRouter key file {} is empty.", path.display()),
-            Some(write),
-        ),
-        KeyState::Loose { path, mode } => (
-            false,
-            format!(
-                "The OpenRouter key {} is mode 0{mode:o}, which another user can read.",
-                path.display()
-            ),
-            Some(format!("chmod 600 {}", path.display())),
-        ),
-        KeyState::NoHome => (
-            false,
-            "No OpenRouter key file: HOME is not set.".to_string(),
-            None,
-        ),
-    };
-
-    Check {
-        id: "key",
-        name: "OpenRouter key",
-        ok,
-        optional: false,
-        detail,
-        remedy,
-        state: Some(key_state_word(state)),
-        engines: vec!["openrouter"],
     }
 }
 
@@ -627,31 +337,5 @@ fn ready_line(facts: &Facts, engine: EngineSlug) -> String {
                 ),
             }
         }
-        EngineSlug::Openai => {
-            let address = facts
-                .openai_endpoint
-                .as_deref()
-                .unwrap_or("the configured address");
-            match facts.llama_unit {
-                UnitState::Running => {
-                    format!("llama.cpp is installed and its unit runs on {address}.")
-                }
-                _ => format!(
-                    "llama.cpp and the weights are installed. The next Check starts the server on {address}, which takes a moment."
-                ),
-            }
-        }
-        // The one engine that sends text off this machine, so the ready line
-        // says where the text goes.
-        EngineSlug::Openrouter => match settings::non_empty(&facts.openrouter_model) {
-            Some(model) => format!(
-                "The key is in place and the model is {model}. Checks send text to openrouter.ai."
-            ),
-            // The model has no built-in default (spec section 7), so a report
-            // that named an empty one would name a Check that cannot run.
-            None => {
-                "The key is in place. Set the cloud model in Settings before a Check.".to_string()
-            }
-        },
     }
 }

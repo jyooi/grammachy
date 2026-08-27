@@ -15,12 +15,7 @@
 use grammachy::args::EngineSlug;
 use grammachy::chunk::MAX_DRAFT_UTF16_UNITS;
 
-const SLUGS: [EngineSlug; 4] = [
-    EngineSlug::Languagetool,
-    EngineSlug::Openai,
-    EngineSlug::Harper,
-    EngineSlug::Openrouter,
-];
+const SLUGS: [EngineSlug; 2] = [EngineSlug::Languagetool, EngineSlug::Harper];
 
 /// The engine a Check runs on when nothing is stored (spec section 7).
 const DEFAULT_ENGINE: EngineSlug = EngineSlug::Languagetool;

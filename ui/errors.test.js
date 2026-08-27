@@ -129,14 +129,6 @@ test("engine_unavailable names the engine and asks for the doctor line", () => {
 test("engine_timeout names the timeout of the engine that is set", () => {
   assert.equal(languageToolCard(ENGINE_TIMEOUT).body,
     "No answer within 10 s. A first start can take a moment.")
-
-  const local = card(ENGINE_TIMEOUT, {
-    engineLabel: labelOf(ENGINE_OPTIONS, "openai"),
-    engineSlug: "openai"
-  })
-  assert.equal(local.title, "Local LLM took too long")
-  assert.equal(local.body, "No answer within 90 s. A first start can take a moment.")
-  assert.deepEqual(local.buttons, [CLOSE, RETRY, SETTINGS])
 })
 
 test("engine_error offers the same three buttons", () => {
@@ -155,100 +147,17 @@ test("bad_arguments blames the companion tool and offers Setup", () => {
   assert.equal(model.primary, SETUP)
 })
 
-// `openrouterModel` has no built-in default (spec section 7), so an empty
-// field is the ordinary first run of the cloud engine. Setup fixes nothing
-// there: the reader has one text field to fill.
-test("an unset cloud model names the field and offers Settings", () => {
-  // The message is the one `cli/src/engines/openrouter/mod.rs` prints.
-  const model = card(BAD_ARGUMENTS, {
-    engineLabel: "Cloud LLM",
-    engineSlug: "openrouter",
-    message: "The cloud model is not set. Type one in Settings. (reason: no_model)"
-  })
-
-  assert.equal(model.title, "No cloud model is set")
-  assert.equal(model.meta, "no cloud model")
-  assert.equal(model.body,
-    "The Cloud model field in Settings is empty. Type a model id there, then run the check again.")
-  // Settings is what fixes it, so it stays the primary button. Retry is what
-  // runs the Check the reader just fixed, without leaving the card first.
-  assert.deepEqual(model.buttons, [CLOSE, RETRY, SETTINGS])
-  assert.equal(model.primary, SETTINGS)
-  assert.ok(!model.buttons.includes(SETUP), "Setup fixes no empty field")
-})
-
-// Every cloud card a reader can fix in Settings offers the same way back to
-// the Check, so no card leaves them with Close as their only offer.
-test("every cloud card Settings can fix offers Retry beside it", () => {
-  const cards = [
-    card(BAD_ARGUMENTS, {
-      engineLabel: "Cloud LLM",
-      engineSlug: "openrouter",
-      message: "The cloud model is not set. Type one in Settings. (reason: no_model)"
-    }),
-    card(ENGINE_UNAVAILABLE, {
-      engineLabel: "Cloud LLM",
-      engineSlug: "openrouter",
-      message: "Cloud LLM has no key. (reason: no_key)"
-    })
-  ]
-
-  for (const model of cards) {
-    assert.ok(model.buttons.includes(SETTINGS), model.title)
-    assert.ok(model.buttons.includes(RETRY), model.title)
-  }
-})
-
-// Compose wraps every failure in the Chunk card of spec section 9, which sets
-// its own buttons. The quick popup's Retry must not reach that surface.
-test("the Chunk card keeps its own buttons for an unset cloud model", () => {
-  const context = {
-    engineLabel: "Cloud LLM",
-    engineSlug: "openrouter",
-    message: "The cloud model is not set. Type one in Settings. (reason: no_model)"
-  }
-
-  const fresh = chunkCard(BAD_ARGUMENTS, context)
-  assert.equal(fresh.title, "No cloud model is set")
-  assert.deepEqual(fresh.buttons, [CLOSE, RETRY_REMAINING, SETTINGS])
-  assert.equal(fresh.primary, RETRY_REMAINING)
-  assert.ok(!fresh.buttons.includes(RETRY), "Compose resumes the run rather than re-running one Chunk")
-
-  const partial = chunkCard(BAD_ARGUMENTS, Object.assign({ hasPartial: true }, context))
-  assert.deepEqual(partial.buttons, [RETRY_REMAINING, REVIEW_PARTIAL])
-})
-
-// The arm is picked from what the CLI said, never from the engine slug, so a
-// cloud failure for any other reason keeps the general card.
-test("every other bad_arguments keeps the companion tool card", () => {
-  const messages = [
-    "",
-    "The cloud model is not set.",
-    "Cloud LLM has no key. (reason: no_key)",
-    "--native is not a language. (reason: something_else)"
-  ]
+// Every `bad_arguments` reads the same card, whatever message the CLI sent:
+// the companion tool is missing or out of date, and Setup is the only fix.
+test("every bad_arguments keeps the companion tool card", () => {
+  const messages = ["", "something went wrong", "--native is not a language."]
 
   for (const message of messages) {
-    const model = card(BAD_ARGUMENTS, {
-      engineLabel: "Cloud LLM",
-      engineSlug: "openrouter",
-      message: message
-    })
-
+    const model = languageToolCard(BAD_ARGUMENTS, message)
     assert.equal(model.title, "Grammachy could not run the check", message)
     assert.equal(model.body, "The companion tool is missing or out of date.", message)
     assert.deepEqual(model.buttons, [CLOSE, SETUP], message)
   }
-})
-
-// A local engine never carries that reason word, but the rule is the message
-// and not the slug, so this proves the two are not tied together.
-test("the cloud model arm follows the message and not the engine", () => {
-  const model = languageToolCard(BAD_ARGUMENTS,
-    "The cloud model is not set. Type one in Settings. (reason: no_model)")
-
-  assert.equal(model.title, "No cloud model is set")
-  assert.deepEqual(model.buttons, [CLOSE, RETRY, SETTINGS])
 })
 
 // The too-long card of spec section 6 has a size bar and a `Check the first N
@@ -267,7 +176,7 @@ test("an unknown code shows the engine_error card", () => {
 // Spec section 8: `<Engine>` is the display name of the current engine
 // setting, which is the name the Settings dropdown shows.
 test("every engine setting reaches its card by its display name", () => {
-  const expected = { languagetool: "LanguageTool", openai: "Local LLM", harper: "Harper" }
+  const expected = { languagetool: "LanguageTool", harper: "Harper" }
   for (const slug of Object.keys(expected)) {
     const model = card(ENGINE_UNAVAILABLE, {
       engineLabel: labelOf(ENGINE_OPTIONS, slug),
@@ -277,99 +186,12 @@ test("every engine setting reaches its card by its display name", () => {
   }
 })
 
-// Spec section 8 and HUF-229: the cloud engine runs on nothing this machine
-// installs, so its card never asks for a `doctor` line. The CLI message under
-// the body carries the reason word instead.
-test("the cloud engine card carries the message and asks for no diagnosis", () => {
-  const model = card(ENGINE_UNAVAILABLE, {
-    engineLabel: "Cloud LLM",
-    engineSlug: "openrouter",
-    message: "OpenRouter credits are used up. Add credits on openrouter.ai, then retry. (reason: no_credit)"
-  })
-
-  assert.equal(model.title, "Cloud LLM could not run the check")
-  assert.equal(model.body, "openrouter.ai refused the Check.")
-  assert.equal(model.needsDiagnosis, false)
-  assert.ok(model.message.includes("no_credit"))
-  assert.deepEqual(model.buttons, languageToolCard(ENGINE_UNAVAILABLE).buttons)
-  assert.equal(model.primary, languageToolCard(ENGINE_UNAVAILABLE).primary)
-})
-
-// HUF-229 AC4: five reasons reach one code, and only `unreachable` means
-// openrouter.ai answered nothing. The card says which one it was, because a
-// body that claims the wrong one contradicts the message printed under it.
-test("the cloud card says what each reason word actually means", () => {
-  // The messages are the ones `cli/src/engines/openrouter/mod.rs` prints.
-  const cases = [
-    {
-      message: "Cloud LLM has no key. Store one: printf '%s' \"$KEY\" | grammachy setup --openrouter-key. (reason: no_key)",
-      body: "No key is stored for openrouter.ai.",
-      meta: "no cloud key"
-    },
-    {
-      message: "Cloud LLM is not reachable. Grammachy could not reach openrouter.ai. (reason: unreachable)",
-      body: "Grammachy could not reach openrouter.ai.",
-      meta: "cloud engine not reachable"
-    },
-    {
-      message: "OpenRouter rejected the key. Store a new one: printf '%s' \"$KEY\" | grammachy setup --openrouter-key. (reason: rejected_key)",
-      body: "openrouter.ai refused the key.",
-      meta: "cloud key refused"
-    },
-    {
-      message: "OpenRouter credits are used up. Add credits on openrouter.ai, then retry. (reason: no_credit)",
-      body: "openrouter.ai refused the Check.",
-      meta: "cloud engine out of credit"
-    },
-    {
-      message: "OpenRouter is rate limited. Wait a moment, then retry. (reason: rate_limited)",
-      body: "openrouter.ai refused the Check.",
-      meta: "cloud engine rate limited"
-    }
-  ]
-
-  for (const one of cases) {
-    const model = card(ENGINE_UNAVAILABLE, {
-      engineLabel: "Cloud LLM",
-      engineSlug: "openrouter",
-      message: one.message
-    })
-
-    assert.equal(model.body, one.body, one.message)
-    assert.equal(model.meta, one.meta, one.message)
-    assert.equal(model.message, one.message)
-    assert.equal(model.needsDiagnosis, false, one.message)
-  }
-})
-
-// A message the shell cannot read a reason out of still needs a body that is
-// true of all five, because the card is what the reader acts on.
-test("a cloud message with no reason word says only what is certain", () => {
-  for (const message of ["", "something new went wrong", "(reason: )"]) {
-    const model = card(ENGINE_UNAVAILABLE, {
-      engineLabel: "Cloud LLM",
-      engineSlug: "openrouter",
-      message: message
-    })
-
-    assert.equal(model.body, "The Check did not run.", message)
-    assert.equal(model.meta, "cloud engine failed", message)
-  }
-})
-
-// Every other engine still gets the `doctor` line, which is what tells the two
-// branches apart.
-test("only the cloud engine skips the doctor line", () => {
+// Every remaining engine gets the `doctor` line.
+test("every engine asks for the doctor line", () => {
   for (const slug of Object.keys(TIMEOUT_SECONDS)) {
     const model = card(ENGINE_UNAVAILABLE, { engineLabel: "Engine", engineSlug: slug })
-    assert.equal(model.needsDiagnosis, slug !== "openrouter", slug)
+    assert.equal(model.needsDiagnosis, true, slug)
   }
-})
-
-test("the cloud engine waits thirty seconds", () => {
-  assert.equal(timeoutSeconds("openrouter"), 30)
-  assert.equal(card(ENGINE_TIMEOUT, { engineSlug: "openrouter" }).body,
-    "No answer within 30 s. A first start can take a moment.")
 })
 
 test("every card carries a title, a body, a meta line, and buttons", () => {
@@ -630,12 +452,9 @@ const CHUNK_COUNT = 4
 // The engine a Check runs on when nothing else is said, spec section 7.
 const DEFAULT_ENGINE = "languagetool"
 // What the stub packs to, one size per Engine. The limit belongs to the Engine
-// (spec section 4), so a Chunk list fits only the Engine that sized it. These
-// are the shape of that rule rather than its numbers, which `limits.test.js`
-// owns.
-const LOCAL_CHUNK_UNITS = SENTENCE.length * 2
-const LOCAL_CHUNK_COUNT = 10
-const CHUNK_UNITS_BY_ENGINE = { languagetool: CHUNK_UNITS, harper: CHUNK_UNITS, openai: LOCAL_CHUNK_UNITS }
+// (spec section 4), and every remaining Engine reads the same one, so a Chunk
+// list packed for either Engine fits the other too.
+const CHUNK_UNITS_BY_ENGINE = { languagetool: CHUNK_UNITS, harper: CHUNK_UNITS }
 // One Issue per sentence, at the same offset in each.
 const WANTED_STARTS = Array.from({ length: 20 }, (_, i) => 2 + SENTENCE.length * i)
 
@@ -877,37 +696,6 @@ test("a first Chunk that fails has nothing to review", () => {
   assert.deepEqual(resumed.issues.map(issue => issue.start), WANTED_STARTS)
 })
 
-// The limit belongs to the Engine (spec section 4), so a Chunk list packed for
-// one Engine is the wrong size for a narrower one. The Settings gear stays
-// reachable at the failure, so a reader can pick that narrower Engine before
-// `Retry remaining`. Resending the Chunks in hand would answer `text_too_long`
-// every time, which no button can get out of.
-test("a narrower Engine picked at the failure packs the Draft again instead of resending Chunks it cannot read", () => {
-  const binary = chunkedStub("chunked-engine-change", 0, 3)
-  const run = runChunked(binary, DRAFT, { engine: "languagetool" })
-
-  assert.equal(run.card.code, ENGINE_UNAVAILABLE)
-  assert.equal(run.index, 2)
-  assert.equal(run.chunkEngine, "languagetool")
-  assert.equal(packCount("chunked-engine-change"), 1)
-
-  // The reader opens Settings at the failure and picks the local engine.
-  const retried = retryRemaining(binary, DRAFT, run, { engine: "openai" })
-
-  assert.equal(retried.card, null)
-  assert.equal(retried.chunkEngine, "openai")
-  assert.equal(packCount("chunked-engine-change"), 2)
-  assert.equal(retried.chunks.length, LOCAL_CHUNK_COUNT)
-  for (const chunk of retried.chunks)
-    assert.ok(chunk.end - chunk.start <= LOCAL_CHUNK_UNITS, "every Chunk fits the local engine")
-
-  // The whole Draft is checked once, so no Issue the first Engine found is
-  // reported twice and none of them is lost.
-  assert.equal(retried.index, LOCAL_CHUNK_COUNT)
-  assert.deepEqual(retried.issues.map(issue => issue.start), WANTED_STARTS)
-  for (const issue of retried.issues) assert.equal(DRAFT.slice(issue.start, issue.end), issue.original)
-})
-
 // The engine that did not change is the normal case, and it must still resume.
 test("Retry remaining on the same Engine resumes the Chunk list in hand", () => {
   const binary = chunkedStub("chunked-same-engine", 0, 3)
@@ -925,17 +713,16 @@ test("Retry remaining on the same Engine resumes the Chunk list in hand", () => 
 
 // A Chunk is cut to the size one Engine reads (spec section 4), so the Check
 // that reads it has to be that Engine. The Settings view stays reachable while
-// the run walks, so a reader can pick a narrower Engine mid-run; the Chunks in
-// hand are still the old size, and sending one of them to the new Engine would
-// answer text_too_long and blame the engine for a Chunk the shell sized.
+// the run walks, so a reader can pick another Engine mid-run; the Chunks in
+// hand were packed for the Engine the run started on, and that is the Engine
+// every Check of this run names, whatever the setting moves to meanwhile.
 test("a run finishes on the Engine its Chunks were packed for when the setting moves mid-run", () => {
   const binary = chunkedStub("chunked-switch-mid-run", 0, 0)
-  const live = { engine: "languagetool", switchAfter: { chunks: 1, to: "openai" } }
+  const live = { engine: "languagetool", switchAfter: { chunks: 1, to: "harper" } }
   const run = runChunked(binary, DRAFT, live)
 
   // The reader really did change the setting while the walk ran.
-  assert.equal(live.engine, "openai")
-  assert.notEqual(Limits.checkLimit("openai"), Limits.checkLimit("languagetool"))
+  assert.equal(live.engine, "harper")
 
   assert.equal(run.card, null, "no Chunk was refused for its size")
   assert.equal(run.chunkEngine, "languagetool")
