@@ -81,6 +81,7 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   The key lives only in `~/.config/grammachy/openrouter-key`, mode 0600, written from stdin by `grammachy setup --openrouter-key` and deleted by `setup --remove`.
   It never reaches `shell.json`, a process list, a log, or a `doctor` report: `cli/src/setup/key.rs` and `doctor::facts::KeyState` both record the state of the file and never its contents.
   Every cloud failure carries its reason word in the message, and `cli/tests/openrouter_stub.rs` maps each one from a recorded response.
+  `ui/errors.js` parses that trailing `(reason: <word>)` to pick the card body, so a change to the message wording moves the card too.
   The `engine_unavailable` card sets `needsDiagnosis` false for this slug alone, because `doctor` reads no piece of this machine that a cloud failure is about.
 - `grammachy setup` lives in `cli/src/setup/`, spec section 10.
   It prints one JSON envelope (`SetupEnvelope`).
@@ -103,7 +104,7 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   `--engine openai --model <name>` fills the Models table and does not narrow the Engines table.
   An engine the machine cannot reach is a skipped row, never an error, so a machine without llama.cpp still produces a valid file.
   `cli/src/bench/weights.rs` is the product rule for which models may be recommended (`docs/spec/evals.md` section 5).
-  `openrouter` is the cloud engine in `cli/src/engines/openrouter/`, and it reuses the `openai` request, prompt, and mapping.
+  A cloud row runs on the `openrouter` engine of `cli/src/engines/openrouter/`, described in its own entry above.
   It is why the binary carries a TLS stack: `ureq` runs with the `rustls` feature for it.
   A cloud row needs `--max-cost <usd>`, the cap on the whole run, and the flag is refused when no cloud row runs.
   `Spend` in `cli/src/bench/mod.rs` owns both ways a cloud row ends and what the report prints as the run's spend, because a row the cap ended carries no tally.

@@ -666,7 +666,7 @@ cargo test
 
 ## 17. Removing it
 
-Remove the hotkeys and the menu entry first (spec section 10):
+Remove the hotkeys, the menu entry, and the OpenRouter key first (spec section 10):
 
 ```bash
 ~/.config/omarchy/plugins/io.github.jyooi.grammachy/bin/grammachy setup --remove
