@@ -10,6 +10,7 @@ import "ui/keymap.js" as Keymap
 import "ui/splice.js" as Splice
 import "ui/format.js" as Format
 import "ui/anchor.js" as Anchor
+import "ui/capture.js" as Capture
 import "ui/limits.js" as Limits
 import "ui/models.js" as ModelsJs
 
@@ -58,7 +59,8 @@ Item {
   // Which surface of spec section 2 is on screen: "quick" or "compose".
   property string surface: "quick"
 
-  // Quick: "capturing", "checking", "result", "error", "notice", or "toolong".
+  // Quick: "capturing", "empty", "checking", "result", "error", "notice", or
+  // "toolong".
   // Compose: "editing", "confirm", "checking", "result", "error", or "notice".
   // Both: "cloudConsent", the card in front of the first cloud Check.
   property string phase: "capturing"
@@ -154,6 +156,24 @@ Item {
   // in the global layout, or null when nothing was focused. The quick popup
   // opens beside it and Replace types into it, so both stop guessing.
   property var sourceWindow: null
+
+  // The capture the last Check consumed, spec section 3: the exact text and
+  // the address of the window it came from. The compositor keeps the primary
+  // selection for as long as the source window owns it, so a summon with
+  // nothing highlighted reads this text again; `ui/capture.js` is what calls
+  // that stale. It outlives a summon, because the summon after the next one
+  // reads the same selection.
+  property string lastCapturedText: ""
+  property string lastCapturedWindow: ""
+  // A Replace has closed the popup and has still to type, spec section 6. The
+  // source window keeps its highlight until then, so the primary selection is
+  // held back until the keystroke is out.
+  property bool replacePending: false
+  // This run took a Selection from a source window, spec section 3. Compose
+  // captures nothing, and a summon that found nothing new took nothing either.
+  // Neither of those owns the primary selection, so neither may record a
+  // capture or release one when it closes.
+  property bool runCaptured: false
 
   // ------------------------------------------------------------- models
   //
@@ -382,6 +402,15 @@ Item {
     // A chunked run launches one Check after another, so a card that is gone
     // must not leave one walking the rest of the Draft.
     root.cancelChunkRun()
+    // Spec section 3: a run that captured is over, whether it ended in Apply,
+    // Replace, Clear, or Close, so what it captured is recorded and the primary
+    // selection it came from is released. A run that captured nothing owns no
+    // selection, so it takes none away and records none. `resetRun` leaves
+    // `capturedText` in place while it drops the source window, so the text
+    // alone cannot answer this. The release holds the same rule of its own.
+    if (root.runCaptured)
+      root.consumeCapture(root.capturedText, Anchor.windowAddress(root.sourceWindow))
+    root.releasePrimary()
     root.opened = false
   }
 
@@ -443,6 +472,10 @@ Item {
     root.errorDiagnosis = ""
     root.pendingDraft = ""
     root.sourceWindow = null
+    // Whatever the last Replace was waiting on, this summon is not it.
+    root.replacePending = false
+    // This summon has captured nothing yet, so it owns no primary selection.
+    root.runCaptured = false
     // Spec section 5.3: closing the overlay does not cancel a download, so a
     // summon leaves `models`, `modelBusy`, and the process in flight alone. The
     // confirm is a question about a card that is gone, so it goes.
@@ -561,10 +594,110 @@ Item {
     return typeof text === "string" && text.replace(/^\s+|\s+$/g, "").length > 0
   }
 
+  // The record `ui/capture.js` reads: what the last consumed capture held and
+  // where it came from.
+  function lastCapture() {
+    return Capture.kept(root.lastCapturedText, root.lastCapturedWindow)
+  }
+
+  // The record of what this run captured, spec section 3. It is what the next
+  // summon is measured against, and it is all this does: the primary selection
+  // is released later, when the popup closes.
+  function consumeCapture(text, address) {
+    if (typeof text !== "string" || text.length === 0) return
+    var window = typeof address === "string" ? address : ""
+    if (Capture.isStale(text, window, root.lastCapture())) return
+    root.lastCapturedText = text
+    root.lastCapturedWindow = window
+  }
+
+  // Spec section 3: the primary selection goes when the popup closes, and not
+  // before. A terminal drops its own highlight when it loses primary
+  // ownership, and Replace pastes over that highlight, so a release at capture
+  // time would take the Selection away from under the Apply the reader is
+  // still deciding on.
+  //
+  // Only a run that took a Selection releases one, and it releases at most
+  // once, whichever exit it takes. Both rules live here rather than at each
+  // exit, so no call site can hold a different one: the close, the Clear, and
+  // the keystroke that ends a Replace all call this plainly.
+  //
+  // Replace is the one path that outlives the close: it closes the popup, asks
+  // for the source window, and only then types. `replacePending` is what makes
+  // the release wait for that keystroke, so the claim has to outlive the close
+  // that armed the wait. That is why the wait answers before the claim goes.
+  function releasePrimary() {
+    if (!root.runCaptured) return
+    if (root.replacePending) return
+    root.runCaptured = false
+    clearPrimary.running = true
+  }
+
   function captured(text) {
+    var address = Anchor.windowAddress(root.sourceWindow)
+    // Spec section 3: the same text from the same window is the selection the
+    // last Check already ran on, so nothing is checked again for free.
+    if (Capture.isStale(text, address, root.lastCapture())) {
+      root.showNothingNew()
+      return
+    }
     root.capturedText = text
     root.truncated = false
+    root.runCaptured = true
+    root.consumeCapture(text, address)
     root.runCheck(text)
+  }
+
+  // Nothing new to check, spec sections 3 and 6. The popup stays open on the
+  // empty state, which offers the kept text rather than a second capture.
+  function showNothingNew() {
+    root.capturedText = ""
+    root.selectionText = ""
+    root.truncated = false
+    root.errorCard = null
+    root.errorDiagnosis = ""
+    root.engineMessage = ""
+    root.phase = "empty"
+  }
+
+  // `Check last text again`, spec section 6: the kept text with no capture at
+  // all, so a selection that has since changed cannot reach the engine.
+  function checkLastAgain() {
+    if (root.lastCapturedText.length === 0) return
+    root.capturedText = root.lastCapturedText
+    root.truncated = false
+    root.runCheck(root.lastCapturedText)
+  }
+
+  // `Clear`, spec section 6. The popup stays open on the empty state with
+  // nothing of the last Check left on it. The Draft is not touched: it is the
+  // one thing the plugin keeps, and no file holds a second copy of it.
+  function clearCapture() {
+    if (root.surface !== "quick") return
+    // A Check still in flight answers into a card that has moved on.
+    root.runGeneration += 1
+    checkProcess.launchPending = false
+    checkProcess.restartQueued = false
+    checkProcess.running = false
+    doctorProcess.restartQueued = false
+    doctorProcess.running = false
+    root.issues = []
+    root.decisions = []
+    root.focusIndex = 0
+    root.engine = ""
+    root.elapsedMs = 0
+    root.applied = false
+    root.noticeTitle = ""
+    root.noticeBody = ""
+    root.noticeMeta = ""
+    // A borrow of the clipboard is the reader's clipboard, so it goes back.
+    if (root.clipboardBorrowed && !restoreClipboard.running)
+      root.restoreBorrowedClipboard()
+    root.borrowedClipboard = ""
+    root.clipboardBorrowed = false
+    root.releasePrimary()
+    root.showNothingNew()
+    Qt.callLater(root.restoreFocus)
   }
 
   function onPrimaryCaptured(text, generation) {
@@ -596,11 +729,19 @@ Item {
 
   function onFallbackCaptured(text, generation) {
     if (!root.isLive(generation)) return
+    var borrowed = root.borrowedClipboard
     root.restoreBorrowedClipboard()
+    // Spec section 3: a field with nothing selected answers Ctrl + C by
+    // leaving the clipboard as it was, so what came back is an earlier copy
+    // rather than a Selection.
+    if (Capture.copiedNothing(borrowed, text)) {
+      root.showNothingNew()
+      return
+    }
     if (root.isSelection(text)) root.captured(text)
-    // Capture found nothing, so the CLI would answer `empty_selection` on an
-    // empty stdin. Showing that card here saves the round trip.
-    else root.showError(Errors.EMPTY_SELECTION, "")
+    // The capture found nothing at all, which is the same answer for the
+    // reader: there is nothing new to check.
+    else root.showNothingNew()
   }
 
   function restoreBorrowedClipboard() {
@@ -1411,7 +1552,12 @@ Item {
     if (!root.canApply()) return
     // Spec section 9: auto-replace never applies in Compose, because the Draft
     // came from this card rather than from a window still holding a Selection.
-    root.runCopy(root.surface === "quick" && root.autoReplace)
+    //
+    // Spec section 6: Replace only works while the Selection is still
+    // highlighted in the source window. A run that took no Selection holds
+    // none, so `Check last text again` is copy-only whatever the setting says.
+    // `runCaptured` is the same fact the release rests on.
+    root.runCopy(root.surface === "quick" && root.autoReplace && root.runCaptured)
   }
 
   function runCopy(pasteAfter) {
@@ -1462,6 +1608,8 @@ Item {
   // typed anywhere, and the card comes back to say where the text went.
   function showSourceGone(generation) {
     if (!root.isLive(generation)) return
+    // No keystroke is coming, so nothing is holding the release back.
+    root.replacePending = false
     root.opened = true
     root.surface = "quick"
     root.settingsOpen = false
@@ -1470,6 +1618,7 @@ Item {
 
   function launchPasteKeystroke(generation) {
     if (!root.isLive(generation)) return
+    pasteKeystroke.generation = generation
     pasteKeystroke.running = true
   }
 
@@ -1486,6 +1635,7 @@ Item {
     down: Qt.Key_Down,
     a: Qt.Key_A,
     c: Qt.Key_C,
+    l: Qt.Key_L,
     control: Qt.ControlModifier,
     shift: Qt.ShiftModifier,
     alt: Qt.AltModifier,
@@ -1514,6 +1664,13 @@ Item {
       return Keymap.MODE_IDLE
     }
     if (root.phase === "result" && root.issues.length > 0) return Keymap.MODE_REVIEW
+    // Spec section 6: the quick cards that carry the Clear button and no Issues
+    // to decide answer Esc and Ctrl + L, and nothing else. `ui/QuickCard.qml`
+    // draws that button on these four phases and on no other, so the button and
+    // the key reach exactly the same cards.
+    if (root.phase === "checking" || root.phase === "error"
+      || root.phase === "notice" || root.phase === "result")
+      return Keymap.MODE_QUICK_CLEAR
     return Keymap.MODE_IDLE
   }
 
@@ -1530,6 +1687,7 @@ Item {
     else if (action === Keymap.FOCUS_NEXT) root.moveFocus(1)
     else if (action === Keymap.ACCEPT_ALL) root.acceptAllOpen()
     else if (action === Keymap.COPY) root.copyCorrected()
+    else if (action === Keymap.CLEAR) root.clearCapture()
     else if (action === Keymap.APPLY) root.applyCorrected()
     else if (action === Keymap.REMOVE_MODEL) root.confirmRemoveModel(root.modelConfirm)
     else if (action === Keymap.CLOUD_CONTINUE) root.continueCloudCheck()
@@ -1624,6 +1782,15 @@ Item {
       waitForEnd: true
       onStreamFinished: root.onFallbackCaptured(text, fallbackPaste.startedGeneration)
     }
+  }
+
+  // Spec section 3: the primary selection is released when the popup closes,
+  // so the summon after this one reads what the reader highlights next rather
+  // than what they highlighted before. `releasePrimary` is the only caller,
+  // and it holds this back until a Replace has typed.
+  Process {
+    id: clearPrimary
+    command: ["wl-copy", "--primary", "--clear"]
   }
 
   // The clipboard was borrowed, not taken. Put it back exactly as it was.
@@ -1864,6 +2031,9 @@ Item {
       if (!copyProcess.pasteAfter) return
       copyProcess.pasteAfter = false
       if (!root.isLive(copyProcess.generation)) return
+      // The source window still holds the highlight this is about to paste
+      // over, so the primary selection is held back until the keystroke is out.
+      root.replacePending = true
       // wl-copy has claimed the selection by now, so the paste will find it.
       root.close()
       pasteTimer.generation = copyProcess.generation
@@ -1929,9 +2099,17 @@ Item {
     }
   }
 
+  // The Replace is over once this is out, so the primary selection the
+  // Selection came from may go, spec section 3.
   Process {
     id: pasteKeystroke
+    property int generation: 0
     command: ["wtype", "-M", "ctrl", "v", "-m", "ctrl"]
+    onExited: {
+      root.replacePending = false
+      if (!root.isLive(pasteKeystroke.generation)) return
+      root.releasePrimary()
+    }
   }
 
   // ----------------------------------------------------------------- window
@@ -2021,6 +2199,7 @@ Item {
         sourceText: root.selectionText
         fullText: root.capturedText
         truncated: root.truncated
+        lastCapturedText: root.lastCapturedText
         limitUnits: root.checkLimitUnits
         issues: root.issues
         decisions: root.decisions
@@ -2029,6 +2208,7 @@ Item {
         elapsedMs: root.elapsedMs
         applied: root.applied
         autoReplace: root.autoReplace
+        runCaptured: root.runCaptured
         noticeTitle: root.noticeTitle
         noticeBody: root.noticeBody
         noticeMeta: root.noticeMeta
@@ -2073,6 +2253,8 @@ Item {
         onAutoReplaceToggled: root.toggleAutoReplace()
         onFocusRequested: function(index) { root.focusIndex = index }
         onCheckFirstRequested: root.checkFirstUnits()
+        onCheckLastRequested: root.checkLastAgain()
+        onClearRequested: root.clearCapture()
         // Spec section 2: both the too-long card's `Open in Compose` and the
         // Compose button in the hero carry the Selection over as the Draft.
         onComposeRequested: root.composeWith(root.capturedText)

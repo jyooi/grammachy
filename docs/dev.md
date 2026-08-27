@@ -121,12 +121,16 @@ Run the whole key map of spec section 6 on the same card:
 | Up, Down | Move the focus over every Issue, wrapping at both ends |
 | A | Accept every open Issue |
 | Ctrl + C | Copy the Corrected text |
-| Ctrl + Enter | Apply: copy, or replace when auto-replace is on |
+| Ctrl + Enter | Apply: copy, or replace when auto-replace is on and this run took a Selection |
+| Ctrl + L | Clear the capture and the review, popup open. It works on every quick card that shows the `Clear` button |
 | Esc | Close the popup |
 
 Ctrl + C and Ctrl + Enter stay off until one Fix is accepted, the same as the Apply button.
 
-Finish the item on the placement, which is the half two windows are here for (spec sections 3 and 6):
+Finish the item on the placement, which is the half two windows are here for (spec sections 3 and 6).
+Every repeat below that expects a Check needs different text, or a different window.
+The same text from the same window is stale (spec section 3), and the popup then shows the nothing-new state.
+So change one word in the sentence before you highlight it again.
 
 - **Every bar position.** Move the bar with `omarchy bar position bottom`, then `left`, `right`, and back to `top`, running the item once at each.
   The card follows the source window every time and never lands under the bar or off an edge.
@@ -135,7 +139,18 @@ Finish the item on the placement, which is the half two windows are here for (sp
 - **A maximized window.** Make the source terminal fullscreen with SUPER + F and run the item again.
   The card sits inside the window, held to its trailing edge.
 - **No source window.** Clear the selection, click the desktop background so no window is focused, and click `G`.
-  The `empty_selection` card opens in the bar widget's own corner, which is the fallback.
+  The nothing-new state opens in the bar widget's own corner, which is the fallback.
+- **The same selection twice.** Run the item once and press Esc, then press SUPER + G again without highlighting anything new.
+  The popup opens on the nothing-new state and runs no Check (spec section 3).
+  Press `Check last text again` and the same text is checked with no new capture.
+  That result is copy-only: with auto-replace on, the Apply button still reads `Copy corrected text`, and Ctrl + Enter types nowhere.
+  The run took no Selection, so there is no highlight left to paste over (spec section 6).
+- **The highlight survives the check.** Run the item again and watch the source terminal while the card is up.
+  The highlight is still there, because the primary selection is released only when the popup closes.
+  Turn auto-replace on and press Ctrl + Enter: the paste lands over that highlight rather than beside it.
+- **Clear.** Run the item again, then press `Clear` in the hero, or Ctrl + L.
+  The popup stays open on the nothing-new state with the Issues gone.
+  Open Compose afterwards: the Draft is exactly as it was.
 
 ## 6. Smoke item 2: an Electron text field
 
@@ -156,10 +171,14 @@ The paste must give the text you copied first, not the sentence, until you press
 2. Clear the primary selection and the clipboard: `wl-copy --clear; wl-copy --primary --clear`.
 3. Click the `G` button on the bar.
 
-Expected: the popup opens with the `empty_selection` card of spec section 8.
-It reads `Nothing selected` over `Highlight some text, then press SUPER + G.`, with `Close` and `Open Compose`.
-`Open Compose` opens the Compose card on the kept Draft.
+Expected: the popup opens on the nothing-new state of spec sections 3 and 6.
+It reads `No new selection. Highlight text and press SUPER + G, or paste here.`, with `Close` and the hero's `Compose`.
+No Check runs, which the meta line says: `nothing new to check`.
+`Compose` opens the Compose card on the kept Draft.
 Esc closes it, and so does a click outside the card.
+
+Run it once more with something on the clipboard: `wl-copy "text from yesterday"`.
+The answer is the same, because a Ctrl + C that copies nothing leaves the clipboard as it was.
 
 The capture tries the primary selection, then the Ctrl + C fallback, so this item takes about 150 ms longer than the others.
 
@@ -773,7 +792,7 @@ The same three plugin checks CI runs, against the shell installed on this machin
 ```bash
 for file in $(find . -name '*.qml' | sort); do qmllint -I /usr/share/omarchy/shell "$file" || echo "FAILED $file"; done
 omarchy-plugin-validate .
-node --test ui/splice.test.js ui/tokens.test.js ui/settings.test.js ui/keymap.test.js ui/errors.test.js ui/format.test.js ui/anchor.test.js ui/limits.test.js ui/models.test.js
+node --test ui/splice.test.js ui/tokens.test.js ui/settings.test.js ui/keymap.test.js ui/errors.test.js ui/format.test.js ui/anchor.test.js ui/limits.test.js ui/models.test.js ui/capture.test.js
 ```
 
 The `qmllint` on `PATH` reports a syntax error through its exit status alone and prints nothing.

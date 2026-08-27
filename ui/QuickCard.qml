@@ -3,6 +3,7 @@ import QtQuick.Layouts
 import qs.Commons
 import qs.Ui
 import "format.js" as Format
+import "capture.js" as Capture
 
 // The quick popup card, spec section 6, laid out after variant B of the
 // HUF-174 prototype: hero, marked text, inspector strip, footer.
@@ -21,13 +22,18 @@ import "format.js" as Format
 BorderSurface {
   id: root
 
-  // "checking", "result", "error", "notice", "cloudConsent", or "toolong".
+  // "empty", "checking", "result", "error", "notice", "cloudConsent", or
+  // "toolong".
   property string phase: "checking"
   // The exact text the Check ran on. Every Issue span indexes into it.
   property string sourceText: ""
   // The whole capture, which is longer than sourceText after a first-N Check.
   property string fullText: ""
   property bool truncated: false
+  // Spec section 3: a capture that is the last consumed one again is stale, so
+  // the empty state offers that kept text rather than a second capture. Empty
+  // means there is none to offer and the button stays away.
+  property string lastCapturedText: ""
   // One Check takes this many UTF-16 code units, spec section 6. The limit
   // belongs to the Engine, so the overlay passes the selected engine's; this
   // default is the default engine's, which `ui/limits.js` also answers.
@@ -41,6 +47,9 @@ BorderSurface {
   // Apply has run on the Corrected text as it stands.
   property bool applied: false
   property bool autoReplace: false
+  // This run took a Selection from a source window, spec section 3. A run that
+  // took none has none to replace, so Apply on it is copy-only.
+  property bool runCaptured: false
   property string noticeTitle: ""
   property string noticeBody: ""
   // The hero line a notice shows, because "check did not finish" is not true
@@ -95,6 +104,8 @@ BorderSurface {
   signal autoReplaceToggled()
   signal focusRequested(int index)
   signal checkFirstRequested()
+  signal checkLastRequested()
+  signal clearRequested()
   signal composeRequested()
   signal closeRequested()
   signal settingsToggled()
@@ -125,6 +136,13 @@ BorderSurface {
   // The Settings view takes the body over; every check row hangs off this.
   readonly property bool showsCheck: !root.settingsOpen
   readonly property bool isEmptyResult: root.phase === "result" && root.issueCount === 0
+  // Nothing new to check, spec sections 3 and 6.
+  readonly property bool isNothingNew: root.phase === "empty"
+  readonly property bool hasLastCapture: root.lastCapturedText.length > 0
+  // Spec section 6: Replace only works while the Selection is still
+  // highlighted in the source window. After `Check last text again` there is
+  // no live Selection, so the label, the tooltip, and Apply all say copy.
+  readonly property bool replaces: root.autoReplace && root.runCaptured
   readonly property var focusedIssue: root.hasIssues && root.focusIndex >= 0 && root.focusIndex < root.issueCount
     ? root.issues[root.focusIndex] : null
 
@@ -157,6 +175,7 @@ BorderSurface {
     if (root.hasError) return String(root.errorCard.meta)
     if (root.phase === "notice") return root.noticeMeta
     if (root.phase === "toolong") return "selection over the limit"
+    if (root.isNothingNew) return "nothing new to check"
     var run = root.engine + ", " + root.elapsedMs + " ms"
     if (root.issueCount === 0) return "no issues, " + run
     return root.issueCount + (root.issueCount === 1 ? " issue, " : " issues, ")
@@ -164,7 +183,7 @@ BorderSurface {
   }
 
   function applyLabel() {
-    if (root.autoReplace) return root.applied ? "Replaced" : "Replace selection"
+    if (root.replaces) return root.applied ? "Replaced" : "Replace selection"
     return root.applied ? "Copied" : "Copy corrected text"
   }
 
@@ -208,16 +227,24 @@ BorderSurface {
       autoReplace: root.autoReplace
       settingsOpen: root.settingsOpen
       // Spec sections 2 and 6: the header carries the Selection into Compose,
-      // even one under the limit. The too-long card offers the same handover
-      // as its primary button, so the hero stands aside there.
+      // even one under the limit, and Clear drops it. Both act on the text on
+      // screen, so both stand here. The too-long card offers the same handover
+      // as its primary button, so the hero stands aside there, and the empty
+      // state has nothing left to clear.
       // The consent card stands aside for nothing: it is one question, and a
       // second way out of it would send the Selection somewhere unasked.
       actions: root.showsCheck && root.phase !== "toolong" && !root.consenting
-        ? [{ id: "compose", text: "Compose", tooltip: "Open the selection in Compose", primary: false }]
+        ? (root.isNothingNew
+          ? [{ id: "compose", text: "Compose", tooltip: "Open the selection in Compose", primary: false }]
+          : [{ id: "clear", text: "Clear", tooltip: "Ctrl + L", primary: false },
+             { id: "compose", text: "Compose", tooltip: "Open the selection in Compose", primary: false }])
         : []
       onAutoReplaceToggled: root.autoReplaceToggled()
       onSettingsToggled: root.settingsToggled()
-      onActionRequested: root.composeRequested()
+      onActionRequested: function(id) {
+        if (id === "clear") root.clearRequested()
+        else root.composeRequested()
+      }
     }
 
     SettingsView {
@@ -356,6 +383,39 @@ BorderSurface {
         card: root.errorCard
         diagnosis: root.diagnosis
         onActionRequested: function(action) { root.errorActionRequested(action) }
+      }
+
+      // --------------------------------------------- nothing new to check
+
+      // Spec sections 3 and 6: the summon found the selection the last Check
+      // already ran on, or found nothing at all. Neither is worth a Check, so
+      // the popup says so and offers the kept text.
+      ColumnLayout {
+        Layout.fillWidth: true
+        Layout.maximumWidth: layout.width
+        Layout.topMargin: Style.spacing.lg
+        Layout.bottomMargin: Style.spacing.lg
+        visible: root.showsCheck && root.isNothingNew
+        spacing: Style.spacing.md
+
+        Text {
+          Layout.fillWidth: true
+          horizontalAlignment: Text.AlignHCenter
+          text: "󰅍"
+          color: Color.muted
+          font.family: Style.font.family
+          font.pixelSize: Style.font.displayLarge
+        }
+
+        Text {
+          Layout.fillWidth: true
+          horizontalAlignment: Text.AlignHCenter
+          wrapMode: Text.Wrap
+          text: Capture.NOTHING_NEW
+          color: Color.popups.text
+          font.family: Style.font.family
+          font.pixelSize: Style.font.body
+        }
       }
 
       // ------------------------------------------------------- empty state
@@ -549,6 +609,16 @@ BorderSurface {
         }
 
         Button {
+          visible: root.showsCheck && root.isNothingNew && root.hasLastCapture
+          text: Capture.CHECK_LAST_AGAIN
+          tooltipText: "Runs the check again on the text it captured last"
+          bordered: true
+          foreground: Color.popups.text
+          fontFamily: Style.font.family
+          onClicked: root.checkLastRequested()
+        }
+
+        Button {
           visible: root.showsCheck && root.phase === "toolong"
           text: "Check the first " + root.grouped(root.limitUnits) + " only"
           bordered: true
@@ -585,7 +655,7 @@ BorderSurface {
           enabled: root.acceptedCount > 0 && !root.applied
           opacity: enabled ? 1.0 : 0.4
           text: root.applyLabel()
-          tooltipText: root.autoReplace ? "Ctrl + Enter, or Ctrl + C to copy only" : "Ctrl + Enter"
+          tooltipText: root.replaces ? "Ctrl + Enter, or Ctrl + C to copy only" : "Ctrl + Enter"
           bordered: true
           foreground: root.applied ? Color.popups.text : Color.accent
           fontFamily: Style.font.family
