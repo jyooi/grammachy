@@ -1,4 +1,4 @@
-//! How much room is left for an engine component, spec section 5.4.
+//! How much room is left for an engine component, spec section 5.3.
 //!
 //! A component is hundreds of megabytes, so the Engines list says what the
 //! disk has before the user asks for one, and `engine install` refuses rather

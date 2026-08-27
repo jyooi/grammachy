@@ -1,4 +1,4 @@
-//! The JSON contract of `grammachy engine`, spec section 5.4.
+//! The JSON contract of `grammachy engine`, spec section 5.3.
 //!
 //! Every verb prints exactly one envelope, a report carries the whole list the
 //! Settings view draws, and the error envelope is the shared one of section

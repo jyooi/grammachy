@@ -2,7 +2,7 @@
 //!
 //! [`install`] is the odd one out: it is not an adapter but the catalogue of
 //! optional components `grammachy engine` puts on disk and takes off again
-//! (spec section 5.4), which is what makes LanguageTool an opt-in engine.
+//! (spec section 5.3), which is what makes LanguageTool an opt-in engine.
 
 pub mod harper;
 pub mod install;

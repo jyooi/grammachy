@@ -15,7 +15,7 @@ use grammachy::{check, chunk, doctor};
 /// `check` and `chunk` render one JSON envelope (spec section 5.1).
 /// `doctor` renders its report (spec section 10).
 /// `setup` renders its JSON envelope (spec section 10), and so does `engine`
-/// (spec section 5.4).
+/// (spec section 5.3).
 struct Output {
     text: String,
     exit_code: i32,
@@ -142,7 +142,7 @@ fn run() -> Option<Output> {
         }
         // `engine` reads no stdin and no Settings entry: the verb names the
         // component, and which engine a Check runs on says nothing about what
-        // is on disk (spec section 5.4).
+        // is on disk (spec section 5.3).
         Command::Engine(args) => Some(engine_install::run(&args.verb).into()),
     }
 }

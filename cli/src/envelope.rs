@@ -50,7 +50,7 @@ pub fn sorted_disjoint(mut issues: Vec<Issue>) -> Vec<Issue> {
 ///
 /// Three codes a Check never answers sit beside them. `SetupFailed` belongs to
 /// `grammachy setup` (spec sections 10 and 12), and `Cancelled` and
-/// `DownloadFailed` belong to `grammachy model` (spec section 5.3). Each owns a
+/// `DownloadFailed` belong to `grammachy engine` (spec section 5.3). Each owns a
 /// code of its own instead of borrowing an engine code that would tell the user
 /// the wrong thing: a cancelled download is the user's own decision, and a
 /// digest that did not match is not an engine failing.

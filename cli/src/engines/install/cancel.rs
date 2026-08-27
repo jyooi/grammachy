@@ -1,4 +1,4 @@
-//! The cancel of `grammachy engine install`, spec section 5.4.
+//! The cancel of `grammachy engine install`, spec section 5.3.
 //!
 //! The shell has no way to stop a transfer other than to signal the process it
 //! started, so a SIGTERM is the cancel. What the user must not lose is the

@@ -1,4 +1,4 @@
-//! `grammachy engine`, spec section 5.4.
+//! `grammachy engine`, spec section 5.3.
 //!
 //! The optional engine components this machine keeps, and the three things a
 //! user does with them: see what is on disk, put one in place, and take it off
@@ -15,8 +15,8 @@
 //! deletes one. The pacman package stays a first-class alternative and is
 //! never touched by either verb; `doctor` reports it where it finds it.
 //!
-//! The row is pinned twice, by sha256 and by byte size, the way a weights row
-//! is. Both numbers come from an unauthenticated request to the upstream host,
+//! The row is pinned twice, by sha256 and by byte size.
+//! Both numbers come from an unauthenticated request to the upstream host,
 //! and the digest is the one the Arch `languagetool` package pins for the same
 //! file.
 //!
@@ -300,8 +300,8 @@ impl Engines {
             name: row.name.to_string(),
             version: row.version.to_string(),
             state,
-            // Spec section 5.4, the rule of 5.3: the length of the `.part`
-            // file, and `0` for any other state.
+            // Spec section 5.3: the length of the `.part` file, and `0` for
+            // any other state.
             partial_bytes: match state {
                 State::Partial => partial_bytes.unwrap_or(0),
                 _ => 0,
