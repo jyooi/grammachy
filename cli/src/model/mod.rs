@@ -86,7 +86,8 @@ const DEFAULT_BASE_URL: &str = "https://huggingface.co";
 /// The `name` must also be a case-insensitive prefix of the `file_name`, because
 /// the Settings value it becomes is resolved to a file by [`unit::model_file`],
 /// which matches on that prefix. A row that breaks the rule downloads and lists
-/// but no engine can run it, so [`every_row_name_prefixes_its_file`] guards it.
+/// but no engine can run it, so `every_row_name_resolves_to_its_own_file` guards
+/// it by running that resolver over every row.
 struct CatalogueRow {
     name: &'static str,
     repository: &'static str,
@@ -736,8 +737,13 @@ mod tests {
     /// A name the engine cannot resolve to a file downloads and lists but never
     /// runs, because `unit::model_file` matches the Settings value against the
     /// start of each `.gguf` name.
+    ///
+    /// This runs that resolver rather than restating its rule, over a directory
+    /// that holds the pinned file of every row at once. So a name that resolves
+    /// to another row's file fails here rather than on a user's machine.
     #[test]
-    fn every_row_name_prefixes_its_file() {
+    fn every_row_name_resolves_to_its_own_file() {
+        let directory = scratch("catalogue-resolution");
         for row in CATALOGUE {
             assert!(
                 row.file_name
@@ -746,6 +752,19 @@ mod tests {
                 "{} does not name the start of {}",
                 row.name,
                 row.file_name
+            );
+            std::fs::write(directory.join(row.file_name), b"weights")
+                .expect("the placeholder weights file is written");
+        }
+
+        for row in CATALOGUE {
+            let resolved = unit::model_file(&directory, row.name)
+                .unwrap_or_else(|error| panic!("{} resolves to a file: {}", row.name, error.0));
+            assert_eq!(
+                resolved,
+                directory.join(row.file_name),
+                "{} resolves to another row's file",
+                row.name
             );
         }
     }
