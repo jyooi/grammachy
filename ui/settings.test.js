@@ -7,6 +7,7 @@ const assert = require("node:assert/strict")
 const {
   PLUGIN_ID,
   NATIVE_LANGUAGE_OPTIONS,
+  TARGET_ENGLISH_OPTIONS,
   ENGINE_OPTIONS,
   entryOf,
   defaultOf,
@@ -87,6 +88,14 @@ test("reading never rewrites the entry it was handed", () => {
   assert.deepEqual(entry, { id: PLUGIN_ID, engine: "claude" })
 })
 
+test("targetEnglish reads en-GB and falls back to en-US for anything else", () => {
+  assert.equal(valueOf({ id: PLUGIN_ID, targetEnglish: "en-GB" }, "targetEnglish"), "en-GB")
+  assert.equal(valueOf({ id: PLUGIN_ID, targetEnglish: "en-AU" }, "targetEnglish"), "en-US")
+  assert.equal(valueOf({ id: PLUGIN_ID }, "targetEnglish"), "en-US")
+  assert.equal(normalised("targetEnglish", "en-GB"), "en-GB")
+  assert.equal(normalised("targetEnglish", "en-AU"), "en-US")
+})
+
 test("a write keeps a known value and replaces an unknown one with the default", () => {
   assert.equal(normalised("engine", "harper"), "harper")
   assert.equal(normalised("engine", "claude"), "harper")
@@ -94,8 +103,8 @@ test("a write keeps a known value and replaces an unknown one with the default",
 })
 
 // `updateEntryInline` replaces the entry, so anything the merge drops is gone
-// from the file. The file-only keys of spec section 7 are the ones that hurt.
-test("a write carries the file-only keys across", () => {
+// from the file.
+test("a write carries the other keys across", () => {
   const entry = {
     id: PLUGIN_ID,
     targetEnglish: "en-GB",
@@ -123,12 +132,14 @@ test("a write against a missing entry still produces the one key", () => {
 
 test("the dropdown rows are the spec section 7 values, in that order", () => {
   assert.deepEqual(NATIVE_LANGUAGE_OPTIONS.map((o) => o.value), ["none", "zh", "ms", "es", "fr", "de", "pt", "ja"])
+  assert.deepEqual(TARGET_ENGLISH_OPTIONS.map((o) => o.value), ["en-US", "en-GB"])
   assert.deepEqual(ENGINE_OPTIONS.map((o) => o.value), ["languagetool", "harper"])
   assert.deepEqual(ENGINE_OPTIONS.map((o) => o.label), ["LanguageTool", "Harper"])
 })
 
 test("every default is itself a value the dropdowns can select", () => {
   assert.ok(NATIVE_LANGUAGE_OPTIONS.some((o) => o.value === defaultOf("nativeLanguage")))
+  assert.ok(TARGET_ENGLISH_OPTIONS.some((o) => o.value === defaultOf("targetEnglish")))
   assert.ok(ENGINE_OPTIONS.some((o) => o.value === defaultOf("engine")))
 })
 

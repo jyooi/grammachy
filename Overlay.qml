@@ -2271,6 +2271,7 @@ Item {
 
         settingsOpen: root.settingsOpen
         nativeLanguage: root.setting("nativeLanguage")
+        targetEnglish: root.setting("targetEnglish")
         engineSetting: root.setting("engine")
         quickHotkey: root.setting("quickHotkey")
         composeHotkey: root.setting("composeHotkey")
@@ -2353,6 +2354,7 @@ Item {
 
         settingsOpen: root.settingsOpen
         nativeLanguage: root.setting("nativeLanguage")
+        targetEnglish: root.setting("targetEnglish")
         engineSetting: root.setting("engine")
         quickHotkey: root.setting("quickHotkey")
         composeHotkey: root.setting("composeHotkey")

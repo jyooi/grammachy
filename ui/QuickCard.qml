@@ -72,6 +72,7 @@ BorderSurface {
   // Check that is on screen, which the meta line names.
   property bool settingsOpen: false
   property string nativeLanguage: "none"
+  property string targetEnglish: "en-US"
   property string engineSetting: "languagetool"
   property string quickHotkey: "SUPER + SHIFT + Q"
   property string composeHotkey: "SUPER + ALT + Q"
@@ -254,6 +255,7 @@ BorderSurface {
       visible: root.settingsOpen
 
       nativeLanguage: root.nativeLanguage
+      targetEnglish: root.targetEnglish
       engine: root.engineSetting
       autoReplace: root.autoReplace
       quickHotkey: root.quickHotkey

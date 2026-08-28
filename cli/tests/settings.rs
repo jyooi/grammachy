@@ -116,13 +116,22 @@ fn every_native_language_value_reads_back() {
 fn an_unknown_stored_value_reads_as_the_default() {
     let entry = stored(
         r#""nativeLanguage": "kl",
-           "targetEnglish": "en-GB",
+           "targetEnglish": "en-AU",
            "engine": "gpt""#,
     );
 
     let options = CheckOptions::resolve(&no_flags(), &entry);
 
     assert_eq!(options, CheckOptions::default());
+}
+
+#[test]
+fn a_stored_target_english_of_en_gb_reads_back() {
+    let entry = stored(r#""targetEnglish": "en-GB""#);
+
+    let options = CheckOptions::resolve(&no_flags(), &entry);
+
+    assert_eq!(options.target, TargetEnglish::EnGb);
 }
 
 #[test]

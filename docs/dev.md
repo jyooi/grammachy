@@ -435,7 +435,7 @@ That is the documented limit of spec section 6, and the hint under the toggle sa
 
 ## 13. Smoke item 9: settings persist across a shell restart
 
-1. Open Settings and set `Native language` to `Malay`, `Engine` to `Harper`, and `Auto-replace` on.
+1. Open Settings and set `Native language` to `Malay`, `Target English` to `British (en-GB)`, `Engine` to `Harper`, and `Auto-replace` on.
 2. Restart the shell:
 
 ```bash
@@ -444,9 +444,9 @@ omarchy restart shell
 
 3. Click `G` on a selection and open Settings again.
 
-Expected: `Malay`, `Harper`, and `Auto-replace` on, all as they were left.
+Expected: `Malay`, `British (en-GB)`, `Harper`, and `Auto-replace` on, all as they were left.
 The plugin keeps no state of its own: the values come back because `~/.config/omarchy/shell.json` holds them, and the shell reads that file at start.
-`targetEnglish` has no control, so check by hand that an edit of that key in the file also survives a round trip through the Settings view.
+With `British (en-GB)` set, a Check of `The colour of the centre` reports nothing on either engine, and with `American (en-US)` it flags `colour`.
 
 ## 14. The Compose card
 
