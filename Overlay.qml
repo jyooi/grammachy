@@ -286,10 +286,14 @@ Item {
     if (name === "quickHotkey" || name === "composeHotkey") root.applyHotkeys()
   }
 
-  // One run at a time: a `setup` already in flight will read the value just
-  // stored anyway, since it resolves the hotkeys itself from `shell.json`.
+  // One run at a time. Setup reads shell.json at start.
+  // A later persist sets pending and runs setup again at the end.
   function applyHotkeys() {
-    if (hotkeyApplyProcess.running) return
+    if (hotkeyApplyProcess.running) {
+      hotkeyApplyProcess.pending = true
+      return
+    }
+    hotkeyApplyProcess.pending = false
     hotkeyApplyProcess.command = [root.binaryPath, "setup"]
     hotkeyApplyProcess.running = true
   }
@@ -1912,6 +1916,12 @@ Item {
   // running `grammachy setup` failing from a terminal, so it only logs.
   Process {
     id: hotkeyApplyProcess
+    property bool pending: false
+    onRunningChanged: {
+      if (hotkeyApplyProcess.running) return
+      if (!hotkeyApplyProcess.pending) return
+      root.applyHotkeys()
+    }
     stderr: StdioCollector {
       waitForEnd: true
       onStreamFinished: if (text.length > 0) console.warn("grammachy setup:", text)

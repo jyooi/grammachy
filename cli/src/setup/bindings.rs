@@ -84,8 +84,18 @@ pub fn path() -> Option<PathBuf> {
     Some(PathBuf::from(home).join(".config/hypr/bindings.lua"))
 }
 
+/// Escape a value for a Lua double-quoted string. Hyprland key syntax is not
+/// parsed here: this is only so a quote or newline cannot break `bindings.lua`.
+fn lua_string(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', "\\n")
+}
+
 /// One hotkey: the default it replaces goes first, the new binding second.
 fn binding(keys: &str, description: &str, payload: &str) -> String {
+    let keys = lua_string(keys);
     format!(
         "hl.unbind(\"{keys}\")\n\
          o.bind(\"{keys}\", \"{description}\", \
@@ -194,6 +204,24 @@ mod tests {
              hl.unbind(\"SUPER + SHIFT + G\")\n\
              o.bind(\"SUPER + SHIFT + G\", \"Grammachy compose\", \
              [[omarchy-shell shell summon io.github.jyooi.grammachy '{\"mode\":\"compose\"}']])\n"
+        );
+    }
+
+    #[test]
+    fn a_backslash_quote_or_newline_in_the_hotkey_is_escaped_as_lua() {
+        let hotkeys = Hotkeys {
+            quick: "SUPER + \"G".to_string(),
+            compose: "SUPER + \\G\nSHIFT".to_string(),
+        };
+        let body = block(&hotkeys).body;
+
+        assert!(
+            body.contains("hl.unbind(\"SUPER + \\\"G\")"),
+            "{body}"
+        );
+        assert!(
+            body.contains("hl.unbind(\"SUPER + \\\\G\\nSHIFT\")"),
+            "{body}"
         );
     }
 
