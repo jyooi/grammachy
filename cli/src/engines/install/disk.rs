@@ -80,17 +80,20 @@ pub fn shortfall(size_bytes: u64, already: u64, free: Option<u64>) -> Option<Sho
 mod tests {
     use super::*;
 
-    /// The one thing worth asserting without knowing the machine: a real
-    /// directory answers, and a path under it that does not exist yet answers
-    /// the same number, because it will be created on the same file system.
+    /// A real directory answers.
+    /// A path under it that does not exist yet still answers.
+    /// The walk asks the parent on the same file system.
+    /// Two `statvfs` readings can differ when other tests write to the disk.
     #[test]
     fn a_directory_that_does_not_exist_yet_answers_for_its_parent() {
         let here = Path::new(env!("CARGO_MANIFEST_DIR"));
         let missing = here.join("no-such-directory/nor-this-one");
 
-        let free = free_bytes(here).expect("the crate directory is on a file system");
+        assert!(!missing.exists());
+        assert_eq!(nearest_existing(&missing).as_deref(), Some(here));
+
+        let free = free_bytes(&missing).expect("a missing child still answers for its parent");
         assert!(free > 0);
-        assert_eq!(free_bytes(&missing), Some(free));
     }
 
     #[test]
