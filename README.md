@@ -98,7 +98,6 @@ See `docs/dev.md` for cutting a release and pinning `cli.lock`.
 
 - `docs/spec/v1.md`: the v1 contract for every surface, engine, and envelope.
 - `docs/doctor.md`: the `doctor` envelope and exit code.
-- `docs/adr/`: the settled decisions.
 - `CONTEXT.md`: the domain glossary.
 
 ## Licence
