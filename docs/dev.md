@@ -14,7 +14,9 @@ The Compose walkthrough later on this page is here for the same reason: spec sec
   The default engine is `harper`, which is compiled into the binary, so a bare machine checks on the first try.
 - For LanguageTool, smoke item 11 installs it from Settings with no password.
   It needs a Java runtime beside it.
-  The Engines row offers an Install for `jre-openjdk`, and for `libarchive` when `bsdtar` is missing, that runs `omarchy pkg add` in a terminal, and smoke item 15 covers it.
+  The Engines row offers an Install for `jre-openjdk` that runs `omarchy pkg add` in a terminal.
+  Smoke item 15 covers that path.
+  The same row offers an Install for `libarchive` when `bsdtar` is missing.
   The Arch `languagetool` package works too, and Grammachy never installs or removes it.
 
 `wl-clipboard` and `wtype` already ship with Omarchy.
