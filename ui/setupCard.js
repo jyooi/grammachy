@@ -9,8 +9,7 @@
 // two fields cli.lock pins, and `card` turns those fields plus the run's
 // state into the title, the body, and what the card offers. A cli.lock with
 // no sha256 yet pins no release, so there is no Install button and the
-// body points at the developer path instead (spec section 10: "ship
-// cli.lock with version 0.1.0 and an explicitly empty hash").
+// body points at the developer path instead (docs/dev.md section 18).
 
 var ASSET = "grammachy-x86_64-linux"
 

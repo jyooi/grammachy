@@ -750,5 +750,5 @@ Spec section 10 makes a release two commits.
 4. Commit the changed `cli.lock`.
    This is the release's second commit.
 
-`cli.lock` ships with version `0.1.0` and an empty `sha256` until the first tag exists.
+`cli.lock` carries the crate version and an empty `sha256` until a later commit pins the tag asset.
 The setup card reads that empty hash as no pinned release and shows the developer path instead of an Install button.
