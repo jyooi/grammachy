@@ -58,7 +58,7 @@ Then write the hotkeys and the menu entry (spec section 10):
 
 The command edits `~/.config/hypr/bindings.lua` and the Omarchy menu extension.
 It then reloads Hyprland.
-Press SUPER + G on a selection to confirm the hotkeys.
+Press SUPER + SHIFT + Q on a selection to confirm the hotkeys.
 Both hotkeys are defaults, not fixed keys: spec section 7 lists `quickHotkey` and `composeHotkey`, remappable from Settings.
 
 ## 3. Enable it and put the button on the bar
@@ -143,7 +143,7 @@ So change one word in the sentence before you highlight it again.
   The card sits inside the window, held to its trailing edge.
 - **No source window.** Clear the selection, click the desktop background so no window is focused, and click `G`.
   The nothing-new state opens in the bar widget's own corner, which is the fallback.
-- **The same selection twice.** Run the item once and press Esc, then press SUPER + G again without highlighting anything new.
+- **The same selection twice.** Run the item once and press Esc, then press SUPER + SHIFT + Q again without highlighting anything new.
   The popup opens on the nothing-new state and runs no Check (spec section 3).
   Press `Check last text again` and the same text is checked with no new capture.
   That result is copy-only: with auto-replace on, the Apply button still reads `Copy corrected text`, and Ctrl + Enter types nowhere.
@@ -175,7 +175,7 @@ The paste must give the text you copied first, not the sentence, until you press
 3. Click the `G` button on the bar.
 
 Expected: the popup opens on the nothing-new state of spec sections 3 and 6.
-It reads `No new selection. Highlight text and press SUPER + G, or paste here.`, with `Close` and the hero's `Compose`.
+It reads `No new selection. Highlight text and press SUPER + SHIFT + Q, or paste here.`, with `Close` and the hero's `Compose`.
 No Check runs, which the meta line says: `nothing new to check`.
 `Compose` opens the Compose card on the kept Draft.
 Esc closes it, and so does a click outside the card.
@@ -252,7 +252,7 @@ This is the item chunked checking exists for: a Draft that takes several Chunks,
    python3 -c "print(('I has two book and she go home every day. ' * 500)[:20000], end='')" | wl-copy
    ```
 
-   Open Compose with SUPER + SHIFT + G, clear whatever is there, and paste with Ctrl + V.
+   Open Compose with SUPER + ALT + Q, clear whatever is there, and paste with Ctrl + V.
 
 Expected: the hero reads `draft, 20,000 units` and `Check` is on.
 
@@ -455,7 +455,7 @@ omarchy-shell shell summon io.github.jyooi.grammachy '{"mode":"compose"}'
 omarchy-shell shell summon io.github.jyooi.grammachy '{"mode":"compose","text":"I has two book."}'
 ```
 
-SUPER + SHIFT + G once `grammachy setup` has written the bindings, and the `Grammachy compose` row of the Omarchy menu.
+SUPER + ALT + Q once `grammachy setup` has written the bindings, and the `Grammachy compose` row of the Omarchy menu.
 The first command, the hotkey, and the menu row open the kept Draft.
 Only the payload with a `text` sets a new Draft, and a confirm appears when a Draft is already there.
 

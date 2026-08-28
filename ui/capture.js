@@ -14,7 +14,7 @@
 // record, and the card.
 
 // The one line the empty state prints, spec sections 3 and 6.
-var NOTHING_NEW = "No new selection. Highlight text and press SUPER + G, or paste here."
+var NOTHING_NEW = "No new selection. Highlight text and press SUPER + SHIFT + Q, or paste here."
 // The secondary button beside it, which runs the Check on the kept text with
 // no second capture.
 var CHECK_LAST_AGAIN = "Check last text again"

@@ -18,8 +18,8 @@ ColumnLayout {
   property string nativeLanguage: "none"
   property string engine: "harper"
   property bool autoReplace: false
-  property string quickHotkey: "SUPER + G"
-  property string composeHotkey: "SUPER + SHIFT + G"
+  property string quickHotkey: "SUPER + SHIFT + Q"
+  property string composeHotkey: "SUPER + ALT + Q"
 
   // The Engines list of spec section 5.4. Everything it needs arrives from
   // Overlay.qml, which is the only thing that runs `grammachy engine`.

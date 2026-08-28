@@ -512,7 +512,7 @@ fn clear_is_reachable_from_the_key_map_and_from_the_hero() {
 /// and the spec says the same thing.
 #[test]
 fn the_empty_state_says_the_same_thing_as_the_spec() {
-    let notice = "No new selection. Highlight text and press SUPER + G, or paste here.";
+    let notice = "No new selection. Highlight text and press SUPER + SHIFT + Q, or paste here.";
     let button = "Check last text again";
 
     let capture = read("ui/capture.js");

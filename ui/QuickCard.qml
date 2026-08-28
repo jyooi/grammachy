@@ -73,8 +73,8 @@ BorderSurface {
   property bool settingsOpen: false
   property string nativeLanguage: "none"
   property string engineSetting: "languagetool"
-  property string quickHotkey: "SUPER + G"
-  property string composeHotkey: "SUPER + SHIFT + G"
+  property string quickHotkey: "SUPER + SHIFT + Q"
+  property string composeHotkey: "SUPER + ALT + Q"
 
   // The Engines list of spec section 5.4, passed straight to the Settings view.
   // The card knows nothing about it either: Overlay.qml owns every process.
