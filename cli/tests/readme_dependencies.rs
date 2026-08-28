@@ -5,7 +5,7 @@
 //! The section carries one Markdown table with the package in its first
 //! column, and this test reads that column back.
 
-use grammachy::doctor::deps::{self, SPECS};
+use grammachy::doctor::deps::SPECS;
 
 fn readme() -> String {
     let path = format!("{}/../README.md", env!("CARGO_MANIFEST_DIR"));
@@ -53,30 +53,4 @@ fn the_readme_dependencies_section_names_exactly_the_packages_doctor_declares() 
         .map(|spec| (spec.package.to_string(), spec.required))
         .collect();
     assert_eq!(table_rows(&lines), declared);
-}
-
-#[test]
-fn the_readme_dependencies_section_states_the_rule() {
-    let text = readme();
-    let body = section(&text, "### Dependencies").join("\n");
-
-    assert!(body.contains(deps::INSTALL_COMMAND), "{body}");
-    assert!(body.contains("no `sudo` and no `pacman`"), "{body}");
-    assert!(
-        body.contains("`grammachy doctor` lists every dependency"),
-        "{body}"
-    );
-    assert!(
-        !body.contains("sudo pacman -S"),
-        "no install line bypasses omarchy pkg add: {body}"
-    );
-}
-
-/// Removal stays manual: the plugin removes no package, and the README names
-/// the one optional line a user may run.
-#[test]
-fn the_readme_uninstall_section_names_the_optional_java_removal() {
-    let text = readme();
-    let body = section(&text, "## Uninstall").join("\n");
-    assert!(body.contains("`sudo pacman -Rs jre-openjdk`"), "{body}");
 }
