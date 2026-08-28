@@ -21,11 +21,34 @@ var DONE = "done"
 var FAILED = "failed"
 
 var INSTALL = "install"
+var INSTALL_DEPS = "installDeps"
 var RETRY = "retry"
 var CLOSE = "close"
 
 function isPlainObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value)
+}
+
+// The required rows of a `ui/deps.js` table that are absent. The rule lives
+// in deps.js too; it is repeated here because QML gives a `.js` no way to
+// import another one that a node `require` also understands.
+function missingRequired(dependencies) {
+  var list = Array.isArray(dependencies) ? dependencies : []
+  return list.filter(function(dependency) {
+    return isPlainObject(dependency) && dependency.required === true && dependency.present !== true
+  })
+}
+
+function packageList(dependencies) {
+  return dependencies.map(function(dependency) { return String(dependency.package) }).join(" and ")
+}
+
+// The exact command the dependency Install button runs, spec section 10.
+function installCommand(dependencies) {
+  if (dependencies.length === 0) return ""
+  return "omarchy pkg add " + dependencies.map(function(dependency) {
+    return String(dependency.package)
+  }).join(" ")
 }
 
 // Whether a launch must open the setup card instead of a Check.
@@ -70,6 +93,13 @@ function readLock(text) {
 // finished (null while none has run this session), and `log` is its stdout
 // and stderr, streamed in the order they arrived.
 //
+// `dependencies` is the table of `ui/deps.js` for this machine, or null
+// while it has not been read yet, and `depsInstalling` is whether the
+// terminal that runs `omarchy pkg add` is still open. A required package that
+// is absent is listed with its purpose and one Install button, and the
+// bootstrap Install stays disabled with the reason shown, because
+// bin/bootstrap.sh needs curl before it can fetch anything (spec section 10).
+//
 // States:
 // - `unpinned`: no sha256 yet, so the card names the developer path and
 //   offers no Install button.
@@ -83,6 +113,8 @@ function card(options) {
   var running = context.running === true
   var exitCode = typeof context.exitCode === "number" ? context.exitCode : null
   var log = typeof context.log === "string" ? context.log : ""
+  var depsInstalling = context.depsInstalling === true
+  var missing = missingRequired(context.dependencies)
 
   var state = READY
   if (running) state = RUNNING
@@ -101,9 +133,21 @@ function card(options) {
     // The button stays on screen through the run, disabled while it goes, so
     // the reader watching the log also sees why nothing else is happening.
     showsInstall: state === READY || state === RUNNING || state === FAILED,
-    installEnabled: state !== RUNNING,
+    installEnabled: state !== RUNNING && missing.length === 0,
+    installReason: "",
     showsLog: state === RUNNING || state === DONE || state === FAILED,
-    showsRetry: state === DONE
+    showsRetry: state === DONE,
+    // The required packages this machine lacks, each with its purpose, and
+    // the one command the Install button beside them runs in a terminal.
+    missingDependencies: missing,
+    showsDependencies: missing.length > 0 && state !== DONE,
+    depsInstalling: depsInstalling,
+    depsInstallEnabled: !depsInstalling && state !== RUNNING,
+    depsInstallCommand: installCommand(missing)
+  }
+
+  if (missing.length > 0 && state !== DONE) {
+    model.installReason = "Install " + packageList(missing) + " first."
   }
 
   if (state === UNPINNED) {
@@ -134,11 +178,13 @@ if (typeof module !== "undefined" && module.exports) {
     DONE: DONE,
     FAILED: FAILED,
     INSTALL: INSTALL,
+    INSTALL_DEPS: INSTALL_DEPS,
     RETRY: RETRY,
     CLOSE: CLOSE,
     companionMissing: companionMissing,
     retryAfterSetup: retryAfterSetup,
     readLock: readLock,
+    missingRequired: missingRequired,
     card: card
   }
 }

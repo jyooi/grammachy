@@ -27,6 +27,13 @@ ColumnLayout {
   readonly property bool installEnabled: Boolean(root.card) && root.card.installEnabled === true
   readonly property bool showsLog: Boolean(root.card) && root.card.showsLog === true
   readonly property bool showsRetry: Boolean(root.card) && root.card.showsRetry === true
+  readonly property string installReason: root.card ? String(root.card.installReason) : ""
+  readonly property var missingDependencies: root.card && Array.isArray(root.card.missingDependencies)
+    ? root.card.missingDependencies : []
+  readonly property bool showsDependencies: Boolean(root.card) && root.card.showsDependencies === true
+  readonly property bool depsInstalling: Boolean(root.card) && root.card.depsInstalling === true
+  readonly property bool depsInstallEnabled: Boolean(root.card) && root.card.depsInstallEnabled === true
+  readonly property string depsInstallCommand: root.card ? String(root.card.depsInstallCommand) : ""
   readonly property bool running: root.cardState === Setup.RUNNING
 
   spacing: Style.spacing.md
@@ -48,6 +55,78 @@ ColumnLayout {
     wrapMode: Text.Wrap
     font.family: Style.font.family
     font.pixelSize: Style.font.body
+  }
+
+  // Spec section 10: the required system packages this machine lacks, each
+  // with its purpose, and one Install that opens a terminal running
+  // `omarchy pkg add` for all of them. The plugin runs no sudo and no pacman.
+  ColumnLayout {
+    Layout.fillWidth: true
+    visible: root.showsDependencies
+    spacing: Style.spacing.xs
+
+    Text {
+      Layout.fillWidth: true
+      text: "Missing system packages"
+      color: Color.urgent
+      wrapMode: Text.Wrap
+      font.family: Style.font.family
+      font.pixelSize: Style.font.bodySmall
+      font.bold: true
+    }
+
+    Repeater {
+      model: root.missingDependencies
+
+      RowLayout {
+        required property var modelData
+
+        Layout.fillWidth: true
+        spacing: Style.spacing.sm
+
+        Text {
+          text: String(modelData.package)
+          color: Color.popups.text
+          font.family: "monospace"
+          font.pixelSize: Style.font.caption
+        }
+
+        Text {
+          Layout.fillWidth: true
+          text: String(modelData.purpose)
+          color: Color.muted
+          wrapMode: Text.Wrap
+          font.family: Style.font.family
+          font.pixelSize: Style.font.caption
+        }
+      }
+    }
+
+    RowLayout {
+      Layout.fillWidth: true
+      spacing: Style.spacing.lg
+
+      Text {
+        Layout.fillWidth: true
+        text: root.depsInstalling
+          ? "Finish the install in the terminal. The card refreshes when it closes."
+          : "Runs " + root.depsInstallCommand + " in a terminal."
+        color: Color.muted
+        wrapMode: Text.Wrap
+        font.family: Style.font.family
+        font.pixelSize: Style.font.caption
+      }
+
+      Button {
+        text: root.depsInstalling ? "Installing..." : "Install packages"
+        enabled: root.depsInstallEnabled
+        opacity: root.depsInstallEnabled ? 1 : 0.6
+        bordered: true
+        foreground: Color.accent
+        fontFamily: Style.font.family
+        onClicked: root.actionRequested(Setup.INSTALL_DEPS)
+      }
+    }
   }
 
   // What bin/bootstrap.sh has printed so far, streamed line by line while it
@@ -78,7 +157,19 @@ ColumnLayout {
     Layout.topMargin: Style.spacing.sm
     spacing: Style.spacing.lg
 
-    Item { Layout.fillWidth: true }
+    // Why the bootstrap Install cannot be pressed, when a package it needs
+    // is still missing.
+    Text {
+      Layout.fillWidth: true
+      visible: root.installReason.length > 0
+      text: root.installReason
+      color: Color.muted
+      wrapMode: Text.Wrap
+      font.family: Style.font.family
+      font.pixelSize: Style.font.caption
+    }
+
+    Item { Layout.fillWidth: true; visible: root.installReason.length === 0 }
 
     Button {
       text: "Close"
@@ -103,6 +194,7 @@ ColumnLayout {
       text: root.running ? "Installing..." : "Install"
       enabled: root.installEnabled
       opacity: root.installEnabled ? 1 : 0.6
+      tooltipText: root.installReason
       bordered: true
       foreground: Color.accent
       fontFamily: Style.font.family

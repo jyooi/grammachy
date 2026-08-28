@@ -14,6 +14,7 @@ import "ui/capture.js" as Capture
 import "ui/limits.js" as Limits
 import "ui/engines.js" as EnginesJs
 import "ui/setupCard.js" as Setup
+import "ui/deps.js" as Deps
 
 // The overlay entry point. `open(payload)` routes a summon to a surface, spec
 // section 2. Quick mode captures the Selection (section 3), runs one Check
@@ -110,8 +111,20 @@ Item {
     lockText: cliLockFile.text(),
     running: root.bootstrapRunning,
     exitCode: root.bootstrapExitCode,
-    log: root.bootstrapLog
+    log: root.bootstrapLog,
+    dependencies: root.dependencies,
+    depsInstalling: root.packageInstalling
   })
+
+  // The system packages of spec section 10, as `ui/deps.js` reads them: from
+  // `grammachy doctor --json` once bin/grammachy is there, and from a
+  // `command -v` probe before that, because the setup card must know whether
+  // curl is here before bin/bootstrap.sh can use it. Null until read.
+  property var dependencies: null
+  // Whether the terminal that runs `omarchy pkg add` is still open. The
+  // plugin never runs sudo or pacman itself: `installPackages` opens that
+  // terminal and asks doctor again when it closes.
+  property bool packageInstalling: false
 
   // One Check takes this many UTF-16 code units. The limit belongs to the
   // Engine (spec section 4), so it moves with the engine setting.
@@ -263,7 +276,11 @@ Item {
     // The Engines list is drawn whatever engine is selected, because the whole
     // point is to add one the dropdown cannot offer yet (HUF-237). So Settings
     // being open is the whole condition for reading it.
-    if (root.settingsOpen) root.refreshEngines()
+    if (root.settingsOpen) {
+      root.refreshEngines()
+      // The Engines list reads the rows LanguageTool needs beside it.
+      root.refreshDependencies()
+    }
     // A question that is off the screen must never still be answerable, the
     // rule the Engines confirm keeps.
     else if (root.phase === "confirmEngine") root.closeEngineConfirm()
@@ -498,6 +515,63 @@ Item {
   // `showSetup` and `resetRun` do not change the bootstrap state.
   function showSetup() {
     root.phase = "setup"
+    root.refreshDependencies()
+  }
+
+  // Read the dependency table again. Doctor is the one table; the probe
+  // stands in only while there is no binary to ask.
+  function refreshDependencies() {
+    if (root.companionFound) {
+      depsDoctorProcess.command = [root.binaryPath, "doctor", "--json"]
+      if (depsDoctorProcess.running) {
+        depsDoctorProcess.restartQueued = true
+        return
+      }
+      depsDoctorProcess.running = true
+      return
+    }
+    depsProbeProcess.command = Deps.probeArgv()
+    if (depsProbeProcess.running) {
+      depsProbeProcess.restartQueued = true
+      return
+    }
+    depsProbeProcess.running = true
+  }
+
+  function onDependencyOutput(table) {
+    // A doctor that cannot answer leaves the table as it was.
+    if (Array.isArray(table)) root.dependencies = table
+  }
+
+  // Open a visible terminal running `omarchy pkg add <packages...>`, spec
+  // section 10. `GRAMMACHY_PKG_TERMINAL=never` is the test seam: the launch
+  // is logged and skipped, and the table is still read again.
+  function installPackages(packages) {
+    if (root.packageInstalling) return
+    var argv = Deps.terminalArgv(packages, Quickshell.env(Deps.TERMINAL_SEAM))
+    if (argv.length === 0) {
+      console.log("grammachy: no terminal opened for", JSON.stringify(packages))
+      root.refreshDependencies()
+      return
+    }
+    root.packageInstalling = true
+    packageTerminalProcess.command = argv
+    packageTerminalProcess.launchPending = true
+    packageTerminalProcess.running = true
+  }
+
+  // The terminal never started at all, so the button comes back.
+  function finishPackageLaunch() {
+    if (packageTerminalProcess.running) return
+    if (!packageTerminalProcess.launchPending) return
+    packageTerminalProcess.launchPending = false
+    root.packageInstalling = false
+    console.warn("grammachy: the package terminal could not be started")
+  }
+
+  function onPackageTerminalClosed() {
+    root.packageInstalling = false
+    root.refreshDependencies()
   }
 
   function installBootstrap() {
@@ -525,6 +599,8 @@ Item {
   // Where each button of the setup card goes, spec section 10.
   function runSetupAction(action) {
     if (action === Setup.INSTALL) root.installBootstrap()
+    else if (action === Setup.INSTALL_DEPS)
+      root.installPackages(Deps.packagesOf(Deps.missingRequired(root.dependencies)))
     else if (action === Setup.RETRY) root.retrySetupCheck()
     else if (action === Setup.CLOSE) root.close()
   }
@@ -1855,6 +1931,63 @@ Item {
     }
   }
 
+  // The dependency table, spec section 10, once bin/grammachy can answer it.
+  Process {
+    id: depsDoctorProcess
+    property bool restartQueued: false
+    onRunningChanged: {
+      if (depsDoctorProcess.running) return
+      if (!depsDoctorProcess.restartQueued) return
+      depsDoctorProcess.restartQueued = false
+      depsDoctorProcess.running = true
+    }
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root.onDependencyOutput(Deps.fromDoctor(text))
+    }
+    stderr: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: if (text.length > 0) console.warn("grammachy doctor:", text)
+    }
+  }
+
+  // The same table before bin/grammachy exists: `command -v` per binary the
+  // packages supply, which is all the setup card needs to know.
+  Process {
+    id: depsProbeProcess
+    property bool restartQueued: false
+    onRunningChanged: {
+      if (depsProbeProcess.running) return
+      if (!depsProbeProcess.restartQueued) return
+      depsProbeProcess.restartQueued = false
+      depsProbeProcess.running = true
+    }
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root.onDependencyOutput(Deps.fromProbe(text))
+    }
+  }
+
+  // The one place a system package is installed from: a visible terminal
+  // running `omarchy pkg add`, opened the way Omarchy's own shell opens one.
+  // `uwsm-app` waits for the terminal, so this process exits when the
+  // terminal closes, and that is when the table is read again.
+  Process {
+    id: packageTerminalProcess
+    property bool launchPending: false
+    onStarted: packageTerminalProcess.launchPending = false
+    onRunningChanged: {
+      if (packageTerminalProcess.running) return
+      if (!packageTerminalProcess.launchPending) return
+      Qt.callLater(root.finishPackageLaunch)
+    }
+    onExited: root.onPackageTerminalClosed()
+    stderr: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: if (text.length > 0) console.warn("grammachy pkg terminal:", text)
+    }
+  }
+
   // The two fields cli.lock pins, spec section 10, read as a plain local file
   // the same way every other path on this machine is: never as a URL.
   FileView {
@@ -1878,7 +2011,14 @@ Item {
     id: companionProbe
     running: true
     command: ["test", "-x", root.binaryPath]
-    onExited: function(exitCode) { root.companionFound = exitCode === 0 }
+    onExited: function(exitCode) {
+      var found = exitCode === 0
+      var changed = found !== root.companionFound
+      root.companionFound = found
+      // The setup card is what opened without a binary, so the table it
+      // shows moves from the probe to doctor the moment one arrives.
+      if (changed && root.phase === "setup") root.refreshDependencies()
+    }
   }
 
   // The setup card's Install button, spec section 10: `bin/bootstrap.sh`,
@@ -2143,6 +2283,9 @@ Item {
         enginesDirectory: root.enginesDirectory
         enginesFreeBytes: root.enginesFreeBytes
         engineNote: root.engineNote
+        dependencies: root.dependencies || []
+        packageInstalling: root.packageInstalling
+        onPackageInstallRequested: function(packages) { root.installPackages(packages) }
 
         onEngineInstallRequested: function(slug) { root.installEngine(slug) }
         onEngineCancelRequested: root.cancelEngineInstall()
@@ -2223,6 +2366,9 @@ Item {
         enginesDirectory: root.enginesDirectory
         enginesFreeBytes: root.enginesFreeBytes
         engineNote: root.engineNote
+        dependencies: root.dependencies || []
+        packageInstalling: root.packageInstalling
+        onPackageInstallRequested: function(packages) { root.installPackages(packages) }
 
         onEngineInstallRequested: function(slug) { root.installEngine(slug) }
         onEngineCancelRequested: root.cancelEngineInstall()

@@ -2,8 +2,9 @@
 //!
 //! `doctor` looks at the binary, LanguageTool, and its transient unit, and
 //! prints one line per piece. A missing piece carries the exact command that
-//! installs it. Nothing here installs anything: pacman steps stay manual
-//! (spec section 10).
+//! installs it. Nothing here installs anything: every system package goes
+//! through `omarchy pkg add`, which the plugin launches in a visible terminal
+//! and `doctor` only names (spec section 10). [`deps`] is that table.
 //!
 //! The same run also answers the one-line diagnosis the `engine_unavailable`
 //! card of spec section 8 shows under its body. `--json` prints the whole
@@ -13,12 +14,14 @@
 //! Detection is injectable: [`facts::Facts`] is a plain value, the report is a
 //! pure function of it, and only [`facts::Facts::collect`] reads the machine.
 
+pub mod deps;
 pub mod facts;
 pub mod render;
 pub mod report;
 
 use crate::args::EngineSlug;
 
+pub use deps::Dependency;
 pub use facts::{Facts, UnitState};
 pub use report::{Check, Report};
 

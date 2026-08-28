@@ -346,6 +346,27 @@ function isBlocked(row, options) {
   return !(slug.length > 0 && busySlug === slug)
 }
 
+// Whether a row needs a system package this machine lacks, spec section 7.
+//
+// `missing` is the list `Deps.absentFor(dependencies, slug)` answers: the
+// packages LanguageTool runs on and is unpacked with. A row with one reads
+// "Needs ..." beside its name and carries the one Install that opens
+// `omarchy pkg add` for all of them in a terminal, and its own Install stays
+// disabled until they are there, because an install with no bsdtar cannot
+// unpack and a server with no runtime would fail the first Check it got.
+function runtimeMissing(row, missing) {
+  if (!isPlainObject(row)) return false
+  return Array.isArray(missing) && missing.length > 0
+}
+
+// Whether one button of a row is drawn but cannot be pressed: everything
+// `isBlocked` says, plus Install while a package it needs is missing.
+function actionBlocked(action, row, options) {
+  if (isBlocked(row, options)) return true
+  var context = isPlainObject(options) ? options : ({})
+  return String(action) === INSTALL && runtimeMissing(row, context.missing)
+}
+
 function actionIcon(action) {
   var icon = ACTION_ICONS[String(action)]
   return typeof icon === "string" ? icon : ""
@@ -430,6 +451,8 @@ if (typeof module !== "undefined" && module.exports) {
     unavailable: unavailable,
     actions: actions,
     isBlocked: isBlocked,
+    runtimeMissing: runtimeMissing,
+    actionBlocked: actionBlocked,
     actionIcon: actionIcon,
     actionTooltip: actionTooltip,
     note: note

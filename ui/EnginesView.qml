@@ -3,6 +3,7 @@ import QtQuick.Layouts
 import qs.Commons
 import qs.Ui
 import "engines.js" as Engines
+import "deps.js" as Deps
 
 // The Engines list of the Settings view, spec sections 5.4 and 7.
 //
@@ -40,12 +41,21 @@ ColumnLayout {
   property double freeBytes: 0
   // One failure, from `Engines.note`, or null when the last verb was fine.
   property var note: null
+  // The dependency table of spec section 10, from `Deps.fromDoctor`. A row
+  // reads the packages its slug is `usedBy`.
+  property var dependencies: []
+  // Whether the terminal that runs `omarchy pkg add` is still open.
+  property bool packageInstalling: false
+
 
   signal install(string slug)
   signal cancel()
   signal remove(string slug)
   signal confirmRemove(string slug)
   signal keepEngine()
+  // The Install beside a row that needs a system package. Overlay.qml opens
+  // the terminal that runs `omarchy pkg add <package>`.
+  signal installPackages(var packages)
 
   spacing: Style.spacing.labelGap
 
@@ -84,6 +94,11 @@ ColumnLayout {
         working: root.working
       })
       readonly property bool asking: root.confirmSlug === row.slug
+      // Spec section 7: a row that needs a system package this machine lacks
+      // says so and carries the one Install that adds every such package,
+      // and its own Install waits until they are there.
+      readonly property var missingPackages: Deps.absentFor(root.dependencies, row.slug)
+      readonly property bool runtimeMissing: Engines.runtimeMissing(row.modelData, row.missingPackages)
 
       Layout.fillWidth: true
       Layout.topMargin: Style.spacing.sm
@@ -122,6 +137,27 @@ ColumnLayout {
               font.pixelSize: Style.font.caption
             }
 
+            Text {
+              visible: row.runtimeMissing
+              text: Deps.needsHint(row.missingPackages)
+              color: Color.urgent
+              font.family: Style.font.family
+              font.pixelSize: Style.font.caption
+            }
+
+            Button {
+              visible: row.runtimeMissing
+              Layout.alignment: Qt.AlignVCenter
+              text: root.packageInstalling ? "Installing..." : "Install " + Deps.packagesOf(row.missingPackages).join(" ")
+              enabled: !root.packageInstalling
+              opacity: root.packageInstalling ? 0.6 : 1
+              bordered: true
+              foreground: Color.accent
+              fontFamily: Style.font.family
+              tooltipText: Deps.installCommand(Deps.packagesOf(row.missingPackages)) + " in a terminal"
+              onClicked: root.installPackages(Deps.packagesOf(row.missingPackages))
+            }
+
             Item { Layout.fillWidth: true }
           }
 
@@ -144,9 +180,15 @@ ColumnLayout {
           Button {
             required property string modelData
 
+            readonly property bool blocked: Engines.actionBlocked(modelData, row.modelData, {
+              busy: root.busy,
+              working: root.working,
+              missing: row.missingPackages
+            })
+
             Layout.alignment: Qt.AlignVCenter
-            enabled: !row.blocked
-            opacity: row.blocked ? 0.4 : 1
+            enabled: !blocked
+            opacity: blocked ? 0.4 : 1
             iconText: Engines.actionIcon(modelData)
             tooltipText: Engines.actionTooltip(modelData, row.name)
             bordered: true

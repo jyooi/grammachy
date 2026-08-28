@@ -83,6 +83,11 @@ BorderSurface {
   property string enginesDirectory: ""
   property double enginesFreeBytes: 0
   property var engineNote: null
+  // The dependency table of spec section 10, read by Overlay.qml through
+  // `grammachy doctor`, and whether the terminal that runs `omarchy pkg add`
+  // is still open.
+  property var dependencies: []
+  property bool packageInstalling: false
 
   // Spec section 9: about 900 px wide and 80 percent of the screen height.
   property int cardWidth: Style.space(900)
@@ -116,6 +121,9 @@ BorderSurface {
   signal engineRemoveRequested(string slug)
   signal engineRemoveConfirmed(string slug)
   signal engineKeepRequested()
+  // The Install beside a row that needs a system package, spec section 7.
+  // Overlay.qml opens the terminal that runs `omarchy pkg add <packages...>`.
+  signal packageInstallRequested(var packages)
 
   readonly property color acceptedColor: marked.acceptedColor
 
@@ -254,6 +262,9 @@ BorderSurface {
       enginesDirectory: root.enginesDirectory
       enginesFreeBytes: root.enginesFreeBytes
       engineNote: root.engineNote
+      dependencies: root.dependencies
+      packageInstalling: root.packageInstalling
+      onPackageInstallRequested: function(packages) { root.packageInstallRequested(packages) }
       onEngineInstallRequested: function(slug) { root.engineInstallRequested(slug) }
       onEngineCancelRequested: root.engineCancelRequested()
       onEngineRemoveRequested: function(slug) { root.engineRemoveRequested(slug) }

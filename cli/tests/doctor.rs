@@ -28,6 +28,11 @@ fn ready() -> Facts {
         java: Some(PathBuf::from("/usr/lib/jvm/default/bin/java")),
         languagetool_address: "127.0.0.1:8081".to_string(),
         languagetool_unit: UnitState::Stopped,
+        binaries: vec![
+            "curl".to_string(),
+            "wl-copy".to_string(),
+            "bsdtar".to_string(),
+        ],
     }
 }
 
@@ -63,7 +68,7 @@ fn a_ready_machine_reports_nothing_missing() {
             output.text
         );
         assert!(
-            !output.text.contains("sudo pacman"),
+            !output.text.contains("Run:"),
             "nothing to install: {}",
             output.text
         );
@@ -117,14 +122,16 @@ fn a_missing_java_is_optional_only_while_languagetool_is_absent() {
 
     let text = text_of(&facts, EngineSlug::Languagetool);
     assert!(missing_lines(&text).is_empty(), "{text}");
-    assert_eq!(optional_lines(&text).len(), 2, "{text}");
+    // The LanguageTool check, the Java check, and the jre-openjdk row of the
+    // dependency table. libarchive is present on this machine.
+    assert_eq!(optional_lines(&text).len(), 3, "{text}");
 
     // Once LanguageTool is on the machine the server cannot start without a
     // runtime, so the same fact is a real fault.
     facts.languagetool_launcher = Some(PathBuf::from("/usr/bin/languagetool"));
     let text = text_of(&facts, EngineSlug::Languagetool);
     assert_eq!(missing_lines(&text).len(), 1, "{text}");
-    assert!(text.contains("sudo pacman -S jre-openjdk"), "{text}");
+    assert!(text.contains("omarchy pkg add jre-openjdk"), "{text}");
 }
 
 /// The pacman package is an alternative Grammachy never installs and never
@@ -193,7 +200,7 @@ fn a_missing_java_runtime_prints_its_pacman_line() {
     let text = text_of(&facts, EngineSlug::Languagetool);
 
     assert_eq!(missing_lines(&text).len(), 1, "{text}");
-    assert!(text.contains("sudo pacman -S jre-openjdk"), "{text}");
+    assert!(text.contains("omarchy pkg add jre-openjdk"), "{text}");
 }
 
 /// Harper needs nothing but the binary, so nothing LanguageTool needs ever
@@ -363,7 +370,7 @@ fn a_missing_piece_carries_its_remedy_in_the_envelope() {
 
     assert_eq!(value["ready"], false);
     assert_eq!(check["ok"], false);
-    assert_eq!(check["remedy"], "sudo pacman -S jre-openjdk");
+    assert_eq!(check["remedy"], "omarchy pkg add jre-openjdk");
     assert_eq!(check["engines"], serde_json::json!(["languagetool"]));
 }
 
@@ -443,4 +450,102 @@ fn run_binary(args: &[&str]) -> String {
         .expect("the binary runs");
 
     String::from_utf8(output.stdout).expect("stdout is UTF-8")
+}
+
+/// Spec section 10: `doctor --json` is the one dependency table. Every row
+/// names the Arch package, why it is there, and the exact `omarchy pkg add`
+/// line that installs it, because the plugin runs no sudo and no pacman.
+#[test]
+fn the_envelope_carries_the_dependency_table() {
+    let json = doctor::run(&ready(), EngineSlug::Harper, true).text;
+    let value: Value = serde_json::from_str(&json).expect("the envelope is one JSON object");
+
+    let rows = value["dependencies"]
+        .as_array()
+        .expect("dependencies is an array");
+    let packages: Vec<&str> = rows
+        .iter()
+        .map(|row| row["package"].as_str().expect("every package is a string"))
+        .collect();
+    assert_eq!(
+        packages,
+        ["curl", "wl-clipboard", "libarchive", "jre-openjdk"]
+    );
+
+    for row in rows {
+        let package = row["package"].as_str().unwrap();
+        assert!(row["name"].as_str().is_some_and(|name| !name.is_empty()));
+        assert!(row["purpose"]
+            .as_str()
+            .is_some_and(|purpose| purpose.ends_with('.')));
+        assert_eq!(row["present"], true, "{package}");
+        assert_eq!(
+            row["installCommand"],
+            format!("omarchy pkg add {package}"),
+            "{package}"
+        );
+        assert!(!row["installCommand"].as_str().unwrap().contains("sudo"));
+    }
+
+    assert_eq!(rows[0]["required"], true);
+    assert_eq!(rows[0]["usedBy"], serde_json::json!(["bootstrap"]));
+    assert_eq!(rows[1]["required"], true);
+    assert_eq!(rows[1]["usedBy"], serde_json::json!(["capture"]));
+    assert_eq!(rows[2]["required"], false);
+    assert_eq!(rows[2]["usedBy"], serde_json::json!(["languagetool"]));
+    assert_eq!(rows[3]["required"], false);
+    assert_eq!(rows[3]["usedBy"], serde_json::json!(["languagetool"]));
+}
+
+/// A required package that is absent reads `missing` in the text and
+/// `present: false` in the envelope, and the engine answer does not move:
+/// `ready` is about the engine, and the setup card is what refuses a
+/// bootstrap without curl.
+#[test]
+fn an_absent_required_package_is_missing_and_the_engine_answer_stands() {
+    let mut facts = ready();
+    facts.binaries = vec!["curl".to_string(), "bsdtar".to_string()];
+
+    let output = doctor::run(&facts, EngineSlug::Harper, false);
+    assert_eq!(output.exit_code, 0, "{}", output.text);
+    let lines = missing_lines(&output.text);
+    assert_eq!(lines.len(), 1, "{}", output.text);
+    assert!(lines[0].contains("wl-clipboard"), "{}", output.text);
+    assert!(
+        lines[0].contains("Run: omarchy pkg add wl-clipboard"),
+        "{}",
+        output.text
+    );
+    assert!(
+        output.text.contains("Doctor installs nothing"),
+        "{}",
+        output.text
+    );
+
+    let json = doctor::run(&facts, EngineSlug::Harper, true).text;
+    let value: Value = serde_json::from_str(&json).expect("the envelope is one JSON object");
+    assert_eq!(value["ready"], true);
+    assert_eq!(value["dependencies"][1]["present"], false);
+}
+
+/// The Java runtime answers through `JAVA_HOME` or the default JVM, the same
+/// route the LanguageTool launcher takes, and it is optional because Harper
+/// needs none.
+#[test]
+fn the_java_package_follows_the_runtime_fact() {
+    let mut facts = ready();
+    facts.java = None;
+
+    let text = text_of(&facts, EngineSlug::Harper);
+    assert!(
+        optional_lines(&text).iter().any(
+            |line| line.contains("jre-openjdk") && line.contains("omarchy pkg add jre-openjdk")
+        ),
+        "{text}"
+    );
+
+    let json = doctor::run(&facts, EngineSlug::Harper, true).text;
+    let value: Value = serde_json::from_str(&json).expect("the envelope is one JSON object");
+    assert_eq!(value["dependencies"][3]["present"], false);
+    assert_eq!(value["dependencies"][3]["required"], false);
 }
