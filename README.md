@@ -6,6 +6,7 @@ Highlight text in any application and press SUPER + G.
 A popup marks every Issue on the Selection.
 Accept or Skip each Fix, then Apply the Corrected text through the clipboard or, if you opt in, straight back into the Selection.
 For longer text, press SUPER + SHIFT + G to open the Compose window, which checks a Draft in Chunks.
+Change either key in Settings.
 
 Grammachy is offline.
 No engine sends the text of a Check off the machine.
@@ -67,8 +68,10 @@ Doctor installs nothing: pacman steps stay manual.
 
 ### Setting the hotkeys by hand
 
-`bin/grammachy setup` writes this block into `~/.config/hypr/bindings.lua`, between `-- grammachy begin` and `-- grammachy end`, then reloads Hyprland.
-Paste it yourself instead if you would rather not run the command:
+`bin/grammachy setup` writes the trigger hotkeys into `~/.config/hypr/bindings.lua`, between `-- grammachy begin` and `-- grammachy end`, then reloads Hyprland.
+The keys are the Settings values `quickHotkey` and `composeHotkey`.
+This is the default block.
+Paste it yourself if you do not run the command:
 
 ```lua
 hl.unbind("SUPER + G")

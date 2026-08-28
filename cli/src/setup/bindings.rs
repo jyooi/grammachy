@@ -215,10 +215,7 @@ mod tests {
         };
         let body = block(&hotkeys).body;
 
-        assert!(
-            body.contains("hl.unbind(\"SUPER + \\\"G\")"),
-            "{body}"
-        );
+        assert!(body.contains("hl.unbind(\"SUPER + \\\"G\")"), "{body}");
         assert!(
             body.contains("hl.unbind(\"SUPER + \\\\G\\nSHIFT\")"),
             "{body}"
