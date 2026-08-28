@@ -75,6 +75,15 @@ Doctor installs nothing: pacman steps stay manual.
 
 `docs/dev.md` is the full walkthrough, including the manual smoke items.
 
+### Dependencies
+
+`curl` and `wl-clipboard` are required.
+`bin/bootstrap.sh` uses `curl` to fetch the pinned binary.
+Capture, Apply, and the restored Selection all go through `wl-copy` and `wl-paste`.
+
+`jre-openjdk` is optional.
+It only matters if you add LanguageTool: `sudo pacman -S jre-openjdk`.
+
 ### Setting the hotkeys by hand
 
 `bin/grammachy setup` writes the trigger hotkeys into `~/.config/hypr/bindings.lua`, between `-- grammachy begin` and `-- grammachy end`, then reloads Hyprland.
@@ -105,6 +114,31 @@ omarchy plugin enable io.github.jyooi.grammachy
 
 The setup card offers this path too whenever `cli.lock` carries no pinned release.
 See `docs/dev.md` for cutting a release and pinning `cli.lock`.
+
+## Uninstall
+
+1. Run `bin/grammachy setup --remove` from the plugin folder.
+   This removes the hotkey block from `~/.config/hypr/bindings.lua` and the menu entry from `~/.config/omarchy/extensions/omarchy-menu.jsonc`, then reloads Hyprland.
+
+   ```bash
+   ~/.config/omarchy/plugins/io.github.jyooi.grammachy/bin/grammachy setup --remove
+   ```
+
+2. Optional: run `bin/grammachy engine remove languagetool` first, if you added LanguageTool.
+   This deletes `~/.local/share/grammachy/engines/languagetool/`.
+   It never touches a pacman package.
+
+3. Run `omarchy plugin remove io.github.jyooi.grammachy`.
+   This deletes the whole plugin directory, including the downloaded `bin/grammachy`, since the folder came from a git clone.
+   If the plugin was enabled, this also drops its entry from `~/.config/omarchy/shell.json`, including any stored Settings such as `nativeLanguage` or `engine`.
+   If the plugin was already disabled, there was no such entry left to drop.
+
+4. Remove what is left.
+   Step 3 clears everything under the plugin folder and the shell.json entry, but `~/.local/share/grammachy/` is untouched by any of the steps above unless step 2 already emptied it.
+
+   ```bash
+   rm -rf ~/.local/share/grammachy
+   ```
 
 ## Documentation
 
