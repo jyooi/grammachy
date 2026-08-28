@@ -47,6 +47,11 @@ Remove takes that directory away again, and the engine falls back to Harper.
 
 It needs a Java runtime beside it.
 When `jre-openjdk` or `libarchive` is missing, the row reads `Needs a Java runtime` or `Needs libarchive` and offers an Install that runs `omarchy pkg add` for them in a terminal.
+
+![The Settings Engines page with the LanguageTool row reading Needs libarchive and a Java runtime, beside an Install button for libarchive and jre-openjdk.](docs/images/engines-java.png)
+
+The Engines page when the LanguageTool row needs system packages.
+
 If you already installed the Arch `languagetool` package, Grammachy uses that and offers no Install.
 `grammachy engine remove` never touches a pacman package.
 
@@ -62,6 +67,11 @@ If you already installed the Arch `languagetool` package, Grammachy uses that an
 2. Click the Grammachy bar widget.
    The setup card names the pinned binary and its sha256.
    If `curl` or `wl-clipboard` is missing, the card lists it first with an Install that runs `omarchy pkg add` in a terminal.
+
+   ![The setup card listing wl-clipboard as a missing system package with its Install packages button, above the disabled binary Install.](docs/images/setup-deps.png)
+
+   The setup card when a required system package is missing.
+
    Click Install, and watch `bin/bootstrap.sh` fetch and verify it.
 3. Highlight text and press SUPER + SHIFT + Q.
    The first Check runs on Harper, compiled into the binary, so nothing downloads and no `pacman` command runs.
