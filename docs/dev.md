@@ -701,14 +701,7 @@ No case reaches the network.
 
 ## 17. Removing it
 
-Remove the hotkeys and the menu entry first (spec section 10):
-
-```bash
-~/.config/omarchy/plugins/io.github.jyooi.grammachy/bin/grammachy setup --remove
-omarchy plugin disable io.github.jyooi.grammachy
-rm -rf ~/.config/omarchy/plugins/io.github.jyooi.grammachy
-omarchy-shell shell rescanPlugins
-```
+The Uninstall section of `README.md` has the removal steps.
 
 ## 18. Cutting a release
 
