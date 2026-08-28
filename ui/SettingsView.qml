@@ -16,6 +16,7 @@ ColumnLayout {
 
   // The stored values, already resolved through the spec section 7 defaults.
   property string nativeLanguage: "none"
+  property string targetEnglish: "en-US"
   property string engine: "harper"
   property bool autoReplace: false
   property string quickHotkey: "SUPER + SHIFT + Q"
@@ -49,6 +50,7 @@ ColumnLayout {
   // is what keeps the view live for a write from outside, such as
   // `omarchy-shell shell setBarWidget <id> engine '"harper"'`.
   onNativeLanguageChanged: nativeLanguageDropdown.value = root.nativeLanguage
+  onTargetEnglishChanged: targetEnglishDropdown.value = root.targetEnglish
   onEngineChanged: engineDropdown.value = root.engine
   // The option list narrows as the Engines list lands, and a Dropdown that
   // has written its own `value` once no longer follows the binding, so the
@@ -85,6 +87,18 @@ ColumnLayout {
       foreground: Color.popups.text
       background: Color.popups.background
       onChanged: function(value) { root.settingChanged("nativeLanguage", Settings.normalised("nativeLanguage", value)) }
+    }
+
+    Dropdown {
+      id: targetEnglishDropdown
+
+      Layout.fillWidth: true
+      label: "Target English"
+      options: Settings.TARGET_ENGLISH_OPTIONS
+      value: root.targetEnglish
+      foreground: Color.popups.text
+      background: Color.popups.background
+      onChanged: function(value) { root.settingChanged("targetEnglish", Settings.normalised("targetEnglish", value)) }
     }
 
     // Spec section 7 and HUF-237: only an engine this machine has is offered.

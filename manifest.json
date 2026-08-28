@@ -49,7 +49,8 @@
         "type": "string",
         "label": "Target English",
         "options": [
-          "en-US"
+          "en-US",
+          "en-GB"
         ],
         "defaultValue": "en-US"
       },

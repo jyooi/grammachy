@@ -253,6 +253,14 @@ mod tests {
     }
 
     #[test]
+    fn the_target_english_is_the_language_field() {
+        let mut options = options(NativeLanguage::None);
+        options.target = TargetEnglish::EnGb;
+
+        assert!(request_body("Colour.", &options).starts_with("language=en-GB&"));
+    }
+
+    #[test]
     fn the_native_language_maps_to_the_mother_tongue() {
         assert!(request_body("x", &options(NativeLanguage::Zh)).ends_with("&motherTongue=zh-CN"));
         assert!(request_body("x", &options(NativeLanguage::Ja)).ends_with("&motherTongue=ja-JP"));

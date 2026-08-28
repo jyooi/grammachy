@@ -117,6 +117,8 @@ pub enum NativeLanguage {
 pub enum TargetEnglish {
     #[value(name = "en-US")]
     EnUs,
+    #[value(name = "en-GB")]
+    EnGb,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -161,6 +163,7 @@ impl TargetEnglish {
     pub fn from_stored(value: &str) -> Option<Self> {
         match value {
             "en-US" => Some(TargetEnglish::EnUs),
+            "en-GB" => Some(TargetEnglish::EnGb),
             _ => None,
         }
     }
@@ -168,6 +171,15 @@ impl TargetEnglish {
     pub fn as_str(self) -> &'static str {
         match self {
             TargetEnglish::EnUs => "en-US",
+            TargetEnglish::EnGb => "en-GB",
+        }
+    }
+
+    /// The `harper-core` dialect that spells this Target English.
+    pub fn harper_dialect(self) -> harper_core::Dialect {
+        match self {
+            TargetEnglish::EnUs => harper_core::Dialect::American,
+            TargetEnglish::EnGb => harper_core::Dialect::British,
         }
     }
 }

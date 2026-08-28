@@ -29,6 +29,7 @@ The Compose card reviewing a longer Draft in the same review view.
 | LanguageTool | LanguageTool 6.6, added from Settings, Engines | No |
 
 Pick one in Settings.
+The Target English dropdown in Settings picks American or British spelling for both engines, and the default is American.
 There is no automatic fallback: an engine that cannot answer says so, and you switch.
 
 A fresh install checks with Harper.

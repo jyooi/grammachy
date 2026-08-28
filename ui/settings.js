@@ -13,10 +13,9 @@
 var PLUGIN_ID = "io.github.jyooi.grammachy"
 
 // Every key the overlay reads, with the default of spec section 7.
-// `targetEnglish` is file only, so it gets no descriptor and no control;
-// `mergedEntry` still carries it across a write untouched.
 var DESCRIPTORS = {
   nativeLanguage: { type: "enum", values: ["none", "zh", "ms", "es", "fr", "de", "pt", "ja"], fallback: "none" },
+  targetEnglish: { type: "enum", values: ["en-US", "en-GB"], fallback: "en-US" },
   engine: { type: "enum", values: ["languagetool", "harper"], fallback: "harper" },
   autoReplace: { type: "boolean", fallback: false },
   quickHotkey: { type: "text", fallback: "SUPER + SHIFT + Q" },
@@ -34,6 +33,11 @@ var NATIVE_LANGUAGE_OPTIONS = [
   { value: "de", label: "German" },
   { value: "pt", label: "Portuguese" },
   { value: "ja", label: "Japanese" }
+]
+
+var TARGET_ENGLISH_OPTIONS = [
+  { value: "en-US", label: "American (en-US)" },
+  { value: "en-GB", label: "British (en-GB)" }
 ]
 
 var ENGINE_OPTIONS = [
@@ -173,6 +177,7 @@ if (typeof module !== "undefined" && module.exports) {
     PLUGIN_ID: PLUGIN_ID,
     DESCRIPTORS: DESCRIPTORS,
     NATIVE_LANGUAGE_OPTIONS: NATIVE_LANGUAGE_OPTIONS,
+    TARGET_ENGLISH_OPTIONS: TARGET_ENGLISH_OPTIONS,
     ENGINE_OPTIONS: ENGINE_OPTIONS,
     BUILT_IN_ENGINE: BUILT_IN_ENGINE,
     entryOf: entryOf,

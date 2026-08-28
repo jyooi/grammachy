@@ -68,6 +68,7 @@ BorderSurface {
   // popup. The values arrive already resolved through the defaults.
   property bool settingsOpen: false
   property string nativeLanguage: "none"
+  property string targetEnglish: "en-US"
   property string engineSetting: "languagetool"
   property bool autoReplace: false
   property string quickHotkey: "SUPER + SHIFT + Q"
@@ -250,6 +251,7 @@ BorderSurface {
       visible: root.settingsOpen
 
       nativeLanguage: root.nativeLanguage
+      targetEnglish: root.targetEnglish
       engine: root.engineSetting
       autoReplace: root.autoReplace
       quickHotkey: root.quickHotkey

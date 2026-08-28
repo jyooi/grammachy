@@ -5,7 +5,8 @@
 //! [`lint`] builds. That cost is paid inside [`Harper::check`] and nowhere
 //! else, which keeps the default LanguageTool path free of it.
 //!
-//! Harper ignores the Native language setting.
+//! Harper ignores the Native language setting and spells in the dialect of
+//! the Target English setting.
 
 pub mod lints;
 
@@ -54,11 +55,11 @@ pub fn initialisations() -> usize {
 ///
 /// Building the dictionary and the rule set is the expensive step, so it
 /// happens here, on the Check itself, rather than when the adapter is built.
-fn lint(text: &str) -> Vec<Issue> {
+fn lint(text: &str, dialect: Dialect) -> Vec<Issue> {
     INITIALISATIONS.fetch_add(1, Ordering::SeqCst);
 
     let document = Document::new_curated(text, &PlainEnglish);
-    let mut linter = LintGroup::new_curated(FstDictionary::curated(), Dialect::American);
+    let mut linter = LintGroup::new_curated(FstDictionary::curated(), dialect);
 
     lints::issues_from(text, &linter.lint(&document))
 }
@@ -91,10 +92,11 @@ impl Engine for Harper {
     ///
     /// A thread that runs past the timeout is left to finish. The CLI prints
     /// the timeout envelope and exits, which ends it.
-    fn check(&self, text: &str, _options: &CheckOptions) -> Result<Vec<Issue>, EngineFailure> {
+    fn check(&self, text: &str, options: &CheckOptions) -> Result<Vec<Issue>, EngineFailure> {
         let (sender, receiver) = mpsc::channel();
         let owned = text.to_string();
-        thread::spawn(move || sender.send(lint(&owned)));
+        let dialect = options.target.harper_dialect();
+        thread::spawn(move || sender.send(lint(&owned, dialect)));
 
         match receiver.recv_timeout(self.timeout) {
             Ok(issues) => Ok(issues),
