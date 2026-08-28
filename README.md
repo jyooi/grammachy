@@ -13,6 +13,14 @@ No engine sends the text of a Check off the machine.
 Grammachy never checks while you type.
 Every Check is an explicit Trigger.
 
+![The quick popup card over a checked Selection, with an accepted Fix, a skipped Fix, and the Inspector open on an open Fix.](docs/images/quick-card.png)
+
+The quick popup after a Check, with the Inspector open on the focused Fix.
+
+![The Compose card reviewing a multi-paragraph Draft, with two Issues accepted and the Inspector open on a third Fix.](docs/images/compose-card.png)
+
+The Compose card reviewing a longer Draft in the same review view.
+
 ## Engines
 
 | Engine | What it runs | Text leaves the machine |
