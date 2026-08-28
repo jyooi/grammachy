@@ -28,7 +28,11 @@ fn ready() -> Facts {
         java: Some(PathBuf::from("/usr/lib/jvm/default/bin/java")),
         languagetool_address: "127.0.0.1:8081".to_string(),
         languagetool_unit: UnitState::Stopped,
-        binaries: vec!["curl".to_string(), "wl-copy".to_string()],
+        binaries: vec![
+            "curl".to_string(),
+            "wl-copy".to_string(),
+            "bsdtar".to_string(),
+        ],
     }
 }
 
@@ -119,7 +123,7 @@ fn a_missing_java_is_optional_only_while_languagetool_is_absent() {
     let text = text_of(&facts, EngineSlug::Languagetool);
     assert!(missing_lines(&text).is_empty(), "{text}");
     // The LanguageTool check, the Java check, and the jre-openjdk row of the
-    // dependency table.
+    // dependency table. libarchive is present on this machine.
     assert_eq!(optional_lines(&text).len(), 3, "{text}");
 
     // Once LanguageTool is on the machine the server cannot start without a
@@ -463,7 +467,10 @@ fn the_envelope_carries_the_dependency_table() {
         .iter()
         .map(|row| row["package"].as_str().expect("every package is a string"))
         .collect();
-    assert_eq!(packages, ["curl", "wl-clipboard", "jre-openjdk"]);
+    assert_eq!(
+        packages,
+        ["curl", "wl-clipboard", "libarchive", "jre-openjdk"]
+    );
 
     for row in rows {
         let package = row["package"].as_str().unwrap();
@@ -486,6 +493,8 @@ fn the_envelope_carries_the_dependency_table() {
     assert_eq!(rows[1]["usedBy"], serde_json::json!(["capture"]));
     assert_eq!(rows[2]["required"], false);
     assert_eq!(rows[2]["usedBy"], serde_json::json!(["languagetool"]));
+    assert_eq!(rows[3]["required"], false);
+    assert_eq!(rows[3]["usedBy"], serde_json::json!(["languagetool"]));
 }
 
 /// A required package that is absent reads `missing` in the text and
@@ -495,7 +504,7 @@ fn the_envelope_carries_the_dependency_table() {
 #[test]
 fn an_absent_required_package_is_missing_and_the_engine_answer_stands() {
     let mut facts = ready();
-    facts.binaries = vec!["curl".to_string()];
+    facts.binaries = vec!["curl".to_string(), "bsdtar".to_string()];
 
     let output = doctor::run(&facts, EngineSlug::Harper, false);
     assert_eq!(output.exit_code, 0, "{}", output.text);
@@ -537,6 +546,6 @@ fn the_java_package_follows_the_runtime_fact() {
 
     let json = doctor::run(&facts, EngineSlug::Harper, true).text;
     let value: Value = serde_json::from_str(&json).expect("the envelope is one JSON object");
-    assert_eq!(value["dependencies"][2]["present"], false);
-    assert_eq!(value["dependencies"][2]["required"], false);
+    assert_eq!(value["dependencies"][3]["present"], false);
+    assert_eq!(value["dependencies"][3]["required"], false);
 }

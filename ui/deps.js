@@ -44,6 +44,14 @@ var DEPENDENCIES = [
     usedBy: ["capture"]
   },
   {
+    name: "libarchive",
+    package: "libarchive",
+    purpose: "grammachy engine install unpacks the LanguageTool release with bsdtar.",
+    required: false,
+    probe: "bsdtar",
+    usedBy: ["languagetool"]
+  },
+  {
     name: "Java runtime",
     package: "jre-openjdk",
     purpose: "LanguageTool runs on it, and Harper needs none.",
@@ -54,6 +62,25 @@ var DEPENDENCIES = [
 ]
 
 var JAVA_PACKAGE = "jre-openjdk"
+
+// The absent rows one part of Grammachy needs, by its `usedBy` word. The
+// Engines page asks this for the engine slug of a row, so a component that
+// needs a runtime and an unpacker names both and one Install adds both.
+function absentFor(dependencies, part) {
+  return absent(dependencies).filter(function(dependency) {
+    return Array.isArray(dependency.usedBy) && dependency.usedBy.indexOf(String(part)) !== -1
+  })
+}
+
+// The one phrase beside a row for the packages it still needs.
+function needsHint(dependencies) {
+  var list = Array.isArray(dependencies) ? dependencies : []
+  var words = list.map(function(dependency) {
+    return dependency.package === JAVA_PACKAGE ? "a Java runtime" : String(dependency.package)
+  })
+  if (words.length === 0) return ""
+  return "Needs " + words.join(" and ")
+}
 
 function isPlainObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value)
@@ -184,6 +211,8 @@ if (typeof module !== "undefined" && module.exports) {
     probeArgv: probeArgv,
     fromProbe: fromProbe,
     absent: absent,
+    absentFor: absentFor,
+    needsHint: needsHint,
     missingRequired: missingRequired,
     isPresent: isPresent,
     packagesOf: packagesOf,

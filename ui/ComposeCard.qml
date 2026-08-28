@@ -122,8 +122,8 @@ BorderSurface {
   signal engineRemoveConfirmed(string slug)
   signal engineKeepRequested()
   // The Install beside a row that needs a system package, spec section 7.
-  // Overlay.qml opens the terminal that runs `omarchy pkg add <package>`.
-  signal packageInstallRequested(string pkg)
+  // Overlay.qml opens the terminal that runs `omarchy pkg add <packages...>`.
+  signal packageInstallRequested(var packages)
 
   readonly property color acceptedColor: marked.acceptedColor
 
@@ -264,7 +264,7 @@ BorderSurface {
       engineNote: root.engineNote
       dependencies: root.dependencies
       packageInstalling: root.packageInstalling
-      onPackageInstallRequested: function(pkg) { root.packageInstallRequested(pkg) }
+      onPackageInstallRequested: function(packages) { root.packageInstallRequested(packages) }
       onEngineInstallRequested: function(slug) { root.engineInstallRequested(slug) }
       onEngineCancelRequested: root.engineCancelRequested()
       onEngineRemoveRequested: function(slug) { root.engineRemoveRequested(slug) }

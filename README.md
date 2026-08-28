@@ -46,7 +46,7 @@ Remove takes that directory away again, and the engine falls back to Harper.
 `grammachy engine list | install languagetool | remove languagetool` does the same from a terminal.
 
 It needs a Java runtime beside it.
-When `jre-openjdk` is missing, the row reads `Needs a Java runtime` and offers an Install that runs `omarchy pkg add jre-openjdk` in a terminal.
+When `jre-openjdk` or `libarchive` is missing, the row reads `Needs a Java runtime` or `Needs libarchive` and offers an Install that runs `omarchy pkg add` for them in a terminal.
 If you already installed the Arch `languagetool` package, Grammachy uses that and offers no Install.
 `grammachy engine remove` never touches a pacman package.
 
@@ -84,6 +84,7 @@ Doctor installs nothing.
 |---|---|---|
 | `curl` | `bin/bootstrap.sh` downloads the pinned companion binary with it. | yes |
 | `wl-clipboard` | Capture, paste, and the restored Selection all go through `wl-copy` and `wl-paste`. | yes |
+| `libarchive` | `grammachy engine install` unpacks the LanguageTool release with `bsdtar`. | no |
 | `jre-openjdk` | LanguageTool runs on it, and Harper needs none. | no |
 
 The plugin runs no `sudo` and no `pacman` itself.
@@ -135,6 +136,7 @@ See `docs/dev.md` for cutting a release and pinning `cli.lock`.
    This deletes `~/.local/share/grammachy/engines/languagetool/`.
    It never touches a pacman package.
    Optional: `sudo pacman -Rs jre-openjdk`, if nothing else on the machine needs the Java runtime the plugin asked for.
+   `libarchive` stays, because pacman itself depends on it.
 
 3. Run `omarchy plugin remove io.github.jyooi.grammachy`.
    This deletes the whole plugin directory, including the downloaded `bin/grammachy`, since the folder came from a git clone.

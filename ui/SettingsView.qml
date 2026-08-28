@@ -42,7 +42,7 @@ ColumnLayout {
   signal engineRemoveRequested(string slug)
   signal engineRemoveConfirmed(string slug)
   signal engineKeepRequested()
-  signal packageInstallRequested(string pkg)
+  signal packageInstallRequested(var packages)
 
   // Dropdown writes its own `value` when the user picks a row, which drops the
   // declarative binding. Re-asserting it on every change of the stored value
@@ -192,7 +192,7 @@ ColumnLayout {
     dependencies: root.dependencies
     packageInstalling: root.packageInstalling
 
-    onInstallPackage: function(pkg) { root.packageInstallRequested(pkg) }
+    onInstallPackages: function(packages) { root.packageInstallRequested(packages) }
     onInstall: function(slug) { root.engineInstallRequested(slug) }
     onCancel: root.engineCancelRequested()
     onRemove: function(slug) { root.engineRemoveRequested(slug) }

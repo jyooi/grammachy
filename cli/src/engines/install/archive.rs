@@ -38,7 +38,7 @@ pub fn bsdtar(archive: &Path, directory: &Path) -> Result<(), String> {
         .arg(directory)
         .output()
         .map_err(|error| {
-            format!("bsdtar could not run: {error}. Install it with: sudo pacman -S libarchive")
+            format!("bsdtar could not run: {error}. Install it with: omarchy pkg add libarchive")
         })?;
 
     if output.status.success() {

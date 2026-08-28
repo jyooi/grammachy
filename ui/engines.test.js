@@ -439,21 +439,22 @@ test("a binary that is not there at all is one note and no rows", () => {
 })
 
 const EnginesModule = require("./engines.js")
-test("a row that needs Java reads the runtime hint until jre-openjdk is present", () => {
+test("a row reads as missing a package only while its list says so", () => {
   const row = { slug: "languagetool", name: "LanguageTool", state: "absent", needsJava: true }
-  assert.equal(EnginesModule.runtimeMissing(row, false), true)
-  assert.equal(EnginesModule.runtimeMissing(row, undefined), true)
-  assert.equal(EnginesModule.runtimeMissing(row, true), false)
-  assert.equal(EnginesModule.runtimeMissing({ slug: "x", needsJava: false }, false), false)
-  assert.equal(EnginesModule.RUNTIME_HINT, "Needs a Java runtime")
+  const java = { package: "jre-openjdk", present: false, usedBy: ["languagetool"] }
+  assert.equal(EnginesModule.runtimeMissing(row, [java]), true)
+  assert.equal(EnginesModule.runtimeMissing(row, []), false)
+  assert.equal(EnginesModule.runtimeMissing(row, undefined), false)
+  assert.equal(EnginesModule.runtimeMissing(null, [java]), false)
 })
 
-test("a missing runtime blocks Install alone, and never Remove or Cancel", () => {
+test("a missing package blocks Install alone, and never Remove or Cancel", () => {
   const row = { slug: "languagetool", name: "LanguageTool", state: "partial", needsJava: true }
-  assert.equal(EnginesModule.actionBlocked(EnginesModule.INSTALL, row, { javaPresent: false }), true)
-  assert.equal(EnginesModule.actionBlocked(EnginesModule.REMOVE, row, { javaPresent: false }), false)
-  assert.equal(EnginesModule.actionBlocked(EnginesModule.INSTALL, row, { javaPresent: true }), false)
+  const missing = [{ package: "libarchive", present: false, usedBy: ["languagetool"] }]
+  assert.equal(EnginesModule.actionBlocked(EnginesModule.INSTALL, row, { missing }), true)
+  assert.equal(EnginesModule.actionBlocked(EnginesModule.REMOVE, row, { missing }), false)
+  assert.equal(EnginesModule.actionBlocked(EnginesModule.INSTALL, row, { missing: [] }), false)
   // A verb in flight still blocks every row but its own.
-  assert.equal(EnginesModule.actionBlocked(EnginesModule.INSTALL, row, { javaPresent: true, working: true, busy: "other" }), true)
-  assert.equal(EnginesModule.actionBlocked(EnginesModule.CANCEL, row, { javaPresent: false, working: true, busy: "languagetool" }), false)
+  assert.equal(EnginesModule.actionBlocked(EnginesModule.INSTALL, row, { missing: [], working: true, busy: "other" }), true)
+  assert.equal(EnginesModule.actionBlocked(EnginesModule.CANCEL, row, { missing, working: true, busy: "languagetool" }), false)
 })

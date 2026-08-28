@@ -44,6 +44,7 @@ Dependencies
 
   ok       curl                bin/bootstrap.sh downloads the pinned companion binary with it.
   missing  wl-clipboard        Capture, paste, and the restored Selection all go through wl-copy and wl-paste. Run: omarchy pkg add wl-clipboard
+  ok       libarchive          grammachy engine install unpacks the LanguageTool release with bsdtar.
   optional jre-openjdk         LanguageTool runs on it, and Harper needs none. Run: omarchy pkg add jre-openjdk
 
 Engine harper is ready.
@@ -134,6 +135,7 @@ The shell reads it for the setup card and the Engines page, and `ui/deps.js` car
 |---|---|---|---|---|
 | `curl` | curl | true | `bootstrap` | `curl` on `PATH` |
 | `wl-clipboard` | wl-clipboard | true | `capture` | `wl-copy` on `PATH` |
+| `libarchive` | libarchive | false | `languagetool` | `bsdtar` on `PATH` |
 | `jre-openjdk` | Java runtime | false | `languagetool` | the same runtime the `java` check finds, through `JAVA_HOME` or the default JVM |
 
 Dependency fields:
@@ -141,7 +143,7 @@ Dependency fields:
 - `name`: the display name.
 - `package`: the Arch package name.
 - `purpose`: one sentence saying what the plugin does with it.
-- `required`: whether the plugin cannot work without it. Only `jre-openjdk` is optional, because Harper needs no runtime.
+- `required`: whether the plugin cannot work without it. `libarchive` and `jre-openjdk` are optional, because only LanguageTool needs them.
 - `present`: whether it is on this machine.
 - `installCommand`: exactly `omarchy pkg add <package>`.
 - `usedBy`: which parts need it, from `bootstrap`, `capture`, and `languagetool`.

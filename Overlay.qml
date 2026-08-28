@@ -278,7 +278,7 @@ Item {
     // being open is the whole condition for reading it.
     if (root.settingsOpen) {
       root.refreshEngines()
-      // The Engines list reads the jre-openjdk row beside LanguageTool.
+      // The Engines list reads the rows LanguageTool needs beside it.
       root.refreshDependencies()
     }
     // A question that is off the screen must never still be answerable, the
@@ -2285,7 +2285,7 @@ Item {
         engineNote: root.engineNote
         dependencies: root.dependencies || []
         packageInstalling: root.packageInstalling
-        onPackageInstallRequested: function(pkg) { root.installPackages([pkg]) }
+        onPackageInstallRequested: function(packages) { root.installPackages(packages) }
 
         onEngineInstallRequested: function(slug) { root.installEngine(slug) }
         onEngineCancelRequested: root.cancelEngineInstall()
@@ -2368,7 +2368,7 @@ Item {
         engineNote: root.engineNote
         dependencies: root.dependencies || []
         packageInstalling: root.packageInstalling
-        onPackageInstallRequested: function(pkg) { root.installPackages([pkg]) }
+        onPackageInstallRequested: function(packages) { root.installPackages(packages) }
 
         onEngineInstallRequested: function(slug) { root.installEngine(slug) }
         onEngineCancelRequested: root.cancelEngineInstall()

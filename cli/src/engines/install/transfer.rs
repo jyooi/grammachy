@@ -77,7 +77,7 @@ pub fn curl(url: &str, path: &Path) -> Result<Transfer, String> {
         .stderr(std::process::Stdio::piped())
         .spawn()
         .map_err(|error| {
-            format!("curl could not run: {error}. Install it with: sudo pacman -S curl")
+            format!("curl could not run: {error}. Install it with: omarchy pkg add curl")
         })?;
 
     loop {

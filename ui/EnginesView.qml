@@ -41,13 +41,12 @@ ColumnLayout {
   property double freeBytes: 0
   // One failure, from `Engines.note`, or null when the last verb was fine.
   property var note: null
-  // The dependency table of spec section 10, from `Deps.fromDoctor`. The
-  // `jre-openjdk` row is what a row that needs Java reads.
+  // The dependency table of spec section 10, from `Deps.fromDoctor`. A row
+  // reads the packages its slug is `usedBy`.
   property var dependencies: []
   // Whether the terminal that runs `omarchy pkg add` is still open.
   property bool packageInstalling: false
 
-  readonly property bool javaPresent: Deps.isPresent(root.dependencies, Deps.JAVA_PACKAGE)
 
   signal install(string slug)
   signal cancel()
@@ -56,7 +55,7 @@ ColumnLayout {
   signal keepEngine()
   // The Install beside a row that needs a system package. Overlay.qml opens
   // the terminal that runs `omarchy pkg add <package>`.
-  signal installPackage(string pkg)
+  signal installPackages(var packages)
 
   spacing: Style.spacing.labelGap
 
@@ -95,10 +94,11 @@ ColumnLayout {
         working: root.working
       })
       readonly property bool asking: root.confirmSlug === row.slug
-      // Spec section 7: a row that needs Java this machine lacks says so and
-      // carries the one Install that adds the runtime, and its own Install
-      // waits until the runtime is there.
-      readonly property bool runtimeMissing: Engines.runtimeMissing(row.modelData, root.javaPresent)
+      // Spec section 7: a row that needs a system package this machine lacks
+      // says so and carries the one Install that adds every such package,
+      // and its own Install waits until they are there.
+      readonly property var missingPackages: Deps.absentFor(root.dependencies, row.slug)
+      readonly property bool runtimeMissing: Engines.runtimeMissing(row.modelData, row.missingPackages)
 
       Layout.fillWidth: true
       Layout.topMargin: Style.spacing.sm
@@ -139,7 +139,7 @@ ColumnLayout {
 
             Text {
               visible: row.runtimeMissing
-              text: Engines.RUNTIME_HINT
+              text: Deps.needsHint(row.missingPackages)
               color: Color.urgent
               font.family: Style.font.family
               font.pixelSize: Style.font.caption
@@ -148,14 +148,14 @@ ColumnLayout {
             Button {
               visible: row.runtimeMissing
               Layout.alignment: Qt.AlignVCenter
-              text: root.packageInstalling ? "Installing..." : "Install " + Deps.JAVA_PACKAGE
+              text: root.packageInstalling ? "Installing..." : "Install " + Deps.packagesOf(row.missingPackages).join(" ")
               enabled: !root.packageInstalling
               opacity: root.packageInstalling ? 0.6 : 1
               bordered: true
               foreground: Color.accent
               fontFamily: Style.font.family
-              tooltipText: Deps.installCommand([Deps.JAVA_PACKAGE]) + " in a terminal"
-              onClicked: root.installPackage(Deps.JAVA_PACKAGE)
+              tooltipText: Deps.installCommand(Deps.packagesOf(row.missingPackages)) + " in a terminal"
+              onClicked: root.installPackages(Deps.packagesOf(row.missingPackages))
             }
 
             Item { Layout.fillWidth: true }
@@ -183,7 +183,7 @@ ColumnLayout {
             readonly property bool blocked: Engines.actionBlocked(modelData, row.modelData, {
               busy: root.busy,
               working: root.working,
-              javaPresent: root.javaPresent
+              missing: row.missingPackages
             })
 
             Layout.alignment: Qt.AlignVCenter

@@ -37,7 +37,7 @@ pub struct Spec {
 }
 
 /// Every package, in the order `doctor` prints them.
-pub const SPECS: [Spec; 3] = [
+pub const SPECS: [Spec; 4] = [
     Spec {
         name: "curl",
         package: "curl",
@@ -53,6 +53,14 @@ pub const SPECS: [Spec; 3] = [
         required: true,
         probe: "wl-copy",
         used_by: &[USED_BY_CAPTURE],
+    },
+    Spec {
+        name: "libarchive",
+        package: "libarchive",
+        purpose: "grammachy engine install unpacks the LanguageTool release with bsdtar.",
+        required: false,
+        probe: "bsdtar",
+        used_by: &[USED_BY_LANGUAGETOOL],
     },
     Spec {
         name: "Java runtime",
