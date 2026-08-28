@@ -162,7 +162,7 @@ function normalised(name, value) {
 
 // The whole entry to hand to `shell.updateEntryInline`, which replaces the
 // entry rather than merging into it. Carrying every stored key across is what
-// keeps the file-only keys and any unknown value the user has not touched.
+// keeps any unknown value the user did not change.
 function mergedEntry(entry, name, value) {
   var next = ({})
   if (isPlainObject(entry)) {
