@@ -96,6 +96,28 @@ mod tests {
         assert!(free > 0);
     }
 
+    /// A path that does not exist yet still answers, even while the disk is
+    /// changing under it, because the ancestor it resolves to is there.
+    #[test]
+    fn a_directory_that_does_not_exist_yet_answers_while_the_disk_changes() {
+        let here = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let missing = here.join("no-such-directory/nor-this-one");
+        let scratch = here.join("target").join("disk-changes.tmp");
+
+        let file = std::fs::File::create(&scratch).unwrap();
+        let noise: Vec<u8> = (0..64u32 << 20)
+            .map(|i| (i.wrapping_mul(2_654_435_761) >> 24) as u8)
+            .collect();
+        std::io::Write::write_all(&mut &file, &noise).unwrap();
+        file.sync_all().unwrap();
+        // Safety: `sync` takes no arguments and only flushes caches.
+        unsafe { libc::sync() };
+        let answer = free_bytes(&missing);
+        std::fs::remove_file(&scratch).unwrap();
+
+        assert!(matches!(answer, Some(n) if n > 0));
+    }
+
     #[test]
     fn a_resumed_transfer_only_asks_for_the_bytes_it_still_needs() {
         // Half the file is already on disk, and the disk holds the other half.
