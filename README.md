@@ -70,6 +70,8 @@ If you already installed the Arch `languagetool` package, Grammachy uses that an
 
    ![The setup card listing wl-clipboard as a missing system package with its Install packages button, above the disabled binary Install.](docs/images/setup-deps.png)
 
+   The setup card when a required system package is missing.
+
    Click Install, and watch `bin/bootstrap.sh` fetch and verify it.
 3. Highlight text and press SUPER + SHIFT + Q.
    The first Check runs on Harper, compiled into the binary, so nothing downloads and no `pacman` command runs.
