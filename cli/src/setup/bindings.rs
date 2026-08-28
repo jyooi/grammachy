@@ -18,8 +18,43 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crate::settings::PLUGIN_ID;
+use crate::settings::{StoredSettings, PLUGIN_ID};
 use crate::setup::block::{self, Anchor, Block};
+
+/// The hotkey spec section 2 assigns to the quick popup.
+pub const DEFAULT_QUICK: &str = "SUPER + G";
+
+/// The hotkey spec section 2 assigns to Compose.
+pub const DEFAULT_COMPOSE: &str = "SUPER + SHIFT + G";
+
+/// The two hotkeys of spec section 2, as one run writes them: the stored
+/// keys of spec section 7, or the defaults for an empty or missing value.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Hotkeys {
+    pub quick: String,
+    pub compose: String,
+}
+
+impl Default for Hotkeys {
+    fn default() -> Self {
+        Hotkeys {
+            quick: DEFAULT_QUICK.to_string(),
+            compose: DEFAULT_COMPOSE.to_string(),
+        }
+    }
+}
+
+impl Hotkeys {
+    /// The keys this run writes, resolved the way spec section 7 resolves
+    /// every other stored value.
+    pub fn resolve(stored: &StoredSettings) -> Self {
+        let defaults = Hotkeys::default();
+        Hotkeys {
+            quick: stored.quick_hotkey.clone().unwrap_or(defaults.quick),
+            compose: stored.compose_hotkey.clone().unwrap_or(defaults.compose),
+        }
+    }
+}
 
 /// Points the CLI at another `bindings.lua`. The test suite sets it, so no
 /// test writes the real file. Not a user-facing setting.
@@ -59,14 +94,14 @@ fn binding(keys: &str, description: &str, payload: &str) -> String {
 }
 
 /// The block spec section 10 puts between the two markers.
-pub fn block() -> Block {
+pub fn block(hotkeys: &Hotkeys) -> Block {
     Block {
         markers: block::LUA,
         body: format!(
             "{}{}",
-            binding("SUPER + G", "Grammachy", r#"{"mode":"quick"}"#),
+            binding(&hotkeys.quick, "Grammachy", r#"{"mode":"quick"}"#),
             binding(
-                "SUPER + SHIFT + G",
+                &hotkeys.compose,
                 "Grammachy compose",
                 r#"{"mode":"compose"}"#
             ),
@@ -75,13 +110,21 @@ pub fn block() -> Block {
 }
 
 /// Write the block, answering whether the file changed.
-pub fn install(path: &Path) -> Result<bool, String> {
-    write(path, |content| block().ensure(content, Anchor::EndOfFile))
+pub fn install(path: &Path, hotkeys: &Hotkeys) -> Result<bool, String> {
+    write(path, |content| {
+        block(hotkeys).ensure(content, Anchor::EndOfFile)
+    })
 }
 
 /// Take the block out, answering whether the file changed.
+///
+/// The markers alone decide the region (`block::find` never reads the body),
+/// so removal is byte exact whatever keys the block was written with.
 pub fn remove(path: &Path) -> Result<bool, String> {
-    write(path, |content| Ok(block().strip(content)))
+    write(
+        path,
+        |content| Ok(block(&Hotkeys::default()).strip(content)),
+    )
 }
 
 fn write(path: &Path, change: impl FnOnce(&str) -> Result<String, String>) -> Result<bool, String> {
@@ -141,7 +184,7 @@ mod tests {
 
     #[test]
     fn the_two_bindings_are_the_ones_spec_section_2_names() {
-        let body = block().body;
+        let body = block(&Hotkeys::default()).body;
 
         assert_eq!(
             body,
@@ -158,7 +201,11 @@ mod tests {
     fn the_payload_needs_no_escape_inside_the_long_bracket() {
         // A `]]` in the command would close the long bracket early. The two
         // payloads carry none, and this is the guard if one ever does.
-        for line in block().body.lines().filter(|line| line.contains("[[")) {
+        for line in block(&Hotkeys::default())
+            .body
+            .lines()
+            .filter(|line| line.contains("[["))
+        {
             let command = line
                 .split_once("[[")
                 .and_then(|(_, rest)| rest.split_once("]]"))

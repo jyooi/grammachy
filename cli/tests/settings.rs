@@ -174,6 +174,32 @@ fn unknown_stored_keys_are_ignored_without_error() {
     assert_eq!(options.engine, EngineSlug::Harper);
 }
 
+/// Spec section 7: the two hotkeys are trimmed, and an empty or missing value
+/// reads as unknown, the same rule every other key follows.
+#[test]
+fn a_stored_hotkey_is_trimmed() {
+    let entry = stored(r#""quickHotkey": "  SUPER + H  ", "composeHotkey": "SUPER + SHIFT + H""#);
+
+    assert_eq!(entry.quick_hotkey.as_deref(), Some("SUPER + H"));
+    assert_eq!(entry.compose_hotkey.as_deref(), Some("SUPER + SHIFT + H"));
+}
+
+#[test]
+fn an_empty_or_blank_stored_hotkey_reads_as_unknown() {
+    let entry = stored(r#""quickHotkey": "", "composeHotkey": "   ""#);
+
+    assert_eq!(entry.quick_hotkey, None);
+    assert_eq!(entry.compose_hotkey, None);
+}
+
+#[test]
+fn a_missing_stored_hotkey_reads_as_unknown() {
+    let entry = stored("");
+
+    assert_eq!(entry.quick_hotkey, None);
+    assert_eq!(entry.compose_hotkey, None);
+}
+
 #[test]
 fn a_missing_entry_and_a_broken_file_read_as_the_defaults() {
     let no_entry = r#"{ "bar": { "layout": { "left": [], "center": [], "right": [] } } }"#;
