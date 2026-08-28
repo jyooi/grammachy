@@ -1,9 +1,8 @@
 //! `bin/bootstrap.sh` against a stub curl, spec section 10.
 //!
 //! No test reaches the network: `GRAMMACHY_BOOTSTRAP_CURL` points at a stub
-//! standing in for curl, and `GRAMMACHY_BOOTSTRAP_GH` is `never`, so a 404
-//! never tries `gh` either. The stub always answers 200 with a fixture file,
-//! so the sha256 check is what every scenario here turns on.
+//! standing in for curl. The stub always answers 200 with a fixture file, so
+//! the sha256 check is what every scenario here turns on.
 
 use std::fs;
 use std::io::Write;
@@ -79,7 +78,6 @@ fn bootstrap(dir: &Path, lock: &Path, curl_stub: &Path) -> Output {
         .env("GRAMMACHY_BOOTSTRAP_LOCK", lock)
         .env("GRAMMACHY_BOOTSTRAP_OUT", dir.join("grammachy"))
         .env("GRAMMACHY_BOOTSTRAP_CURL", curl_stub)
-        .env("GRAMMACHY_BOOTSTRAP_GH", "never")
         .output()
         .expect("bootstrap.sh runs")
 }

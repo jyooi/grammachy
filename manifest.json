@@ -4,6 +4,7 @@
   "name": "Grammachy",
   "version": "0.1.0",
   "author": "jyooi",
+  "license": "MIT",
   "description": "Grammar and spelling checks for any selected text",
   "kinds": [
     "bar-widget",
