@@ -87,3 +87,70 @@ test("a non-zero exit reads as failed and the log carries the reason", () => {
   assert.equal(model.showsLog, true)
   assert.match(model.log, /sha256 mismatch/)
 })
+
+const LOCK = '{"version": "0.1.0", "sha256": "abc123"}'
+
+function deps(present) {
+  return [
+    { name: "curl", package: "curl", purpose: "Fetches the binary.", required: true, present: present.curl === true },
+    { name: "wl-clipboard", package: "wl-clipboard", purpose: "Captures text.", required: true, present: present.wl === true },
+    { name: "Java runtime", package: "jre-openjdk", purpose: "Runs LanguageTool.", required: false, present: false }
+  ]
+}
+
+test("a missing required package is listed and blocks the bootstrap Install", () => {
+  const model = Setup.card({ lockText: LOCK, dependencies: deps({ wl: true }) })
+  assert.equal(model.state, Setup.READY)
+  assert.equal(model.showsDependencies, true)
+  assert.deepEqual(model.missingDependencies.map((row) => row.package), ["curl"])
+  assert.equal(model.missingDependencies[0].purpose, "Fetches the binary.")
+  assert.equal(model.depsInstallCommand, "omarchy pkg add curl")
+  assert.equal(model.depsInstallEnabled, true)
+  assert.equal(model.showsInstall, true)
+  assert.equal(model.installEnabled, false)
+  assert.equal(model.installReason, "Install curl first.")
+})
+
+test("every missing required package goes into one omarchy pkg add", () => {
+  const model = Setup.card({ lockText: LOCK, dependencies: deps({}) })
+  assert.deepEqual(model.missingDependencies.map((row) => row.package), ["curl", "wl-clipboard"])
+  assert.equal(model.depsInstallCommand, "omarchy pkg add curl wl-clipboard")
+  assert.equal(model.installReason, "Install curl and wl-clipboard first.")
+})
+
+test("an optional package never blocks the bootstrap and is never listed here", () => {
+  const model = Setup.card({ lockText: LOCK, dependencies: deps({ curl: true, wl: true }) })
+  assert.equal(model.showsDependencies, false)
+  assert.deepEqual(model.missingDependencies, [])
+  assert.equal(model.installEnabled, true)
+  assert.equal(model.installReason, "")
+  assert.equal(model.depsInstallCommand, "")
+})
+
+test("an unread table blocks nothing, so a probe that has not answered hides no button", () => {
+  const model = Setup.card({ lockText: LOCK })
+  assert.equal(model.showsDependencies, false)
+  assert.equal(model.installEnabled, true)
+  assert.equal(Setup.card({ lockText: LOCK, dependencies: null }).installEnabled, true)
+})
+
+test("the dependency Install goes quiet while its terminal is open", () => {
+  const model = Setup.card({ lockText: LOCK, dependencies: deps({}), depsInstalling: true })
+  assert.equal(model.depsInstalling, true)
+  assert.equal(model.depsInstallEnabled, false)
+  assert.equal(model.showsDependencies, true)
+})
+
+test("a finished bootstrap lists no packages", () => {
+  const model = Setup.card({ lockText: LOCK, exitCode: 0, dependencies: deps({}) })
+  assert.equal(model.state, Setup.DONE)
+  assert.equal(model.showsDependencies, false)
+  assert.equal(model.installReason, "")
+})
+
+test("missingRequired matches the rule of deps.js", () => {
+  const Deps = require("./deps.js")
+  const rows = Deps.fromProbe("curl\n")
+  assert.deepEqual(Setup.missingRequired(rows), Deps.missingRequired(rows))
+  assert.deepEqual(Setup.missingRequired(undefined), [])
+})

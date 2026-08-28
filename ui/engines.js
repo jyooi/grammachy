@@ -346,6 +346,28 @@ function isBlocked(row, options) {
   return !(slug.length > 0 && busySlug === slug)
 }
 
+// Whether a row needs a Java runtime this machine lacks, spec section 7.
+//
+// `javaPresent` is the `jre-openjdk` row of the `ui/deps.js` table. A row
+// that needs Java and has none reads "Needs a Java runtime" beside its name
+// and carries the one Install that opens `omarchy pkg add jre-openjdk` in a
+// terminal, and its own Install stays disabled until the runtime is there,
+// because a server with no runtime would fail the first Check it got.
+function runtimeMissing(row, javaPresent) {
+  if (!isPlainObject(row) || row.needsJava !== true) return false
+  return javaPresent !== true
+}
+
+var RUNTIME_HINT = "Needs a Java runtime"
+
+// Whether one button of a row is drawn but cannot be pressed: everything
+// `isBlocked` says, plus Install while the runtime is missing.
+function actionBlocked(action, row, options) {
+  if (isBlocked(row, options)) return true
+  var context = isPlainObject(options) ? options : ({})
+  return String(action) === INSTALL && runtimeMissing(row, context.javaPresent)
+}
+
 function actionIcon(action) {
   var icon = ACTION_ICONS[String(action)]
   return typeof icon === "string" ? icon : ""
@@ -430,6 +452,9 @@ if (typeof module !== "undefined" && module.exports) {
     unavailable: unavailable,
     actions: actions,
     isBlocked: isBlocked,
+    RUNTIME_HINT: RUNTIME_HINT,
+    runtimeMissing: runtimeMissing,
+    actionBlocked: actionBlocked,
     actionIcon: actionIcon,
     actionTooltip: actionTooltip,
     note: note

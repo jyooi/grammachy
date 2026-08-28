@@ -37,6 +37,10 @@ pub struct Facts {
     /// The address the `languagetool` adapter talks to.
     pub languagetool_address: String,
     pub languagetool_unit: UnitState,
+    /// The binaries on `PATH` that stand for the system packages of
+    /// [`super::deps`]. The Java runtime counts through `java` above, because
+    /// the launcher reads `JAVA_HOME` rather than `PATH`.
+    pub binaries: Vec<String>,
 }
 
 impl Facts {
@@ -52,7 +56,25 @@ impl Facts {
                 .map(|home| PathBuf::from(home).join("bin/java")),
             languagetool_address: languagetool::Config::from_env().address,
             languagetool_unit: unit_state(languagetool::unit::UNIT_NAME),
+            binaries: super::deps::SPECS
+                .iter()
+                .map(|spec| spec.probe)
+                .filter(|probe| on_path(probe))
+                .map(str::to_string)
+                .collect(),
         }
+    }
+
+    /// Whether the binary one package supplies is on this machine.
+    ///
+    /// `java` answers through `JAVA_HOME` or the default JVM, which is what
+    /// the LanguageTool launcher runs, so a runtime `PATH` alone knows would
+    /// not start the unit.
+    pub fn has_binary(&self, probe: &str) -> bool {
+        if probe == "java" {
+            return self.java.is_some();
+        }
+        self.binaries.iter().any(|name| name == probe)
     }
 
     /// Where LanguageTool is on this machine, whichever route put it there.
@@ -64,6 +86,14 @@ impl Facts {
             .as_deref()
             .or(self.languagetool_launcher.as_deref())
     }
+}
+
+/// Whether `PATH` carries one executable, the same lookup a shell makes.
+fn on_path(name: &str) -> bool {
+    let Some(path) = std::env::var_os("PATH") else {
+        return false;
+    };
+    std::env::split_paths(&path).any(|directory| directory.join(name).is_file())
 }
 
 fn existing_file(path: &str) -> Option<PathBuf> {

@@ -58,6 +58,9 @@ The Local LLM and Cloud LLM engines were removed (HUF-240).
   `cli/tests/manifest.rs` enforces both.
 - `cli/src/doctor/facts.rs` is the only place that reads the machine.
   The report is a pure function of `Facts`.
+- The system package table lives in `cli/src/doctor/deps.rs` and again in `ui/deps.js`, because the setup card opens before `bin/grammachy` exists.
+  `cli/tests/overlay_deps.rs` keeps the two equal and `cli/tests/readme_dependencies.rs` keeps the README section equal to both.
+  The plugin never runs `sudo` or `pacman`. `Overlay.installPackages` opens a terminal running `omarchy pkg add` through `Deps.terminalArgv`, and the `Process` exits when that terminal closes because `uwsm-app` waits.
 
 ## Plugin
 
@@ -86,7 +89,7 @@ The Local LLM and Cloud LLM engines were removed (HUF-240).
 
 - No test may reach a real engine server, a real systemd unit, a real config file, a real compositor, or the network.
   Stub binaries and the seams below are the only route.
-- Seams: `GRAMMACHY_LANGUAGETOOL_ADDRESS`, `GRAMMACHY_LANGUAGETOOL_START=never`, `GRAMMACHY_ENGINE_STOP=never`, `GRAMMACHY_ENGINES_DIR`, `GRAMMACHY_ENGINE_BASE_URL`, `GRAMMACHY_ENGINE_SHA256`, `GRAMMACHY_ENGINE_SIZE_BYTES`, `GRAMMACHY_SHELL_JSON`, `GRAMMACHY_BINDINGS_LUA`, `GRAMMACHY_MENU_JSONC`, `GRAMMACHY_HYPRCTL_RELOAD=never`, and the `GRAMMACHY_BOOTSTRAP_*` set in `bin/bootstrap.sh`.
+- Seams: `GRAMMACHY_LANGUAGETOOL_ADDRESS`, `GRAMMACHY_LANGUAGETOOL_START=never`, `GRAMMACHY_ENGINE_STOP=never`, `GRAMMACHY_ENGINES_DIR`, `GRAMMACHY_ENGINE_BASE_URL`, `GRAMMACHY_ENGINE_SHA256`, `GRAMMACHY_ENGINE_SIZE_BYTES`, `GRAMMACHY_SHELL_JSON`, `GRAMMACHY_BINDINGS_LUA`, `GRAMMACHY_MENU_JSONC`, `GRAMMACHY_HYPRCTL_RELOAD=never`, `GRAMMACHY_PKG_TERMINAL=never`, and the `GRAMMACHY_BOOTSTRAP_*` set in `bin/bootstrap.sh`.
 - `cli/tests/engine_install.rs` owns its whole binary because it pins a digest for the process.
   `languagetool_live.rs` skips when its port is silent.
 - Debug builds of the `harper` adapter time out at 60 s so CI can load the dictionary.

@@ -11,6 +11,7 @@ use serde::Serialize;
 use crate::args::EngineSlug;
 use crate::envelope::CONTRACT_VERSION;
 
+use super::deps::{self, Dependency};
 use super::facts::{Facts, UnitState};
 
 /// One thing `doctor` looked at.
@@ -33,7 +34,7 @@ pub struct Check {
     /// One sentence saying what was found, or what is missing.
     pub detail: String,
     /// The exact command that installs the missing piece, when one exists.
-    /// pacman steps stay manual: `doctor` never runs this itself.
+    /// `doctor` never runs this itself.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub remedy: Option<String>,
     /// The stable word for which state this piece is in, for a check whose
@@ -73,6 +74,10 @@ pub struct Report {
     /// The one line the `engine_unavailable` card shows under its body.
     pub diagnosis: String,
     pub checks: Vec<Check>,
+    /// Every system package Grammachy leans on, spec section 10. A missing
+    /// required package never moves `ready`, which answers the engine
+    /// question alone; the setup card is what refuses a bootstrap without one.
+    pub dependencies: Vec<Dependency>,
 }
 
 impl Report {
@@ -91,6 +96,7 @@ impl Report {
             ready,
             diagnosis,
             checks,
+            dependencies: deps::table(facts),
         }
     }
 
@@ -105,6 +111,13 @@ impl Report {
     /// because an advisory line prints a command the user may still run.
     pub fn commanded(&self) -> impl Iterator<Item = &Check> {
         self.checks.iter().filter(|check| check.remedy.is_some())
+    }
+
+    /// The packages that are not on this machine, in table order.
+    pub fn absent_dependencies(&self) -> impl Iterator<Item = &Dependency> {
+        self.dependencies
+            .iter()
+            .filter(|dependency| !dependency.present)
     }
 
     /// Exit 0 when the chosen engine can run, exit 1 when it cannot.
@@ -259,7 +272,7 @@ fn java_check(facts: &Facts) -> Check {
             optional: facts.languagetool().is_none(),
             detail: "No Java runtime: JAVA_HOME is not set and no default JVM is installed."
                 .to_string(),
-            remedy: Some("sudo pacman -S jre-openjdk".to_string()),
+            remedy: Some(deps::install_command(&["jre-openjdk"])),
             state: None,
             engines: vec!["languagetool"],
         },

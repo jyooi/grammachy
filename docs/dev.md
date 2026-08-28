@@ -13,10 +13,13 @@ The Compose walkthrough later on this page is here for the same reason: spec sec
 - Nothing else, to start with.
   The default engine is `harper`, which is compiled into the binary, so a bare machine checks on the first try.
 - For LanguageTool, smoke item 11 installs it from Settings with no password.
-  It needs a Java runtime beside it: `sudo pacman -S jre-openjdk`.
+  It needs a Java runtime beside it.
+  The Engines row offers an Install for `jre-openjdk` that runs `omarchy pkg add jre-openjdk` in a terminal, and smoke item 15 covers it.
   The Arch `languagetool` package works too, and Grammachy never installs or removes it.
 
 `wl-clipboard` and `wtype` already ship with Omarchy.
+The plugin runs no `sudo` and no `pacman` itself.
+`bin/grammachy doctor` lists every system package it leans on and its state.
 
 ## 1. Install the plugin
 
@@ -363,6 +366,8 @@ Two more cards belong to the same session:
   Switch `Engine` to `Harper` and click `Retry`: the Check now runs in process and succeeds.
 - **No companion binary.** Move `bin/grammachy` aside, reload the plugin, and click the bar widget.
   The setup card of spec section 10 opens, with an Install button that runs `bin/bootstrap.sh` and streams its output.
+  Hide `curl` first, with `PATH` trimmed or the binary moved aside, and the card lists it under `Missing system packages` with one `Install packages` button and the bootstrap Install disabled over `Install curl first.`.
+  `Install packages` opens a terminal running `omarchy pkg add curl`, and the card refreshes when that terminal closes.
   A Check that fails later still offers Setup on the `bad_arguments` card.
   See [Cutting a release](#18-cutting-a-release) for the state before cli.lock pins a hash.
   Put the binary back and reload.
@@ -669,6 +674,25 @@ bin/grammachy doctor --json | jq -r '.checks[] | select(.id == "languagetool") |
 Expected: the line names the launcher and says it came from the package, and the state word is `package`.
 With nothing installed at all the state word is `absent`, the line reads `optional` rather than `missing`, and its remedy is `grammachy engine install languagetool` with no `sudo` in it.
 
+### 15. The Java runtime comes through omarchy pkg add
+
+1. Hide the runtime: `sudo pacman -Rs jre-openjdk`, or start the shell with `JAVA_HOME` unset on a machine with no default JVM.
+2. Open Settings.
+
+Expected: the LanguageTool row reads `Needs a Java runtime` beside its name with an `Install jre-openjdk` button, and the row's own download button is dim.
+
+3. Press `Install jre-openjdk`.
+
+Expected: a terminal opens running `omarchy pkg add jre-openjdk`, which asks for the password itself.
+The button reads `Installing...` until that terminal closes.
+
+4. Let it finish and close the terminal.
+
+Expected: the hint and the `Install jre-openjdk` button go, and the download button is live again.
+`bin/grammachy doctor --json | jq '.dependencies[] | select(.package == "jre-openjdk") | .present'` answers `true`.
+
+To try the launch without installing anything, set `GRAMMACHY_PKG_TERMINAL=never` in the shell's environment: the click logs the packages and opens no terminal.
+
 ## 16. Running the automated checks
 
 The same three plugin checks CI runs, against the shell installed on this machine:
@@ -676,7 +700,7 @@ The same three plugin checks CI runs, against the shell installed on this machin
 ```bash
 for file in $(find . -name '*.qml' | sort); do qmllint -I /usr/share/omarchy/shell "$file" || echo "FAILED $file"; done
 omarchy-plugin-validate .
-node --test ui/splice.test.js ui/tokens.test.js ui/settings.test.js ui/keymap.test.js ui/errors.test.js ui/format.test.js ui/anchor.test.js ui/limits.test.js ui/capture.test.js ui/engines.test.js ui/setupCard.test.js
+node --test ui/splice.test.js ui/tokens.test.js ui/settings.test.js ui/keymap.test.js ui/errors.test.js ui/format.test.js ui/anchor.test.js ui/limits.test.js ui/capture.test.js ui/engines.test.js ui/setupCard.test.js ui/deps.test.js
 ```
 
 The `qmllint` on `PATH` reports a syntax error through its exit status alone and prints nothing.

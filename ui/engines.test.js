@@ -437,3 +437,23 @@ test("a binary that is not there at all is one note and no rows", () => {
   assert.equal(answer.error.code, BAD_ARGUMENTS)
   assert.ok(note(answer.error.code, answer.error.message, "").body.includes("out of date"))
 })
+
+const EnginesModule = require("./engines.js")
+test("a row that needs Java reads the runtime hint until jre-openjdk is present", () => {
+  const row = { slug: "languagetool", name: "LanguageTool", state: "absent", needsJava: true }
+  assert.equal(EnginesModule.runtimeMissing(row, false), true)
+  assert.equal(EnginesModule.runtimeMissing(row, undefined), true)
+  assert.equal(EnginesModule.runtimeMissing(row, true), false)
+  assert.equal(EnginesModule.runtimeMissing({ slug: "x", needsJava: false }, false), false)
+  assert.equal(EnginesModule.RUNTIME_HINT, "Needs a Java runtime")
+})
+
+test("a missing runtime blocks Install alone, and never Remove or Cancel", () => {
+  const row = { slug: "languagetool", name: "LanguageTool", state: "partial", needsJava: true }
+  assert.equal(EnginesModule.actionBlocked(EnginesModule.INSTALL, row, { javaPresent: false }), true)
+  assert.equal(EnginesModule.actionBlocked(EnginesModule.REMOVE, row, { javaPresent: false }), false)
+  assert.equal(EnginesModule.actionBlocked(EnginesModule.INSTALL, row, { javaPresent: true }), false)
+  // A verb in flight still blocks every row but its own.
+  assert.equal(EnginesModule.actionBlocked(EnginesModule.INSTALL, row, { javaPresent: true, working: true, busy: "other" }), true)
+  assert.equal(EnginesModule.actionBlocked(EnginesModule.CANCEL, row, { javaPresent: false, working: true, busy: "languagetool" }), false)
+})

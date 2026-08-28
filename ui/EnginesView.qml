@@ -3,6 +3,7 @@ import QtQuick.Layouts
 import qs.Commons
 import qs.Ui
 import "engines.js" as Engines
+import "deps.js" as Deps
 
 // The Engines list of the Settings view, spec sections 5.4 and 7.
 //
@@ -40,12 +41,22 @@ ColumnLayout {
   property double freeBytes: 0
   // One failure, from `Engines.note`, or null when the last verb was fine.
   property var note: null
+  // The dependency table of spec section 10, from `Deps.fromDoctor`. The
+  // `jre-openjdk` row is what a row that needs Java reads.
+  property var dependencies: []
+  // Whether the terminal that runs `omarchy pkg add` is still open.
+  property bool packageInstalling: false
+
+  readonly property bool javaPresent: Deps.isPresent(root.dependencies, Deps.JAVA_PACKAGE)
 
   signal install(string slug)
   signal cancel()
   signal remove(string slug)
   signal confirmRemove(string slug)
   signal keepEngine()
+  // The Install beside a row that needs a system package. Overlay.qml opens
+  // the terminal that runs `omarchy pkg add <package>`.
+  signal installPackage(string pkg)
 
   spacing: Style.spacing.labelGap
 
@@ -84,6 +95,10 @@ ColumnLayout {
         working: root.working
       })
       readonly property bool asking: root.confirmSlug === row.slug
+      // Spec section 7: a row that needs Java this machine lacks says so and
+      // carries the one Install that adds the runtime, and its own Install
+      // waits until the runtime is there.
+      readonly property bool runtimeMissing: Engines.runtimeMissing(row.modelData, root.javaPresent)
 
       Layout.fillWidth: true
       Layout.topMargin: Style.spacing.sm
@@ -122,6 +137,27 @@ ColumnLayout {
               font.pixelSize: Style.font.caption
             }
 
+            Text {
+              visible: row.runtimeMissing
+              text: Engines.RUNTIME_HINT
+              color: Color.urgent
+              font.family: Style.font.family
+              font.pixelSize: Style.font.caption
+            }
+
+            Button {
+              visible: row.runtimeMissing
+              Layout.alignment: Qt.AlignVCenter
+              text: root.packageInstalling ? "Installing..." : "Install " + Deps.JAVA_PACKAGE
+              enabled: !root.packageInstalling
+              opacity: root.packageInstalling ? 0.6 : 1
+              bordered: true
+              foreground: Color.accent
+              fontFamily: Style.font.family
+              tooltipText: Deps.installCommand([Deps.JAVA_PACKAGE]) + " in a terminal"
+              onClicked: root.installPackage(Deps.JAVA_PACKAGE)
+            }
+
             Item { Layout.fillWidth: true }
           }
 
@@ -144,9 +180,15 @@ ColumnLayout {
           Button {
             required property string modelData
 
+            readonly property bool blocked: Engines.actionBlocked(modelData, row.modelData, {
+              busy: root.busy,
+              working: root.working,
+              javaPresent: root.javaPresent
+            })
+
             Layout.alignment: Qt.AlignVCenter
-            enabled: !row.blocked
-            opacity: row.blocked ? 0.4 : 1
+            enabled: !blocked
+            opacity: blocked ? 0.4 : 1
             iconText: Engines.actionIcon(modelData)
             tooltipText: Engines.actionTooltip(modelData, row.name)
             bordered: true

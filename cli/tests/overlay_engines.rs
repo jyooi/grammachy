@@ -199,7 +199,7 @@ fn the_list_is_drawn_for_every_engine_and_the_dropdown_is_filtered() {
 
     let overlay = read("Overlay.qml");
     assert!(
-        overlay.contains("if (root.settingsOpen) root.refreshEngines()"),
+        overlay.contains("if (root.settingsOpen) {\n      root.refreshEngines()"),
         "opening Settings reads the list"
     );
 

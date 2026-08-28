@@ -2,7 +2,8 @@
 //!
 //! One line per piece, so a missing piece is one line that already carries the
 //! exact command to fix it (spec section 10). Nothing here runs a command:
-//! pacman steps stay manual and `doctor` installs nothing.
+//! `doctor` installs nothing, and every system package goes through
+//! `omarchy pkg add`, which the plugin launches in a visible terminal.
 //!
 //! A piece the machine simply does not have yet reads `optional` rather than
 //! `missing` (HUF-237). LanguageTool is the case: a fresh install never fetched
@@ -35,6 +36,23 @@ pub fn to_text(report: &Report) -> String {
         ));
     }
 
+    out.push_str("\nDependencies\n\n");
+    for dependency in &report.dependencies {
+        let status = if dependency.present {
+            "ok"
+        } else if dependency.required {
+            "missing"
+        } else {
+            "optional"
+        };
+        out.push_str(&format!(
+            "  {status:<STATUS_WIDTH$}{:<NAME_WIDTH$}{}\n",
+            dependency.package,
+            dependency.line()
+        ));
+    }
+    out.push('\n');
+
     let engine = &report.engine;
     let state = if report.ready {
         "is ready"
@@ -46,7 +64,7 @@ pub fn to_text(report: &Report) -> String {
         report.diagnosis
     ));
 
-    if report.commanded().next().is_some() {
+    if report.commanded().next().is_some() || report.absent_dependencies().next().is_some() {
         out.push_str("\nRun the commands above yourself. Doctor installs nothing.\n");
     }
     out

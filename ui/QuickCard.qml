@@ -86,6 +86,11 @@ BorderSurface {
   property string enginesDirectory: ""
   property double enginesFreeBytes: 0
   property var engineNote: null
+  // The dependency table of spec section 10, read by Overlay.qml through
+  // `grammachy doctor`, and whether the terminal that runs `omarchy pkg add`
+  // is still open.
+  property var dependencies: []
+  property bool packageInstalling: false
 
   property int cardWidth: Style.space(680)
   // The whole card fits in this, spec section 6. The marked text is what
@@ -110,6 +115,9 @@ BorderSurface {
   signal engineRemoveRequested(string slug)
   signal engineRemoveConfirmed(string slug)
   signal engineKeepRequested()
+  // The Install beside a row that needs a system package, spec section 7.
+  // Overlay.qml opens the terminal that runs `omarchy pkg add <package>`.
+  signal packageInstallRequested(string pkg)
   // One button of an error card, spec section 8. The action is a button id
   // from `ui/errors.js`; Overlay.qml owns where each one goes.
   signal errorActionRequested(string action)
@@ -258,6 +266,9 @@ BorderSurface {
       enginesDirectory: root.enginesDirectory
       enginesFreeBytes: root.enginesFreeBytes
       engineNote: root.engineNote
+      dependencies: root.dependencies
+      packageInstalling: root.packageInstalling
+      onPackageInstallRequested: function(pkg) { root.packageInstallRequested(pkg) }
       onEngineInstallRequested: function(slug) { root.engineInstallRequested(slug) }
       onEngineCancelRequested: root.engineCancelRequested()
       onEngineRemoveRequested: function(slug) { root.engineRemoveRequested(slug) }
