@@ -1,7 +1,7 @@
 # Project agent memory
 
 Grammachy is a desktop grammar and style checker for Omarchy on Hyprland.
-The Rust CLI in `cli/` runs the engines and prints one JSON envelope per command.
+The Rust CLI in `cli/` runs the engines and prints one JSON envelope for `check`, `chunk`, `setup`, and `engine`.
 The Omarchy Quickshell plugin at the repo root (`manifest.json`, `BarWidget.qml`, `Overlay.qml`, `ui/`) captures text, runs the CLI, and draws the cards.
 `harper` is the default engine and is compiled in.
 `languagetool` is an opt-in component.
@@ -25,8 +25,8 @@ The Local LLM and Cloud LLM engines were removed (HUF-240).
 - The repo has no QML test harness.
   `Overlay.qml` cannot run outside the shell's plugin loader.
   `cli/tests/overlay_*.rs` keep it in step with the JS modules by reading its text.
-- A leaf card in `ui/` runs in a scratch Quickshell config with `Commons` and `Ui` symlinked from `/usr/share/omarchy/shell`, under `QT_QPA_PLATFORM=offscreen`.
-  See `docs/dev.md`.
+- A leaf card in `ui/` runs in a scratch Quickshell config under `QT_QPA_PLATFORM=offscreen`.
+  The config root holds `Commons` and `Ui` symlinks from `/usr/share/omarchy/shell`, plus a `ui` symlink into the repo.
 - The plugin CI job clones `basecamp/omarchy` at `OMARCHY_REF` for the `qs.*` modules and `omarchy-plugin-validate`.
   Raise the tag when the plugin needs a newer shell.
 - The `qmllint` on `PATH` is the Qt 5 verifier.
@@ -36,8 +36,12 @@ The Local LLM and Cloud LLM engines were removed (HUF-240).
 
 ## CLI contracts
 
-- `check`, `chunk`, `setup`, `engine`, and `doctor` print exactly one JSON envelope on stdout and log to stderr only.
-  Exit 0 carries a result, exit 1 an error envelope.
+- `check`, `chunk`, `setup`, and `engine` print exactly one JSON envelope on stdout and log to stderr only.
+  Exit 0 carries a result.
+  Exit 1 carries an error envelope.
+- Default `doctor` prints text.
+  `--json` prints one JSON envelope.
+  Exit 1 means a missing piece, not an error envelope.
 - Spans are UTF-16 code units, because the shell indexes text in JavaScript.
   Harper counts `char`s, so `cli/src/engines/harper/lints.rs` converts through `text::utf16_offsets`.
 - Engines implement the `Engine` trait in `cli/src/engine.rs` and live under `cli/src/engines/`.
@@ -58,9 +62,12 @@ The Local LLM and Cloud LLM engines were removed (HUF-240).
 ## Plugin
 
 - `Overlay.qml` owns capture, the CLI run, the key map dispatch, Apply, the review state, the Draft, and settings storage.
-  Every file in `ui/` only draws.
+  Every QML file in `ui/` only draws.
+  `ui/*.js` owns capture, settings, keymap, errors, and other logic.
   Both surfaces (`quick`, `compose`) share one `phase`, one Check, and one key map.
-- Name every new `phase` in `Overlay.keyMode`, or its card silently inherits the review keys.
+- Name every new `phase` in `Overlay.keyMode`.
+  An unnamed phase uses `MODE_IDLE`.
+  `keymap.js` then maps Esc to close and ignores Accept, Skip, and Apply.
 - Omarchy answers `configProvider: lua`.
   Hyprland bindings go in `bindings.lua` and `hyprctl dispatch` takes Lua, never the `.conf` syntax.
   `hyprctl repl` shows any dispatcher's Lua name.
