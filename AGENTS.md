@@ -6,7 +6,7 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   Section 5.1 fixes the `grammachy check` JSON envelope.
   Section 5.2 fixes the `grammachy chunk` JSON envelope.
   Section 10 is the packaging, section 11 the repository layout, section 13 the test plan.
-  `CONTEXT.md` holds the domain glossary; `docs/adr/` records the settled decisions.
+  `CONTEXT.md` holds the domain glossary.
   Grammachy shipped a Local LLM engine (`openai`, backed by llama-server) and a Cloud LLM engine (`openrouter`), plus the eval and benchmark programme that picked and ranked models for them, and removed all of it (HUF-240): a two-sentence check took 17 s on a CPU-only laptop with thinking on, and 1.6 s with thinking off at a higher false-positive rate. `git log` before that removal has the code if it is ever needed again.
 - The Rust CLI lives in `cli/` and is its own cargo package.
   Run `cargo test`, `cargo clippy --all-targets -- -D warnings`, and `cargo fmt --check` from `cli/`.
