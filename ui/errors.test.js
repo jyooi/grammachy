@@ -111,7 +111,7 @@ test("every code of the contract is known", () => {
 test("empty_selection asks for a selection and offers Close and Open Compose", () => {
   const model = languageToolCard(EMPTY_SELECTION)
   assert.equal(model.title, "Nothing selected")
-  assert.equal(model.body, "Highlight some text, then press SUPER + G.")
+  assert.equal(model.body, "Highlight some text, then press SUPER + SHIFT + Q.")
   assert.deepEqual(model.buttons, [CLOSE, COMPOSE])
   assert.equal(model.needsDiagnosis, false)
 })

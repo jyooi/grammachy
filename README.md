@@ -2,10 +2,10 @@
 
 Grammachy is an Omarchy plugin that checks the grammar and spelling of text on demand.
 
-Highlight text in any application and press SUPER + G.
+Highlight text in any application and press SUPER + SHIFT + Q.
 A popup marks every Issue on the Selection.
 Accept or Skip each Fix, then Apply the Corrected text through the clipboard or, if you opt in, straight back into the Selection.
-For longer text, press SUPER + SHIFT + G to open the Compose window, which checks a Draft in Chunks.
+For longer text, press SUPER + ALT + Q to open the Compose window, which checks a Draft in Chunks.
 Change either key in Settings.
 
 Grammachy is offline.
@@ -52,11 +52,12 @@ If you already installed the Arch `languagetool` package, Grammachy uses that an
 2. Click the Grammachy bar widget.
    The setup card names the pinned binary and its sha256.
    Click Install, and watch `bin/bootstrap.sh` fetch and verify it.
-3. Highlight text and press SUPER + G.
+3. Highlight text and press SUPER + SHIFT + Q.
    The first Check runs on Harper, compiled into the binary, so nothing downloads and no `pacman` command runs.
 4. Run `bin/grammachy setup` from the plugin folder.
    This writes the two hotkeys and the menu entry, then reloads Hyprland.
    `bin/grammachy setup --remove` takes them out again.
+   An install that already ran `setup` keeps its old keys until it runs `setup` again.
 5. Optional: add LanguageTool.
    Open Settings, Engines and press Install beside LanguageTool.
    It needs a Java runtime: `sudo pacman -S jre-openjdk`.
@@ -74,10 +75,10 @@ This is the default block.
 Paste it yourself if you do not run the command:
 
 ```lua
-hl.unbind("SUPER + G")
-o.bind("SUPER + G", "Grammachy", [[omarchy-shell shell summon io.github.jyooi.grammachy '{"mode":"quick"}']])
-hl.unbind("SUPER + SHIFT + G")
-o.bind("SUPER + SHIFT + G", "Grammachy compose", [[omarchy-shell shell summon io.github.jyooi.grammachy '{"mode":"compose"}']])
+hl.unbind("SUPER + SHIFT + Q")
+o.bind("SUPER + SHIFT + Q", "Grammachy", [[omarchy-shell shell summon io.github.jyooi.grammachy '{"mode":"quick"}']])
+hl.unbind("SUPER + ALT + Q")
+o.bind("SUPER + ALT + Q", "Grammachy compose", [[omarchy-shell shell summon io.github.jyooi.grammachy '{"mode":"compose"}']])
 ```
 
 ### Developer path

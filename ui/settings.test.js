@@ -155,10 +155,10 @@ test("an enum key rejects a value outside its list, blanks included", () => {
 // so an unknown or blank stored value reads as the spec default, the same
 // rule every other key follows.
 test("the two hotkeys default to the spec section 2 bindings", () => {
-  assert.equal(valueOf({ id: PLUGIN_ID }, "quickHotkey"), "SUPER + G")
-  assert.equal(valueOf({ id: PLUGIN_ID }, "composeHotkey"), "SUPER + SHIFT + G")
-  assert.equal(defaultOf("quickHotkey"), "SUPER + G")
-  assert.equal(defaultOf("composeHotkey"), "SUPER + SHIFT + G")
+  assert.equal(valueOf({ id: PLUGIN_ID }, "quickHotkey"), "SUPER + SHIFT + Q")
+  assert.equal(valueOf({ id: PLUGIN_ID }, "composeHotkey"), "SUPER + ALT + Q")
+  assert.equal(defaultOf("quickHotkey"), "SUPER + SHIFT + Q")
+  assert.equal(defaultOf("composeHotkey"), "SUPER + ALT + Q")
 })
 
 test("a stored hotkey reads back as it stands", () => {
@@ -170,13 +170,13 @@ test("a stored hotkey reads back as it stands", () => {
 test("a blank or missing hotkey reads as the default rather than the empty string", () => {
   for (const blank of ["", " ", "   ", "\t"]) {
     assert.equal(isKnown("quickHotkey", blank), false, blank)
-    assert.equal(valueOf({ quickHotkey: blank }, "quickHotkey"), "SUPER + G")
-    assert.equal(valueOf({ composeHotkey: blank }, "composeHotkey"), "SUPER + SHIFT + G")
+    assert.equal(valueOf({ quickHotkey: blank }, "quickHotkey"), "SUPER + SHIFT + Q")
+    assert.equal(valueOf({ composeHotkey: blank }, "composeHotkey"), "SUPER + ALT + Q")
   }
 })
 
 test("a write to a hotkey keeps a non-blank value and defaults a blank one", () => {
   assert.equal(normalised("quickHotkey", "SUPER + H"), "SUPER + H")
-  assert.equal(normalised("quickHotkey", "  "), "SUPER + G")
-  assert.equal(normalised("composeHotkey", ""), "SUPER + SHIFT + G")
+  assert.equal(normalised("quickHotkey", "  "), "SUPER + SHIFT + Q")
+  assert.equal(normalised("composeHotkey", ""), "SUPER + ALT + Q")
 })

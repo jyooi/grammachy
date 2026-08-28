@@ -4,8 +4,10 @@
 //! install answers `configProvider: lua`, so `hyprland.lua` is the entry point
 //! and the `.conf` files beside it are never read. The block therefore holds
 //! Lua, and it uses the two helpers that file is written around: `hl.unbind`
-//! first, because SUPER + SHIFT + G carries an Omarchy default, then `o.bind`,
-//! which is what puts the description into `omarchy menu keybindings`.
+//! first, then `o.bind`, which is what puts the description into
+//! `omarchy menu keybindings`. Both hotkeys are remappable settings, so the
+//! unbind stays even though the shipped defaults carry no Omarchy default:
+//! a user-chosen key can still collide with one.
 //!
 //! The command is a Lua long bracket string, `[[...]]`, because the payload
 //! already carries both single and double quotes and a long bracket needs no
@@ -22,10 +24,10 @@ use crate::settings::{StoredSettings, PLUGIN_ID};
 use crate::setup::block::{self, Anchor, Block};
 
 /// The hotkey spec section 2 assigns to the quick popup.
-pub const DEFAULT_QUICK: &str = "SUPER + G";
+pub const DEFAULT_QUICK: &str = "SUPER + SHIFT + Q";
 
 /// The hotkey spec section 2 assigns to Compose.
-pub const DEFAULT_COMPOSE: &str = "SUPER + SHIFT + G";
+pub const DEFAULT_COMPOSE: &str = "SUPER + ALT + Q";
 
 /// The two hotkeys of spec section 2, as one run writes them: the stored
 /// keys of spec section 7, or the defaults for an empty or missing value.
@@ -198,11 +200,11 @@ mod tests {
 
         assert_eq!(
             body,
-            "hl.unbind(\"SUPER + G\")\n\
-             o.bind(\"SUPER + G\", \"Grammachy\", \
+            "hl.unbind(\"SUPER + SHIFT + Q\")\n\
+             o.bind(\"SUPER + SHIFT + Q\", \"Grammachy\", \
              [[omarchy-shell shell summon io.github.jyooi.grammachy '{\"mode\":\"quick\"}']])\n\
-             hl.unbind(\"SUPER + SHIFT + G\")\n\
-             o.bind(\"SUPER + SHIFT + G\", \"Grammachy compose\", \
+             hl.unbind(\"SUPER + ALT + Q\")\n\
+             o.bind(\"SUPER + ALT + Q\", \"Grammachy compose\", \
              [[omarchy-shell shell summon io.github.jyooi.grammachy '{\"mode\":\"compose\"}']])\n"
         );
     }

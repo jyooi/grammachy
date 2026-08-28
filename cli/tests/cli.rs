@@ -419,7 +419,7 @@ fn setup_writes_custom_hotkeys_from_the_plugin_entry() {
     assert_eq!(installed.status, 0, "{}", installed.stdout);
     assert!(text.contains("hl.unbind(\"SUPER + H\")"), "{text}");
     assert!(text.contains("hl.unbind(\"SUPER + SHIFT + H\")"), "{text}");
-    assert!(!text.contains("SUPER + G\""), "{text}");
+    assert!(!text.contains("SUPER + SHIFT + Q\""), "{text}");
 }
 
 /// A quote in a stored hotkey must not break the Lua string in `bindings.lua`.
@@ -428,12 +428,12 @@ fn setup_escapes_a_quote_in_a_stored_hotkey() {
     let home = setup_home("escaped-hotkeys");
     let settings = settings_file(
         "escaped-hotkeys.json",
-        r#""quickHotkey": "SUPER + \"G", "composeHotkey": "SUPER + SHIFT + G""#,
+        r#""quickHotkey": "SUPER + \"H", "composeHotkey": "SUPER + SHIFT + H""#,
     );
 
     let installed = run_setup_with_settings(&["setup"], &home, &settings);
     let text = std::fs::read_to_string(home.join("bindings.lua")).unwrap();
 
     assert_eq!(installed.status, 0, "{}", installed.stdout);
-    assert!(text.contains("hl.unbind(\"SUPER + \\\"G\")"), "{text}");
+    assert!(text.contains("hl.unbind(\"SUPER + \\\"H\")"), "{text}");
 }

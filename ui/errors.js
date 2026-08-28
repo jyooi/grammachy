@@ -151,7 +151,7 @@ function card(code, options) {
   if (settled === EMPTY_SELECTION) {
     model.title = "Nothing selected"
     model.meta = "nothing to check"
-    model.body = "Highlight some text, then press SUPER + G."
+    model.body = "Highlight some text, then press SUPER + SHIFT + Q."
     model.buttons = [CLOSE, COMPOSE]
     model.primary = COMPOSE
     return model

@@ -19,8 +19,8 @@ var DESCRIPTORS = {
   nativeLanguage: { type: "enum", values: ["none", "zh", "ms", "es", "fr", "de", "pt", "ja"], fallback: "none" },
   engine: { type: "enum", values: ["languagetool", "harper"], fallback: "harper" },
   autoReplace: { type: "boolean", fallback: false },
-  quickHotkey: { type: "text", fallback: "SUPER + G" },
-  composeHotkey: { type: "text", fallback: "SUPER + SHIFT + G" }
+  quickHotkey: { type: "text", fallback: "SUPER + SHIFT + Q" },
+  composeHotkey: { type: "text", fallback: "SUPER + ALT + Q" }
 }
 
 // The dropdown rows, in the order spec section 7 fixes. The labels are the

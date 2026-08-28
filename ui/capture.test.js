@@ -129,7 +129,7 @@ function closePopup(box, run) {
   return release(box, run)
 }
 
-// `Overlay.showCompose`: SUPER + SHIFT + G opens Compose on the kept Draft and
+// `Overlay.showCompose`: SUPER + ALT + Q opens Compose on the kept Draft and
 // captures nothing at all. `Overlay.resetRun` drops the source window of the
 // run before it and leaves that run's text in place, which is why the text
 // alone cannot say whether this run captured.
@@ -182,7 +182,7 @@ function applyCorrected(box, run, autoReplace) {
   return replace(box, run)
 }
 
-// One SUPER + G, driven the way `Overlay.startQuick` drives it: the source
+// One SUPER + SHIFT + Q, driven the way `Overlay.startQuick` drives it: the source
 // window, then the primary selection of step 1, then the Ctrl + C fallback of
 // step 2, then the freshness rule, then one Check.
 function summon(binary, box) {
@@ -428,7 +428,7 @@ test("Apply with auto-replace off copies on a run that captured", () => {
   assert.equal(box.clipboard, CORRECTED)
 })
 
-// Spec sections 2 and 3: SUPER + SHIFT + G opens Compose and captures nothing.
+// Spec sections 2 and 3: SUPER + ALT + Q opens Compose and captures nothing.
 // A terminal drops its own highlight when it loses primary ownership, so a
 // surface that took no Selection must take none away either.
 test("a Compose that closes releases nothing and records nothing", () => {
@@ -642,6 +642,6 @@ test("a clipboard that did not move copied nothing", () => {
 
 test("the empty state prints one line and names the kept text", () => {
   assert.equal(Capture.NOTHING_NEW,
-    "No new selection. Highlight text and press SUPER + G, or paste here.")
+    "No new selection. Highlight text and press SUPER + SHIFT + Q, or paste here.")
   assert.equal(Capture.CHECK_LAST_AGAIN, "Check last text again")
 })

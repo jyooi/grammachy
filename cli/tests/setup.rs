@@ -141,16 +141,16 @@ fn the_written_block_carries_the_two_bindings_of_spec_section_2() {
     let text = home.bindings_text();
     assert!(
         text.contains(
-            "hl.unbind(\"SUPER + G\")\n\
-             o.bind(\"SUPER + G\", \"Grammachy\", \
+            "hl.unbind(\"SUPER + SHIFT + Q\")\n\
+             o.bind(\"SUPER + SHIFT + Q\", \"Grammachy\", \
              [[omarchy-shell shell summon io.github.jyooi.grammachy '{\"mode\":\"quick\"}']])\n"
         ),
         "{text}"
     );
     assert!(
         text.contains(
-            "hl.unbind(\"SUPER + SHIFT + G\")\n\
-             o.bind(\"SUPER + SHIFT + G\", \"Grammachy compose\", \
+            "hl.unbind(\"SUPER + ALT + Q\")\n\
+             o.bind(\"SUPER + ALT + Q\", \"Grammachy compose\", \
              [[omarchy-shell shell summon io.github.jyooi.grammachy '{\"mode\":\"compose\"}']])\n"
         ),
         "{text}"
@@ -170,7 +170,29 @@ fn a_custom_hotkey_lands_in_the_written_block() {
     let text = home.bindings_text();
     assert!(text.contains("hl.unbind(\"SUPER + H\")"), "{text}");
     assert!(text.contains("hl.unbind(\"SUPER + SHIFT + H\")"), "{text}");
-    assert!(!text.contains("SUPER + G\")"), "{text}");
+    assert!(!text.contains("SUPER + SHIFT + Q\")"), "{text}");
+}
+
+#[test]
+fn a_block_written_with_the_old_default_keys_is_replaced_by_the_new_ones() {
+    let home = Home::new("old-default-keys");
+    let old_hotkeys = Hotkeys {
+        quick: "SUPER + G".to_string(),
+        compose: "SUPER + SHIFT + G".to_string(),
+    };
+    home.setup_with_hotkeys(old_hotkeys).install();
+    assert!(
+        home.bindings_text().contains("SUPER + G"),
+        "{}",
+        home.bindings_text()
+    );
+
+    home.setup().install();
+
+    let text = home.bindings_text();
+    assert!(!text.contains("SUPER + G"), "{text}");
+    assert!(text.contains("hl.unbind(\"SUPER + SHIFT + Q\")"), "{text}");
+    assert!(text.contains("hl.unbind(\"SUPER + ALT + Q\")"), "{text}");
 }
 
 #[test]
@@ -195,8 +217,8 @@ fn a_missing_stored_hotkey_resolves_to_the_default() {
     let resolved = Hotkeys::resolve(&StoredSettings::default());
 
     assert_eq!(resolved, Hotkeys::default());
-    assert_eq!(resolved.quick, "SUPER + G");
-    assert_eq!(resolved.compose, "SUPER + SHIFT + G");
+    assert_eq!(resolved.quick, "SUPER + SHIFT + Q");
+    assert_eq!(resolved.compose, "SUPER + ALT + Q");
 }
 
 #[test]
