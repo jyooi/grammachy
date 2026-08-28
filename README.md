@@ -13,17 +13,13 @@ No engine sends the text of a Check off the machine.
 Grammachy never checks while you type.
 Every Check is an explicit Trigger.
 
-![The quick popup card over a checked Selection, with two Issues accepted or skipped and the Inspector open on the third Fix.](docs/images/quick-card.png)
+![The quick popup card over a checked Selection, with an accepted Fix, a skipped Fix, and the Inspector open on an open Fix.](docs/images/quick-card.png)
 
 The quick popup after a Check, with the Inspector open on the focused Fix.
 
-![The Compose card reviewing a Draft, with one Issue accepted and the Inspector open on the second Fix.](docs/images/compose-card.png)
+![The Compose card reviewing a multi-paragraph Draft, with two Issues accepted and the Inspector open on a third Fix.](docs/images/compose-card.png)
 
 The Compose card reviewing a longer Draft in the same review view.
-
-![The Settings view of the quick popup, with the engine dropdown, the two hotkeys, and the Engines list.](docs/images/settings-card.png)
-
-The Settings view, reached from the gear on either card.
 
 ## Engines
 
