@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
+use grammachy::setup::bindings::Hotkeys;
 use grammachy::setup::{Setup, SetupEnvelope, SetupReport, State, Step};
 
 /// The files a fresh Omarchy install carries, as this repository keeps them.
@@ -39,12 +40,18 @@ impl Home {
         }
     }
 
-    /// A setup whose reload only counts.
+    /// A setup whose reload only counts, on the default hotkeys.
     fn setup(&self) -> Setup {
+        self.setup_with_hotkeys(Hotkeys::default())
+    }
+
+    /// A setup whose reload only counts, on the hotkeys given.
+    fn setup_with_hotkeys(&self, hotkeys: Hotkeys) -> Setup {
         let reloads = Arc::clone(&self.reloads);
         Setup {
             bindings_path: self.bindings.clone(),
             menu_path: self.menu.clone(),
+            hotkeys,
             reload: Box::new(move || {
                 reloads.fetch_add(1, Ordering::SeqCst);
                 Ok(())
@@ -148,6 +155,48 @@ fn the_written_block_carries_the_two_bindings_of_spec_section_2() {
         ),
         "{text}"
     );
+}
+
+#[test]
+fn a_custom_hotkey_lands_in_the_written_block() {
+    let home = Home::new("custom-keys");
+    let hotkeys = Hotkeys {
+        quick: "SUPER + H".to_string(),
+        compose: "SUPER + SHIFT + H".to_string(),
+    };
+
+    home.setup_with_hotkeys(hotkeys).install();
+
+    let text = home.bindings_text();
+    assert!(text.contains("hl.unbind(\"SUPER + H\")"), "{text}");
+    assert!(text.contains("hl.unbind(\"SUPER + SHIFT + H\")"), "{text}");
+    assert!(!text.contains("SUPER + G\")"), "{text}");
+}
+
+#[test]
+fn remove_is_byte_exact_for_a_block_written_with_custom_keys() {
+    let home = Home::new("custom-keys-remove");
+    let hotkeys = Hotkeys {
+        quick: "SUPER + H".to_string(),
+        compose: "SUPER + SHIFT + H".to_string(),
+    };
+    let setup = home.setup_with_hotkeys(hotkeys);
+
+    setup.install();
+    setup.remove();
+
+    assert_eq!(home.bindings_text(), BINDINGS_FIXTURE);
+}
+
+#[test]
+fn a_missing_stored_hotkey_resolves_to_the_default() {
+    use grammachy::settings::StoredSettings;
+
+    let resolved = Hotkeys::resolve(&StoredSettings::default());
+
+    assert_eq!(resolved, Hotkeys::default());
+    assert_eq!(resolved.quick, "SUPER + G");
+    assert_eq!(resolved.compose, "SUPER + SHIFT + G");
 }
 
 #[test]

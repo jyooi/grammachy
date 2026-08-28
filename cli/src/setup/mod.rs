@@ -17,6 +17,7 @@ use std::path::PathBuf;
 use serde::Serialize;
 
 use crate::envelope::{CheckError, ErrorBody, ErrorCode, CONTRACT_VERSION};
+use crate::settings::StoredSettings;
 
 /// What one step of a run did.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -97,10 +98,12 @@ impl SetupEnvelope {
     }
 }
 
-/// What one run works on: two paths and the one side effect.
+/// What one run works on: two paths, the keys of spec section 7, and the one
+/// side effect.
 pub struct Setup {
     pub bindings_path: PathBuf,
     pub menu_path: PathBuf,
+    pub hotkeys: bindings::Hotkeys,
     pub reload: bindings::Reloader,
 }
 
@@ -110,6 +113,7 @@ impl Setup {
         Ok(Setup {
             bindings_path: bindings::path().ok_or_else(no_home)?,
             menu_path: menu::path().ok_or_else(no_home)?,
+            hotkeys: bindings::Hotkeys::resolve(&StoredSettings::load()),
             reload: bindings::reloader_from_env(),
         })
     }
@@ -118,7 +122,7 @@ impl Setup {
     pub fn install(&self) -> SetupEnvelope {
         let mut steps = Vec::with_capacity(3);
 
-        match bindings::install(&self.bindings_path) {
+        match bindings::install(&self.bindings_path, &self.hotkeys) {
             Ok(changed) => steps.push(Step::new(
                 "hotkeys",
                 state_of(changed),

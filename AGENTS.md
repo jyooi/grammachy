@@ -72,6 +72,8 @@ The Local LLM and Cloud LLM engines were removed (HUF-240).
   Hyprland bindings go in `bindings.lua` and `hyprctl dispatch` takes Lua, never the `.conf` syntax.
   `hyprctl repl` shows any dispatcher's Lua name.
   See `ui/anchor.js` and `cli/src/setup/bindings.rs`.
+  The two trigger keys are remappable settings, `quickHotkey` and `composeHotkey`.
+  `bindings::Hotkeys::resolve` reads them through `StoredSettings` and uses the spec section 2 defaults for an empty or missing value.
 - Settings storage is the plugin entry in `shell.json`, read through `Overlay.setting` and written through `Overlay.persistSetting`.
   Every write carries the whole entry, because `shell.updateEntryInline` replaces rather than merges.
   The manifest `barWidget.defaults` and `schema` are documentation only.

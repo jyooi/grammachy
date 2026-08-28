@@ -59,6 +59,7 @@ Then write the hotkeys and the menu entry (spec section 10):
 The command edits `~/.config/hypr/bindings.lua` and the Omarchy menu extension.
 It then reloads Hyprland.
 Press SUPER + G on a selection to confirm the hotkeys.
+Both hotkeys are defaults, not fixed keys: spec section 7 lists `quickHotkey` and `composeHotkey`, remappable from Settings.
 
 ## 3. Enable it and put the button on the bar
 

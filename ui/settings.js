@@ -18,7 +18,9 @@ var PLUGIN_ID = "io.github.jyooi.grammachy"
 var DESCRIPTORS = {
   nativeLanguage: { type: "enum", values: ["none", "zh", "ms", "es", "fr", "de", "pt", "ja"], fallback: "none" },
   engine: { type: "enum", values: ["languagetool", "harper"], fallback: "harper" },
-  autoReplace: { type: "boolean", fallback: false }
+  autoReplace: { type: "boolean", fallback: false },
+  quickHotkey: { type: "text", fallback: "SUPER + G" },
+  composeHotkey: { type: "text", fallback: "SUPER + SHIFT + G" }
 }
 
 // The dropdown rows, in the order spec section 7 fixes. The labels are the

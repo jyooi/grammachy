@@ -280,6 +280,22 @@ Item {
     // A Settings write is the stored value. Drop a hero override so the two
     // controls do not disagree after the file catches up.
     if (name === "autoReplace") root.autoReplaceOverride = null
+    // Spec section 2: Hyprland only reads `bindings.lua` when told to, so a
+    // hotkey change re-runs `grammachy setup`, which writes the block from
+    // the Settings just stored and reloads the compositor.
+    if (name === "quickHotkey" || name === "composeHotkey") root.applyHotkeys()
+  }
+
+  // One run at a time. Setup reads shell.json at start.
+  // A later persist sets pending and runs setup again at the end.
+  function applyHotkeys() {
+    if (hotkeyApplyProcess.running) {
+      hotkeyApplyProcess.pending = true
+      return
+    }
+    hotkeyApplyProcess.pending = false
+    hotkeyApplyProcess.command = [root.binaryPath, "setup"]
+    hotkeyApplyProcess.running = true
   }
 
   // The hero toggle of spec section 6 shows `autoReplace` and flips it for the
@@ -1894,6 +1910,24 @@ Item {
     }
   }
 
+  // A hotkey change of spec section 7 re-runs `grammachy setup` so the new
+  // key reaches `bindings.lua` and the compositor. Fire and forget: the
+  // command prints its own envelope, and a failure here is no different from
+  // running `grammachy setup` failing from a terminal, so it only logs.
+  Process {
+    id: hotkeyApplyProcess
+    property bool pending: false
+    onRunningChanged: {
+      if (hotkeyApplyProcess.running) return
+      if (!hotkeyApplyProcess.pending) return
+      root.applyHotkeys()
+    }
+    stderr: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: if (text.length > 0) console.warn("grammachy setup:", text)
+    }
+  }
+
   Process {
     id: copyProcess
     property string text: ""
@@ -2098,6 +2132,8 @@ Item {
         settingsOpen: root.settingsOpen
         nativeLanguage: root.setting("nativeLanguage")
         engineSetting: root.setting("engine")
+        quickHotkey: root.setting("quickHotkey")
+        composeHotkey: root.setting("composeHotkey")
 
         engines: root.engines
         engineBusy: root.engineBusy
@@ -2175,6 +2211,8 @@ Item {
         settingsOpen: root.settingsOpen
         nativeLanguage: root.setting("nativeLanguage")
         engineSetting: root.setting("engine")
+        quickHotkey: root.setting("quickHotkey")
+        composeHotkey: root.setting("composeHotkey")
         autoReplace: root.autoReplace
 
         engines: root.engines

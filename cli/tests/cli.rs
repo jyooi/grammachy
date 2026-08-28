@@ -345,10 +345,15 @@ fn setup_home(name: &str) -> PathBuf {
 }
 
 fn run_setup(args: &[&str], home: &Path) -> Run {
+    run_setup_with_settings(args, home, &silent_settings())
+}
+
+fn run_setup_with_settings(args: &[&str], home: &Path, settings: &Path) -> Run {
     let output = no_engine(&mut Command::new(env!("CARGO_BIN_EXE_grammachy")))
         .env("GRAMMACHY_BINDINGS_LUA", home.join("bindings.lua"))
         .env("GRAMMACHY_MENU_JSONC", home.join("omarchy-menu.jsonc"))
         .env("GRAMMACHY_HYPRCTL_RELOAD", "never")
+        .env("GRAMMACHY_SHELL_JSON", settings)
         .args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -396,4 +401,39 @@ fn setup_writes_the_block_and_the_entry_and_remove_takes_them_out() {
         ),
         before
     );
+}
+
+/// Spec section 7: `grammachy setup` reads the remapped keys from the plugin
+/// entry and writes those strings into `bindings.lua`.
+#[test]
+fn setup_writes_custom_hotkeys_from_the_plugin_entry() {
+    let home = setup_home("custom-hotkeys");
+    let settings = settings_file(
+        "custom-hotkeys.json",
+        r#""quickHotkey": "SUPER + H", "composeHotkey": "SUPER + SHIFT + H""#,
+    );
+
+    let installed = run_setup_with_settings(&["setup"], &home, &settings);
+    let text = std::fs::read_to_string(home.join("bindings.lua")).unwrap();
+
+    assert_eq!(installed.status, 0, "{}", installed.stdout);
+    assert!(text.contains("hl.unbind(\"SUPER + H\")"), "{text}");
+    assert!(text.contains("hl.unbind(\"SUPER + SHIFT + H\")"), "{text}");
+    assert!(!text.contains("SUPER + G\""), "{text}");
+}
+
+/// A quote in a stored hotkey must not break the Lua string in `bindings.lua`.
+#[test]
+fn setup_escapes_a_quote_in_a_stored_hotkey() {
+    let home = setup_home("escaped-hotkeys");
+    let settings = settings_file(
+        "escaped-hotkeys.json",
+        r#""quickHotkey": "SUPER + \"G", "composeHotkey": "SUPER + SHIFT + G""#,
+    );
+
+    let installed = run_setup_with_settings(&["setup"], &home, &settings);
+    let text = std::fs::read_to_string(home.join("bindings.lua")).unwrap();
+
+    assert_eq!(installed.status, 0, "{}", installed.stdout);
+    assert!(text.contains("hl.unbind(\"SUPER + \\\"G\")"), "{text}");
 }

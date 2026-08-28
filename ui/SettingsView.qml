@@ -18,6 +18,8 @@ ColumnLayout {
   property string nativeLanguage: "none"
   property string engine: "harper"
   property bool autoReplace: false
+  property string quickHotkey: "SUPER + G"
+  property string composeHotkey: "SUPER + SHIFT + G"
 
   // The Engines list of spec section 5.4. Everything it needs arrives from
   // Overlay.qml, which is the only thing that runs `grammachy engine`.
@@ -47,6 +49,11 @@ ColumnLayout {
   // has written its own `value` once no longer follows the binding, so the
   // value is re-asserted when the rows move as well as when the setting does.
   onEnginesChanged: engineDropdown.value = root.engine
+  // A TextField that has typed its own `text` once no longer follows the
+  // binding either, so a live external write, such as a hand edit of
+  // shell.json, is re-asserted the same way.
+  onQuickHotkeyChanged: quickHotkeyField.text = root.quickHotkey
+  onComposeHotkeyChanged: composeHotkeyField.text = root.composeHotkey
 
   spacing: Style.spacing.lg
 
@@ -87,6 +94,67 @@ ColumnLayout {
       foreground: Color.popups.text
       background: Color.popups.background
       onChanged: function(value) { root.settingChanged("engine", Settings.normalised("engine", value)) }
+    }
+  }
+
+  // Spec section 2: the two trigger hotkeys, remappable text fields rather
+  // than a dropdown, because a Hyprland key combination is free text. A
+  // change reaches `~/.config/hypr/bindings.lua` and the compositor through
+  // `Overlay.applyHotkeys`, not through this view.
+  RowLayout {
+    Layout.fillWidth: true
+    spacing: Style.spacing.xxl
+
+    ColumnLayout {
+      Layout.fillWidth: true
+      spacing: Style.spacing.labelGap
+
+      Text {
+        text: "Quick popup hotkey"
+        color: Qt.darker(Color.popups.text, 1.4)
+        font.family: Style.font.family
+        font.pixelSize: Style.font.caption
+        font.bold: true
+      }
+
+      TextField {
+        id: quickHotkeyField
+
+        Layout.fillWidth: true
+        text: root.quickHotkey
+        foreground: Color.popups.text
+        onEditingFinished: {
+          var value = Settings.normalised("quickHotkey", quickHotkeyField.text)
+          if (value !== root.quickHotkey) root.settingChanged("quickHotkey", value)
+          quickHotkeyField.text = value
+        }
+      }
+    }
+
+    ColumnLayout {
+      Layout.fillWidth: true
+      spacing: Style.spacing.labelGap
+
+      Text {
+        text: "Compose hotkey"
+        color: Qt.darker(Color.popups.text, 1.4)
+        font.family: Style.font.family
+        font.pixelSize: Style.font.caption
+        font.bold: true
+      }
+
+      TextField {
+        id: composeHotkeyField
+
+        Layout.fillWidth: true
+        text: root.composeHotkey
+        foreground: Color.popups.text
+        onEditingFinished: {
+          var value = Settings.normalised("composeHotkey", composeHotkeyField.text)
+          if (value !== root.composeHotkey) root.settingChanged("composeHotkey", value)
+          composeHotkeyField.text = value
+        }
+      }
     }
   }
 
