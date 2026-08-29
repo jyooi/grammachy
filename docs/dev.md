@@ -678,7 +678,7 @@ With nothing installed at all the state word is `absent`, the line reads `option
 
 ### 15. The Java runtime comes through omarchy pkg add
 
-1. Hide the runtime: `sudo pacman -Rs jre-openjdk`, or start the shell with `JAVA_HOME` unset on a machine with no default JVM.
+1. Hide the runtime: `omarchy pkg drop jre-openjdk`, or start the shell with `JAVA_HOME` unset on a machine with no default JVM.
 2. Open Settings.
 
 Expected: the LanguageTool row reads `Needs a Java runtime` beside its name with an `Install jre-openjdk` button, and the row's own download button is dim.
