@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.jyooi.grammachy",
   "name": "Grammachy",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "author": "jyooi",
   "license": "MIT",
   "description": "Grammar and spelling checks for any selected text",
