@@ -14,7 +14,7 @@ The Compose walkthrough later on this page is here for the same reason: spec sec
   The default engine is `harper`, which is compiled into the binary, so a bare machine checks on the first try.
 - For LanguageTool, smoke item 11 installs it from Settings with no password.
   It needs a Java runtime beside it.
-  The Engines row offers an Install for `jre-openjdk` that runs `omarchy pkg add` in a terminal.
+  The Engines row names `jre-openjdk` for Omarchy Install.
   Smoke item 15 covers that path.
   The same row offers an Install for `libarchive` when `bsdtar` is missing.
   The Arch `languagetool` package works too, and Grammachy never installs or removes it.
@@ -371,8 +371,9 @@ Two more cards belong to the same session:
   Switch `Engine` to `Harper` and click `Retry`: the Check now runs in process and succeeds.
 - **No companion binary.** Move `bin/grammachy` aside, reload the plugin, and click the bar widget.
   The setup card of spec section 10 opens, with an Install button that runs `bin/bootstrap.sh` and streams its output.
-  Hide `curl` first, with `PATH` trimmed or the binary moved aside, and the card lists it under `Missing system packages` with one `Install packages` button and the bootstrap Install disabled over `Install curl first.`.
-  `Install packages` opens a terminal running `omarchy pkg add curl`, and the card refreshes when that terminal closes.
+  Hide `curl` first, with `PATH` trimmed or the binary moved aside, and the card lists it under `Missing system packages`.
+  The bootstrap Install is disabled over `Install curl first.`.
+  Add `curl` through Omarchy Install, then open the card again.
   A Check that fails later still offers Setup on the `bad_arguments` card.
   See [Cutting a release](#18-cutting-a-release) for the state before cli.lock pins a hash.
   Put the binary back and reload.
@@ -679,24 +680,24 @@ bin/grammachy doctor --json | jq -r '.checks[] | select(.id == "languagetool") |
 Expected: the line names the launcher and says it came from the package, and the state word is `package`.
 With nothing installed at all the state word is `absent`, the line reads `optional` rather than `missing`, and its remedy is `grammachy engine install languagetool` with no `sudo` in it.
 
-### 15. The Java runtime comes through omarchy pkg add
+### 15. The Java runtime comes through Omarchy Install
 
 1. Hide the runtime: `omarchy pkg drop jre-openjdk`, or start the shell with `JAVA_HOME` unset on a machine with no default JVM.
 2. Open Settings.
 
-Expected: the LanguageTool row reads `Needs a Java runtime` beside its name with an `Install jre-openjdk` button, and the row's own download button is dim.
+Expected: the LanguageTool row reads `Needs a Java runtime` beside its name.
+It names `jre-openjdk` for Omarchy Install.
+The row's own download button is dim.
 
-3. Press `Install jre-openjdk`.
+3. Add `jre-openjdk` through Omarchy Install.
+   Open SUPER+SPACE, then Install, then Package.
+4. Open Settings again.
 
-Expected: a terminal opens running `omarchy pkg add jre-openjdk`, which asks for the password itself.
-The button reads `Installing...` until that terminal closes.
-
-4. Let it finish and close the terminal.
-
-Expected: the hint and the `Install jre-openjdk` button go, and the download button is live again.
+Expected: the hint goes, and the download button is live again.
 `bin/grammachy doctor --json | jq '.dependencies[] | select(.package == "jre-openjdk") | .present'` answers `true`.
 
-To try the launch without installing anything, set `GRAMMACHY_PKG_TERMINAL=never` in the shell's environment: the click logs the packages and opens no terminal.
+If nothing else on the machine needs the Java runtime, `omarchy pkg drop jre-openjdk` removes it.
+`libarchive` stays, because pacman itself depends on it.
 
 ## 16. Running the automated checks
 

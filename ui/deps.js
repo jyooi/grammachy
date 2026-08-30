@@ -2,27 +2,25 @@
 //
 // Loaded twice: by QML as `Deps`, and by `deps.test.js` under node. Nothing
 // here may touch a QML or a node API, because each side only has one of them.
-//
-// The plugin never runs sudo or pacman itself. Every package goes through
-// `omarchy pkg add <packages...>`, launched in a terminal the user can see,
-// from the setup card or the Engines page. `grammachy doctor --json` is the
-// one dependency table, but the setup card opens before bin/grammachy exists,
-// so the required rows must be known here too. `cli/tests/overlay_deps.rs`
-// keeps this table equal to `cli/src/doctor/deps.rs`.
-//
-// This file owns the whole route: `fromDoctor` reads the table out of a
-// doctor envelope, `fromProbe` reads it out of the shell probe that stands in
-// while the binary is absent, `missingRequired` and `absent` pick the rows a
-// card lists, `installCommand` is the exact command those rows name, and
-// `terminalArgv` is the one command line that opens the terminal.
 
-// The command that installs any package, before the package names.
-var INSTALL_COMMAND = "omarchy pkg add"
+// The plugin does not install packages itself. A missing package is named.
+// The card tells the user to add it through Omarchy Install.
+// Open SUPER+SPACE, then Install, then Package.
 
-// The env var that stops a test from opening a terminal, the pattern of
-// GRAMMACHY_HYPRCTL_RELOAD=never.
-var TERMINAL_SEAM = "GRAMMACHY_PKG_TERMINAL"
-var NEVER = "never"
+// `grammachy doctor --json` is the one dependency table.
+// The setup card opens before bin/grammachy exists.
+// So the rows that the bootstrap needs must be known here too.
+// `cli/tests/overlay_deps.rs` keeps this table equal to
+// `cli/src/doctor/deps.rs`.
+
+// This file owns the whole route from a doctor envelope or a probe to the
+// rows a card lists. `fromDoctor` reads the table out of a doctor envelope.
+// `fromProbe` reads it out of the shell probe that stands in while the
+// binary is absent. `missingRequired` and `absent` pick the rows a card
+// lists. `installHint` names those packages for Omarchy Install.
+
+// The shared tail of every install hint, kept equal to the Rust table.
+var INSTALL_HINT_TAIL = "through Omarchy Install. Open SUPER+SPACE, then Install, then Package."
 
 // Every package, in the order doctor prints them. `probe` is the binary whose
 // presence on PATH says the package is installed.
@@ -65,7 +63,7 @@ var JAVA_PACKAGE = "jre-openjdk"
 
 // The absent rows one part of Grammachy needs, by its `usedBy` word. The
 // Engines page asks this for the engine slug of a row, so a component that
-// needs a runtime and an unpacker names both and one Install adds both.
+// needs a runtime and an unpacker names both.
 function absentFor(dependencies, part) {
   return absent(dependencies).filter(function(dependency) {
     return Array.isArray(dependency.usedBy) && dependency.usedBy.indexOf(String(part)) !== -1
@@ -93,20 +91,21 @@ function row(spec, present) {
     purpose: spec.purpose,
     required: spec.required === true,
     present: present === true,
-    installCommand: installCommand([spec.package]),
+    installHint: installHint([spec.package]),
     usedBy: spec.usedBy.slice()
   }
 }
 
-// The exact command that installs one or more packages.
-function installCommand(packages) {
+// The text that names one or more packages and points at Omarchy Install.
+function installHint(packages) {
   var list = Array.isArray(packages) ? packages : []
-  return INSTALL_COMMAND + " " + list.join(" ")
+  if (list.length === 0) return ""
+  return "Add " + list.join(" and ") + " " + INSTALL_HINT_TAIL
 }
 
 // The table as one `grammachy doctor --json` run reports it, or null when the
 // text is not a doctor envelope. Rows are read by package, so the order and
-// the wording come from here rather than from the binary, and a package the
+// the wording come from here rather than from the binary. A package the
 // binary does not know reads as absent.
 function fromDoctor(stdout) {
   var envelope = null
@@ -148,14 +147,13 @@ function absent(dependencies) {
   })
 }
 
-// The required rows that are not on this machine, which is what blocks the
-// bootstrap.
+// The rows the bootstrap needs that are not on this machine.
 function missingRequired(dependencies) {
   return absent(dependencies).filter(function(dependency) { return dependency.required === true })
 }
 
 // Whether one package is on this machine. An unread table answers false, so
-// no button offers an install the shell has not checked for yet.
+// no hint names a package the shell did not check yet.
 function isPresent(dependencies, pkg) {
   var list = Array.isArray(dependencies) ? dependencies : []
   for (var i = 0; i < list.length; i++) {
@@ -169,44 +167,12 @@ function packagesOf(dependencies) {
   return list.map(function(dependency) { return String(dependency.package) })
 }
 
-// Only a package the table declares may reach the terminal, so a name from
-// anywhere else cannot become part of a command line.
-function known(packages) {
-  var list = Array.isArray(packages) ? packages : []
-  return list.filter(function(pkg) {
-    return DEPENDENCIES.some(function(spec) { return spec.package === pkg })
-  })
-}
-
-// The one command line that opens the terminal, or an empty list when the
-// seam says never or nothing is left to install.
-//
-// It is the line `omarchy-launch-floating-terminal-with-presentation` runs,
-// minus its `setsid`: `uwsm-app` waits for the terminal, so the Process that
-// runs this exits when the terminal closes, which is when the card asks
-// doctor again. `omarchy pkg add` asks for the password itself and installs
-// only what is missing.
-function terminalArgv(packages, seam) {
-  if (String(seam) === NEVER) return []
-  var list = known(packages)
-  if (list.length === 0) return []
-  var script = "omarchy-show-logo; " + installCommand(list) +
-    "; if (( $? != 130 )); then omarchy-show-done; fi"
-  return [
-    "uwsm-app", "--",
-    "xdg-terminal-exec", "--app-id=org.omarchy.terminal", "--title=Grammachy",
-    "-e", "bash", "-c", script
-  ]
-}
-
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
-    INSTALL_COMMAND: INSTALL_COMMAND,
-    TERMINAL_SEAM: TERMINAL_SEAM,
-    NEVER: NEVER,
+    INSTALL_HINT_TAIL: INSTALL_HINT_TAIL,
     DEPENDENCIES: DEPENDENCIES,
     JAVA_PACKAGE: JAVA_PACKAGE,
-    installCommand: installCommand,
+    installHint: installHint,
     fromDoctor: fromDoctor,
     probeArgv: probeArgv,
     fromProbe: fromProbe,
@@ -215,8 +181,6 @@ if (typeof module !== "undefined" && module.exports) {
     needsHint: needsHint,
     missingRequired: missingRequired,
     isPresent: isPresent,
-    packagesOf: packagesOf,
-    known: known,
-    terminalArgv: terminalArgv
+    packagesOf: packagesOf
   }
 }

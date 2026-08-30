@@ -1,10 +1,9 @@
 //! `grammachy doctor`, spec sections 4, 8, 10, and 12.
 //!
 //! `doctor` looks at the binary, LanguageTool, and its transient unit, and
-//! prints one line per piece. A missing piece carries the exact command that
-//! installs it. Nothing here installs anything: every system package goes
-//! through `omarchy pkg add`, which the plugin launches in a visible terminal
-//! and `doctor` only names (spec section 10). [`deps`] is that table.
+//! prints one line per piece. A missing engine piece names the command that
+//! adds it. A missing system package names the package for Omarchy Install.
+//! Nothing here installs anything (spec section 10). [`deps`] is that table.
 //!
 //! The same run also answers the one-line diagnosis the `engine_unavailable`
 //! card of spec section 8 shows under its body. `--json` prints the whole

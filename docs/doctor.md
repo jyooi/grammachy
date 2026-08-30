@@ -3,12 +3,12 @@
 The install check of spec sections 4, 8, 10, and 12.
 It checks the binary, LanguageTool, the Java runtime, and its transient unit.
 It prints one line per piece.
-A missing package carries the exact command that installs it.
+A missing package names Omarchy Install.
 Under the pieces it prints the dependency table: every system package the plugin leans on, with its state.
 
 Doctor never installs anything.
-The plugin runs no `sudo` and no `pacman` itself.
-Every system package goes through `omarchy pkg add`, which the setup card and the Engines page launch in a visible terminal.
+The plugin does not install packages itself.
+No sudo or pkexec is required.
 
 A piece the machine simply has not added reads `optional` rather than `missing`.
 LanguageTool is the one such piece today (HUF-237): it is an engine the user adds in Settings, Engines, so a fresh install that never asked for it is not a broken install.
@@ -37,15 +37,15 @@ Grammachy doctor
 
   ok       Grammachy CLI       grammachy 0.1.0 at /home/u/plugin/bin/grammachy
   optional LanguageTool        LanguageTool is optional and is not installed. Add it in Settings, Engines. Run: grammachy engine install languagetool
-  optional Java runtime        No Java runtime: JAVA_HOME is not set and no default JVM is installed. Run: omarchy pkg add jre-openjdk
+  optional Java runtime        No Java runtime: JAVA_HOME is not set and no default JVM is installed. Add jre-openjdk through Omarchy Install. Open SUPER+SPACE, then Install, then Package.
   ok       LanguageTool unit   grammachy-languagetool is not running. The next Check starts it.
 
 Dependencies
 
   ok       curl                bin/bootstrap.sh downloads the pinned companion binary with it.
-  missing  wl-clipboard        Capture, paste, and the restored Selection all go through wl-copy and wl-paste. Run: omarchy pkg add wl-clipboard
+  missing  wl-clipboard        Capture, paste, and the restored Selection all go through wl-copy and wl-paste. Add wl-clipboard through Omarchy Install. Open SUPER+SPACE, then Install, then Package.
   ok       libarchive          grammachy engine install unpacks the LanguageTool release with bsdtar.
-  optional jre-openjdk         LanguageTool runs on it, and Harper needs none. Run: omarchy pkg add jre-openjdk
+  optional jre-openjdk         LanguageTool runs on it, and Harper needs none. Add jre-openjdk through Omarchy Install. Open SUPER+SPACE, then Install, then Package.
 
 Engine harper is ready.
   Harper runs inside the companion binary and needs nothing installed.
@@ -90,7 +90,7 @@ Spec section 8 puts the `diagnosis` line under the body of the `engine_unavailab
       "purpose": "bin/bootstrap.sh downloads the pinned companion binary with it.",
       "required": true,
       "present": true,
-      "installCommand": "omarchy pkg add curl",
+      "installCommand": "Add curl through Omarchy Install. Open SUPER+SPACE, then Install, then Package.",
       "usedBy": ["bootstrap"]
     }
   ]
@@ -145,7 +145,8 @@ Dependency fields:
 - `purpose`: one sentence saying what the plugin does with it.
 - `required`: whether the plugin cannot work without it. `libarchive` and `jre-openjdk` are optional, because only LanguageTool needs them.
 - `present`: whether it is on this machine.
-- `installCommand`: exactly `omarchy pkg add <package>`.
+- `installCommand`: the install hint for that package, not a runnable command.
+  It names the package and Omarchy Install.
 - `usedBy`: which parts need it, from `bootstrap`, `capture`, and `languagetool`.
 
 ## The engine diagnosis

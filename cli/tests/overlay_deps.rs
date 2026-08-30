@@ -64,9 +64,9 @@ fn the_js_table_equals_the_rust_table() {
 
     assert!(
         source.contains(&format!(
-            "var INSTALL_COMMAND = \"{}\"",
-            deps::INSTALL_COMMAND
+            "var INSTALL_HINT_TAIL = \"{}\"",
+            deps::INSTALL_HINT_TAIL
         )),
-        "ui/deps.js names the same command"
+        "ui/deps.js names the same install hint"
     );
 }

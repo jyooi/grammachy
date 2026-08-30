@@ -350,10 +350,9 @@ function isBlocked(row, options) {
 //
 // `missing` is the list `Deps.absentFor(dependencies, slug)` answers: the
 // packages LanguageTool runs on and is unpacked with. A row with one reads
-// "Needs ..." beside its name and carries the one Install that opens
-// `omarchy pkg add` for all of them in a terminal, and its own Install stays
-// disabled until they are there, because an install with no bsdtar cannot
-// unpack and a server with no runtime would fail the first Check it got.
+// "Needs ..." beside its name and names those packages for Omarchy Install.
+// Its own Install stays disabled until they are there. An install with no
+// bsdtar cannot unpack. A server with no runtime fails the first Check.
 function runtimeMissing(row, missing) {
   if (!isPlainObject(row)) return false
   return Array.isArray(missing) && missing.length > 0

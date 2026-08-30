@@ -104,17 +104,14 @@ test("a missing required package is listed and blocks the bootstrap Install", ()
   assert.equal(model.showsDependencies, true)
   assert.deepEqual(model.missingDependencies.map((row) => row.package), ["curl"])
   assert.equal(model.missingDependencies[0].purpose, "Fetches the binary.")
-  assert.equal(model.depsInstallCommand, "omarchy pkg add curl")
-  assert.equal(model.depsInstallEnabled, true)
   assert.equal(model.showsInstall, true)
   assert.equal(model.installEnabled, false)
   assert.equal(model.installReason, "Install curl first.")
 })
 
-test("every missing required package goes into one omarchy pkg add", () => {
+test("every missing required package is listed by name", () => {
   const model = Setup.card({ lockText: LOCK, dependencies: deps({}) })
   assert.deepEqual(model.missingDependencies.map((row) => row.package), ["curl", "wl-clipboard"])
-  assert.equal(model.depsInstallCommand, "omarchy pkg add curl wl-clipboard")
   assert.equal(model.installReason, "Install curl and wl-clipboard first.")
 })
 
@@ -124,7 +121,6 @@ test("an optional package never blocks the bootstrap and is never listed here", 
   assert.deepEqual(model.missingDependencies, [])
   assert.equal(model.installEnabled, true)
   assert.equal(model.installReason, "")
-  assert.equal(model.depsInstallCommand, "")
 })
 
 test("an unread table blocks nothing, so a probe that has not answered hides no button", () => {
@@ -132,13 +128,6 @@ test("an unread table blocks nothing, so a probe that has not answered hides no 
   assert.equal(model.showsDependencies, false)
   assert.equal(model.installEnabled, true)
   assert.equal(Setup.card({ lockText: LOCK, dependencies: null }).installEnabled, true)
-})
-
-test("the dependency Install goes quiet while its terminal is open", () => {
-  const model = Setup.card({ lockText: LOCK, dependencies: deps({}), depsInstalling: true })
-  assert.equal(model.depsInstalling, true)
-  assert.equal(model.depsInstallEnabled, false)
-  assert.equal(model.showsDependencies, true)
 })
 
 test("a finished bootstrap lists no packages", () => {

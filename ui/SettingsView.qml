@@ -33,9 +33,8 @@ ColumnLayout {
   property double enginesFreeBytes: 0
   property var engineNote: null
   // The dependency table of spec section 10, so a row that needs a system
-  // package can say so and offer the one Install that adds it.
+  // package can name it.
   property var dependencies: []
-  property bool packageInstalling: false
 
   signal settingChanged(string name, var value)
   signal engineInstallRequested(string slug)
@@ -43,7 +42,6 @@ ColumnLayout {
   signal engineRemoveRequested(string slug)
   signal engineRemoveConfirmed(string slug)
   signal engineKeepRequested()
-  signal packageInstallRequested(var packages)
 
   // Dropdown writes its own `value` when the user picks a row, which drops the
   // declarative binding. Re-asserting it on every change of the stored value
@@ -204,9 +202,7 @@ ColumnLayout {
     freeBytes: root.enginesFreeBytes
     note: root.engineNote
     dependencies: root.dependencies
-    packageInstalling: root.packageInstalling
 
-    onInstallPackages: function(packages) { root.packageInstallRequested(packages) }
     onInstall: function(slug) { root.engineInstallRequested(slug) }
     onCancel: root.engineCancelRequested()
     onRemove: function(slug) { root.engineRemoveRequested(slug) }

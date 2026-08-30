@@ -88,14 +88,13 @@ BorderSurface {
   property double enginesFreeBytes: 0
   property var engineNote: null
   // The dependency table of spec section 10, read by Overlay.qml through
-  // `grammachy doctor`, and whether the terminal that runs `omarchy pkg add`
-  // is still open.
+  // `grammachy doctor`.
   property var dependencies: []
-  property bool packageInstalling: false
 
   property int cardWidth: Style.space(680)
-  // The whole card fits in this, spec section 6. The marked text is what
-  // gives, so a long Selection scrolls rather than pushing the card off screen.
+  // The whole card fits in this, spec section 6.
+  // The marked text is what gives.
+  // A long Selection scrolls rather than pushing the card off screen.
   property int maxCardHeight: Style.space(600)
 
   signal accepted(int index)
@@ -116,9 +115,6 @@ BorderSurface {
   signal engineRemoveRequested(string slug)
   signal engineRemoveConfirmed(string slug)
   signal engineKeepRequested()
-  // The Install beside a row that needs a system package, spec section 7.
-  // Overlay.qml opens the terminal that runs `omarchy pkg add <packages...>`.
-  signal packageInstallRequested(var packages)
   // One button of an error card, spec section 8. The action is a button id
   // from `ui/errors.js`; Overlay.qml owns where each one goes.
   signal errorActionRequested(string action)
@@ -269,8 +265,6 @@ BorderSurface {
       enginesFreeBytes: root.enginesFreeBytes
       engineNote: root.engineNote
       dependencies: root.dependencies
-      packageInstalling: root.packageInstalling
-      onPackageInstallRequested: function(packages) { root.packageInstallRequested(packages) }
       onEngineInstallRequested: function(slug) { root.engineInstallRequested(slug) }
       onEngineCancelRequested: root.engineCancelRequested()
       onEngineRemoveRequested: function(slug) { root.engineRemoveRequested(slug) }

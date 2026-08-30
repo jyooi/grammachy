@@ -25,27 +25,23 @@ ColumnLayout {
   property var engines: []
   // The slug an install is running on, or "" when none is.
   property string busy: ""
-  // The `.part` length of that row, moved by every poll answer. It arrives
-  // beside the list rather than inside it, so the row keeps its identity and
-  // the bar animates across each step rather than being rebuilt on it.
+  // The `.part` length of that row, moved by every poll answer.
   property double busyBytes: 0
-  // Whether any verb is in flight, which is what every row but the one being
-  // installed draws its disabled state from.
+
+  // Whether any verb is in flight.
   property bool working: false
   // The slug awaiting a Remove confirm, spec section 7, or "" when none is.
   property string confirmSlug: ""
   // The engine a Check would run on, so removing it can say what happens next.
   property string selected: ""
-  // The engines directory and what the disk has left, from the same envelope.
+
+  // The engines directory and free disk space, from the same envelope.
   property string directory: ""
   property double freeBytes: 0
   // One failure, from `Engines.note`, or null when the last verb was fine.
   property var note: null
-  // The dependency table of spec section 10, from `Deps.fromDoctor`. A row
-  // reads the packages its slug is `usedBy`.
+  // The dependency table of spec section 10, from `Deps.fromDoctor`.
   property var dependencies: []
-  // Whether the terminal that runs `omarchy pkg add` is still open.
-  property bool packageInstalling: false
 
 
   signal install(string slug)
@@ -53,9 +49,6 @@ ColumnLayout {
   signal remove(string slug)
   signal confirmRemove(string slug)
   signal keepEngine()
-  // The Install beside a row that needs a system package. Overlay.qml opens
-  // the terminal that runs `omarchy pkg add <package>`.
-  signal installPackages(var packages)
 
   spacing: Style.spacing.labelGap
 
@@ -95,8 +88,8 @@ ColumnLayout {
       })
       readonly property bool asking: root.confirmSlug === row.slug
       // Spec section 7: a row that needs a system package this machine lacks
-      // says so and carries the one Install that adds every such package,
-      // and its own Install waits until they are there.
+      // says so and names the package. Its own Install waits until they are
+      // there.
       readonly property var missingPackages: Deps.absentFor(root.dependencies, row.slug)
       readonly property bool runtimeMissing: Engines.runtimeMissing(row.modelData, row.missingPackages)
 
@@ -145,20 +138,17 @@ ColumnLayout {
               font.pixelSize: Style.font.caption
             }
 
-            Button {
-              visible: row.runtimeMissing
-              Layout.alignment: Qt.AlignVCenter
-              text: root.packageInstalling ? "Installing..." : "Install " + Deps.packagesOf(row.missingPackages).join(" ")
-              enabled: !root.packageInstalling
-              opacity: root.packageInstalling ? 0.6 : 1
-              bordered: true
-              foreground: Color.accent
-              fontFamily: Style.font.family
-              tooltipText: Deps.installCommand(Deps.packagesOf(row.missingPackages)) + " in a terminal"
-              onClicked: root.installPackages(Deps.packagesOf(row.missingPackages))
-            }
-
             Item { Layout.fillWidth: true }
+          }
+
+          Text {
+            visible: row.runtimeMissing
+            Layout.fillWidth: true
+            text: Deps.installHint(Deps.packagesOf(row.missingPackages))
+            color: Color.muted
+            wrapMode: Text.Wrap
+            font.family: Style.font.family
+            font.pixelSize: Style.font.caption
           }
 
           Text {
