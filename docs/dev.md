@@ -16,7 +16,7 @@ The Compose walkthrough later on this page is here for the same reason: spec sec
   It needs a Java runtime beside it.
   The Engines row names `jre-openjdk` for Omarchy Install.
   Smoke item 15 covers that path.
-  The same row offers an Install for `libarchive` when `bsdtar` is missing.
+  The same row names `libarchive` for Omarchy Install when `bsdtar` is missing.
   The Arch `languagetool` package works too, and Grammachy never installs or removes it.
 
 `wl-clipboard` and `wtype` already ship with Omarchy.
