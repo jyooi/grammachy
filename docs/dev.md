@@ -457,8 +457,8 @@ Compose is spec section 9.
 It captures nothing: it holds a Draft, checks it only when you ask, and reviews the answer with the same hero, inspector, footer, and keys as the popup.
 Smoke item 5 above covers the chunked Draft; this walkthrough is the manual check of everything else on the card.
 
-Every trigger of spec section 2 opens it.
-The four to try are:
+Open Compose with a compose payload or with SUPER + ALT + Q.
+The three to try are:
 
 ```bash
 omarchy-shell shell summon io.github.jyooi.grammachy '{"mode":"compose"}'
