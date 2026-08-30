@@ -363,8 +363,8 @@ Item {
 
     root.opened = true
     if (String(payload.mode || "quick") === "compose") {
-      // Spec section 2: a payload with no `text` opens Compose on the kept
-      // Draft, which is what the menu entry and SUPER + ALT + Q send.
+      // Spec section 2: a payload with no `text` opens Compose on the kept Draft.
+      // SUPER + ALT + Q sends that payload.
       if (typeof payload.text === "string") root.composeWith(payload.text)
       else root.showCompose()
       return
@@ -464,8 +464,8 @@ Item {
   }
 
   // Spec sections 2 and 9: Compose opens on the kept Draft and captures
-  // nothing. This is where SUPER + ALT + Q and the `grammachy.compose` menu
-  // entry land, and where `composeWith` lands once the Draft is settled.
+  // nothing. This is where SUPER + ALT + Q lands, and where `composeWith`
+  // lands once the Draft is settled.
   function showCompose() {
     root.resetRun()
     root.surface = "compose"

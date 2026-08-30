@@ -209,7 +209,7 @@ mod tests {
     fn the_json_block_lands_inside_the_opening_brace() {
         let member = Block {
             markers: JSONC,
-            body: "  \"grammachy.compose\": {},\n".to_string(),
+            body: "  \"apps.grammachy\": {},\n".to_string(),
         };
         let original = "{\n  // a comment\n}\n";
 

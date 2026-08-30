@@ -100,7 +100,58 @@ fn a_second_run_leaves_one_block_and_one_entry() {
         home.bindings_text().matches("-- grammachy begin").count(),
         1
     );
-    assert_eq!(home.menu_text().matches("grammachy.compose").count(), 1);
+    assert_eq!(home.menu_text().matches("apps.grammachy").count(), 1);
+    assert!(!home.menu_text().contains("grammachy.compose"));
+}
+
+#[test]
+fn an_old_compose_menu_block_is_replaced_by_the_apps_row() {
+    let home = Home::new("old-menu");
+    let old = concat!(
+        "{\n",
+        "  // a comment\n",
+        "\n",
+        "  // grammachy begin\n",
+        "  \"grammachy.compose\": {\"icon\":\"\",\"label\":\"Grammachy compose\",",
+        "\"parent\":\"root\",",
+        "\"action\":\"omarchy-shell shell summon io.github.jyooi.grammachy '{\\\"mode\\\":\\\"compose\\\"}'\"},\n",
+        "  // grammachy end\n",
+        "}\n",
+    );
+    std::fs::write(&home.menu, old).expect("the old menu copy is written");
+
+    let installed = home.setup().install();
+    let text = home.menu_text();
+
+    assert_eq!(step(&installed, "menu").state, State::Changed);
+    assert!(!text.contains("grammachy.compose"), "{text}");
+    assert_eq!(text.matches("apps.grammachy").count(), 1);
+    assert!(text.contains("\"label\":\"Grammachy\""), "{text}");
+    assert!(text.contains("\\\"mode\\\":\\\"quick\\\""), "{text}");
+    assert!(!text.contains("\"parent\":\"root\""), "{text}");
+}
+
+#[test]
+fn remove_clears_an_old_compose_menu_block() {
+    let home = Home::new("old-menu-remove");
+    let original = "{\n  // a comment\n}\n";
+    let old = concat!(
+        "{\n",
+        "  // a comment\n",
+        "\n",
+        "  // grammachy begin\n",
+        "  \"grammachy.compose\": {\"icon\":\"\",\"label\":\"Grammachy compose\",",
+        "\"parent\":\"root\",",
+        "\"action\":\"omarchy-shell shell summon io.github.jyooi.grammachy '{\\\"mode\\\":\\\"compose\\\"}'\"},\n",
+        "  // grammachy end\n",
+        "}\n",
+    );
+    std::fs::write(&home.menu, old).expect("the old menu copy is written");
+
+    let removal = home.setup().remove();
+
+    assert_eq!(step(&removal, "menu").state, State::Changed);
+    assert_eq!(home.menu_text(), original);
 }
 
 #[test]
