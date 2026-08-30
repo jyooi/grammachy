@@ -19,7 +19,7 @@ function envelope(present) {
       purpose: spec.purpose,
       required: spec.required,
       present: present[spec.package] === true,
-      installCommand: "omarchy pkg add " + spec.package,
+      installHint: Deps.installHint([spec.package]),
       usedBy: spec.usedBy
     }))
   })
@@ -31,13 +31,20 @@ test("the table names the three packages in doctor's order", () => {
   for (const spec of Deps.DEPENDENCIES) assert.ok(spec.purpose.endsWith("."), spec.package)
 })
 
-test("every install command is omarchy pkg add and never sudo or pacman", () => {
-  assert.equal(Deps.installCommand(["curl"]), "omarchy pkg add curl")
-  assert.equal(Deps.installCommand(["curl", "wl-clipboard"]), "omarchy pkg add curl wl-clipboard")
+test("every install hint names the package and Omarchy Install", () => {
+  assert.equal(
+    Deps.installHint(["curl"]),
+    "Add curl through Omarchy Install. Open SUPER+SPACE, then Install, then Package."
+  )
+  assert.equal(
+    Deps.installHint(["curl", "wl-clipboard"]),
+    "Add curl and wl-clipboard through Omarchy Install. Open SUPER+SPACE, then Install, then Package."
+  )
+  assert.equal(Deps.installHint([]), "")
   for (const row of Deps.fromDoctor(envelope({}))) {
-    assert.equal(row.installCommand, "omarchy pkg add " + row.package)
-    assert.ok(!row.installCommand.includes("sudo"))
-    assert.ok(!row.installCommand.includes("pacman"))
+    assert.equal(row.installHint, Deps.installHint([row.package]))
+    assert.ok(row.installHint.includes(row.package))
+    assert.ok(row.installHint.includes("Omarchy Install"))
   }
 })
 
@@ -90,26 +97,4 @@ test("isPresent answers false until the table has been read", () => {
   assert.equal(Deps.isPresent(null, Deps.JAVA_PACKAGE), false)
   assert.equal(Deps.isPresent(Deps.fromProbe("java\n"), Deps.JAVA_PACKAGE), true)
   assert.equal(Deps.isPresent(Deps.fromProbe("curl\n"), Deps.JAVA_PACKAGE), false)
-})
-
-test("the terminal runs omarchy pkg add through uwsm-app and xdg-terminal-exec", () => {
-  const argv = Deps.terminalArgv(["curl", "wl-clipboard"], "")
-  assert.deepEqual(argv.slice(0, 3), ["uwsm-app", "--", "xdg-terminal-exec"])
-  assert.ok(argv.includes("--app-id=org.omarchy.terminal"))
-  assert.deepEqual(argv.slice(-3, -1), ["bash", "-c"])
-  const script = argv[argv.length - 1]
-  assert.ok(script.includes("omarchy pkg add curl wl-clipboard"), script)
-  assert.ok(script.startsWith("omarchy-show-logo; "), script)
-  assert.ok(script.includes("omarchy-show-done"), script)
-  assert.ok(!script.includes("sudo"))
-  assert.ok(!script.includes("pacman"))
-  assert.ok(!argv.includes("setsid"), "uwsm-app must wait for the terminal")
-})
-
-test("the seam and an empty or unknown package list open no terminal", () => {
-  assert.deepEqual(Deps.terminalArgv(["curl"], Deps.NEVER), [])
-  assert.deepEqual(Deps.terminalArgv([], ""), [])
-  assert.deepEqual(Deps.terminalArgv(["; rm -rf /"], ""), [])
-  assert.deepEqual(Deps.known(["curl", "evil", "jre-openjdk", "libarchive"]), ["curl", "jre-openjdk", "libarchive"])
-  assert.equal(Deps.TERMINAL_SEAM, "GRAMMACHY_PKG_TERMINAL")
 })

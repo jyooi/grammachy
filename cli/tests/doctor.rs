@@ -131,7 +131,8 @@ fn a_missing_java_is_optional_only_while_languagetool_is_absent() {
     facts.languagetool_launcher = Some(PathBuf::from("/usr/bin/languagetool"));
     let text = text_of(&facts, EngineSlug::Languagetool);
     assert_eq!(missing_lines(&text).len(), 1, "{text}");
-    assert!(text.contains("omarchy pkg add jre-openjdk"), "{text}");
+    assert!(text.contains("jre-openjdk"), "{text}");
+    assert!(text.contains("Omarchy Install"), "{text}");
 }
 
 /// The pacman package is an alternative Grammachy never installs and never
@@ -200,7 +201,8 @@ fn a_missing_java_runtime_prints_its_pacman_line() {
     let text = text_of(&facts, EngineSlug::Languagetool);
 
     assert_eq!(missing_lines(&text).len(), 1, "{text}");
-    assert!(text.contains("omarchy pkg add jre-openjdk"), "{text}");
+    assert!(text.contains("jre-openjdk"), "{text}");
+    assert!(text.contains("Omarchy Install"), "{text}");
 }
 
 /// Harper needs nothing but the binary, so nothing LanguageTool needs ever
@@ -370,7 +372,10 @@ fn a_missing_piece_carries_its_remedy_in_the_envelope() {
 
     assert_eq!(value["ready"], false);
     assert_eq!(check["ok"], false);
-    assert_eq!(check["remedy"], "omarchy pkg add jre-openjdk");
+    assert_eq!(
+        check["remedy"],
+        "Add jre-openjdk through Omarchy Install. Open SUPER+SPACE, then Install, then Package."
+    );
     assert_eq!(check["engines"], serde_json::json!(["languagetool"]));
 }
 
@@ -453,8 +458,7 @@ fn run_binary(args: &[&str]) -> String {
 }
 
 /// Spec section 10: `doctor --json` is the one dependency table. Every row
-/// names the Arch package, why it is there, and the exact `omarchy pkg add`
-/// line that installs it, because the plugin runs no sudo and no pacman.
+/// names the Arch package, why it is there, and the Omarchy Install hint.
 #[test]
 fn the_envelope_carries_the_dependency_table() {
     let json = doctor::run(&ready(), EngineSlug::Harper, true).text;
@@ -481,10 +485,13 @@ fn the_envelope_carries_the_dependency_table() {
         assert_eq!(row["present"], true, "{package}");
         assert_eq!(
             row["installCommand"],
-            format!("omarchy pkg add {package}"),
+            format!("Add {package} through Omarchy Install. Open SUPER+SPACE, then Install, then Package."),
             "{package}"
         );
-        assert!(!row["installCommand"].as_str().unwrap().contains("sudo"));
+        assert!(row["installCommand"]
+            .as_str()
+            .unwrap()
+            .contains("Omarchy Install"));
     }
 
     assert_eq!(rows[0]["required"], true);
@@ -512,7 +519,7 @@ fn an_absent_required_package_is_missing_and_the_engine_answer_stands() {
     assert_eq!(lines.len(), 1, "{}", output.text);
     assert!(lines[0].contains("wl-clipboard"), "{}", output.text);
     assert!(
-        lines[0].contains("Run: omarchy pkg add wl-clipboard"),
+        lines[0].contains("Add wl-clipboard through Omarchy Install"),
         "{}",
         output.text
     );
@@ -538,9 +545,9 @@ fn the_java_package_follows_the_runtime_fact() {
 
     let text = text_of(&facts, EngineSlug::Harper);
     assert!(
-        optional_lines(&text).iter().any(
-            |line| line.contains("jre-openjdk") && line.contains("omarchy pkg add jre-openjdk")
-        ),
+        optional_lines(&text)
+            .iter()
+            .any(|line| line.contains("jre-openjdk") && line.contains("Omarchy Install")),
         "{text}"
     );
 

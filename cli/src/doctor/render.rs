@@ -1,9 +1,8 @@
 //! The human form of a [`Report`].
 //!
 //! One line per piece, so a missing piece is one line that already carries the
-//! exact command to fix it (spec section 10). Nothing here runs a command:
-//! `doctor` installs nothing, and every system package goes through
-//! `omarchy pkg add`, which the plugin launches in a visible terminal.
+//! exact command to fix it (spec section 10). Nothing here runs a command.
+//! `doctor` installs nothing. A missing system package names Omarchy Install.
 //!
 //! A piece the machine simply does not have yet reads `optional` rather than
 //! `missing` (HUF-237). LanguageTool is the case: a fresh install never fetched
@@ -64,8 +63,12 @@ pub fn to_text(report: &Report) -> String {
         report.diagnosis
     ));
 
-    if report.commanded().next().is_some() || report.absent_dependencies().next().is_some() {
+    if report.commanded().next().is_some() {
         out.push_str("\nRun the commands above yourself. Doctor installs nothing.\n");
+    } else if report.absent_dependencies().next().is_some() {
+        out.push_str(
+            "\nAdd the named packages through Omarchy Install. Doctor installs nothing.\n",
+        );
     }
     out
 }

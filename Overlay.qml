@@ -112,8 +112,7 @@ Item {
     running: root.bootstrapRunning,
     exitCode: root.bootstrapExitCode,
     log: root.bootstrapLog,
-    dependencies: root.dependencies,
-    depsInstalling: root.packageInstalling
+    dependencies: root.dependencies
   })
 
   // The system packages of spec section 10, as `ui/deps.js` reads them: from
@@ -121,10 +120,6 @@ Item {
   // `command -v` probe before that, because the setup card must know whether
   // curl is here before bin/bootstrap.sh can use it. Null until read.
   property var dependencies: null
-  // Whether the terminal that runs `omarchy pkg add` is still open. The
-  // plugin never runs sudo or pacman itself: `installPackages` opens that
-  // terminal and asks doctor again when it closes.
-  property bool packageInstalling: false
 
   // One Check takes this many UTF-16 code units. The limit belongs to the
   // Engine (spec section 4), so it moves with the engine setting.
@@ -543,37 +538,6 @@ Item {
     if (Array.isArray(table)) root.dependencies = table
   }
 
-  // Open a visible terminal running `omarchy pkg add <packages...>`, spec
-  // section 10. `GRAMMACHY_PKG_TERMINAL=never` is the test seam: the launch
-  // is logged and skipped, and the table is still read again.
-  function installPackages(packages) {
-    if (root.packageInstalling) return
-    var argv = Deps.terminalArgv(packages, Quickshell.env(Deps.TERMINAL_SEAM))
-    if (argv.length === 0) {
-      console.log("grammachy: no terminal opened for", JSON.stringify(packages))
-      root.refreshDependencies()
-      return
-    }
-    root.packageInstalling = true
-    packageTerminalProcess.command = argv
-    packageTerminalProcess.launchPending = true
-    packageTerminalProcess.running = true
-  }
-
-  // The terminal never started at all, so the button comes back.
-  function finishPackageLaunch() {
-    if (packageTerminalProcess.running) return
-    if (!packageTerminalProcess.launchPending) return
-    packageTerminalProcess.launchPending = false
-    root.packageInstalling = false
-    console.warn("grammachy: the package terminal could not be started")
-  }
-
-  function onPackageTerminalClosed() {
-    root.packageInstalling = false
-    root.refreshDependencies()
-  }
-
   function installBootstrap() {
     if (root.bootstrapRunning) return
     root.bootstrapRunning = true
@@ -599,8 +563,6 @@ Item {
   // Where each button of the setup card goes, spec section 10.
   function runSetupAction(action) {
     if (action === Setup.INSTALL) root.installBootstrap()
-    else if (action === Setup.INSTALL_DEPS)
-      root.installPackages(Deps.packagesOf(Deps.missingRequired(root.dependencies)))
     else if (action === Setup.RETRY) root.retrySetupCheck()
     else if (action === Setup.CLOSE) root.close()
   }
@@ -1968,26 +1930,6 @@ Item {
     }
   }
 
-  // The one place a system package is installed from: a visible terminal
-  // running `omarchy pkg add`, opened the way Omarchy's own shell opens one.
-  // `uwsm-app` waits for the terminal, so this process exits when the
-  // terminal closes, and that is when the table is read again.
-  Process {
-    id: packageTerminalProcess
-    property bool launchPending: false
-    onStarted: packageTerminalProcess.launchPending = false
-    onRunningChanged: {
-      if (packageTerminalProcess.running) return
-      if (!packageTerminalProcess.launchPending) return
-      Qt.callLater(root.finishPackageLaunch)
-    }
-    onExited: root.onPackageTerminalClosed()
-    stderr: StdioCollector {
-      waitForEnd: true
-      onStreamFinished: if (text.length > 0) console.warn("grammachy pkg terminal:", text)
-    }
-  }
-
   // The two fields cli.lock pins, spec section 10, read as a plain local file
   // the same way every other path on this machine is: never as a URL.
   FileView {
@@ -2285,8 +2227,6 @@ Item {
         enginesFreeBytes: root.enginesFreeBytes
         engineNote: root.engineNote
         dependencies: root.dependencies || []
-        packageInstalling: root.packageInstalling
-        onPackageInstallRequested: function(packages) { root.installPackages(packages) }
 
         onEngineInstallRequested: function(slug) { root.installEngine(slug) }
         onEngineCancelRequested: root.cancelEngineInstall()
@@ -2369,8 +2309,6 @@ Item {
         enginesFreeBytes: root.enginesFreeBytes
         engineNote: root.engineNote
         dependencies: root.dependencies || []
-        packageInstalling: root.packageInstalling
-        onPackageInstallRequested: function(packages) { root.installPackages(packages) }
 
         onEngineInstallRequested: function(slug) { root.installEngine(slug) }
         onEngineCancelRequested: root.cancelEngineInstall()

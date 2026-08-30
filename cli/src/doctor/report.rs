@@ -52,7 +52,10 @@ impl Check {
     /// the engine diagnosis print.
     pub fn line(&self) -> String {
         match &self.remedy {
-            Some(remedy) => format!("{} Run: {remedy}", self.detail),
+            Some(remedy) if remedy.starts_with("grammachy ") => {
+                format!("{} Run: {remedy}", self.detail)
+            }
+            Some(remedy) => format!("{} {remedy}", self.detail),
             None => self.detail.clone(),
         }
     }
@@ -105,12 +108,18 @@ impl Report {
         self.checks.iter().filter(|check| !check.ok)
     }
 
-    /// The checks that carry a command, missing or merely improvable.
+    /// The checks that carry a runnable command, missing or merely improvable.
     ///
     /// The manual-step footer reads this rather than [`Report::missing`],
     /// because an advisory line prints a command the user may still run.
+    /// A system-package hint is not a command.
     pub fn commanded(&self) -> impl Iterator<Item = &Check> {
-        self.checks.iter().filter(|check| check.remedy.is_some())
+        self.checks.iter().filter(|check| {
+            check
+                .remedy
+                .as_deref()
+                .is_some_and(|remedy| remedy.starts_with("grammachy "))
+        })
     }
 
     /// The packages that are not on this machine, in table order.
@@ -272,7 +281,7 @@ fn java_check(facts: &Facts) -> Check {
             optional: facts.languagetool().is_none(),
             detail: "No Java runtime: JAVA_HOME is not set and no default JVM is installed."
                 .to_string(),
-            remedy: Some(deps::install_command(&["jre-openjdk"])),
+            remedy: Some(deps::install_hint(&["jre-openjdk"])),
             state: None,
             engines: vec!["languagetool"],
         },

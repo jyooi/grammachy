@@ -38,7 +38,9 @@ pub fn bsdtar(archive: &Path, directory: &Path) -> Result<(), String> {
         .arg(directory)
         .output()
         .map_err(|error| {
-            format!("bsdtar could not run: {error}. Install it with: omarchy pkg add libarchive")
+            format!(
+                "bsdtar could not run: {error}. Add libarchive through Omarchy Install. Open SUPER+SPACE, then Install, then Package."
+            )
         })?;
 
     if output.status.success() {

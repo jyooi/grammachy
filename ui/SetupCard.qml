@@ -31,9 +31,6 @@ ColumnLayout {
   readonly property var missingDependencies: root.card && Array.isArray(root.card.missingDependencies)
     ? root.card.missingDependencies : []
   readonly property bool showsDependencies: Boolean(root.card) && root.card.showsDependencies === true
-  readonly property bool depsInstalling: Boolean(root.card) && root.card.depsInstalling === true
-  readonly property bool depsInstallEnabled: Boolean(root.card) && root.card.depsInstallEnabled === true
-  readonly property string depsInstallCommand: root.card ? String(root.card.depsInstallCommand) : ""
   readonly property bool running: root.cardState === Setup.RUNNING
 
   spacing: Style.spacing.md
@@ -57,9 +54,9 @@ ColumnLayout {
     font.pixelSize: Style.font.body
   }
 
-  // Spec section 10: the required system packages this machine lacks, each
-  // with its purpose, and one Install that opens a terminal running
-  // `omarchy pkg add` for all of them. The plugin runs no sudo and no pacman.
+  // Spec section 10: the system packages this machine lacks that the
+  // bootstrap needs, each with its purpose. The card names them. It does not
+  // install them. Add them through Omarchy Install.
   ColumnLayout {
     Layout.fillWidth: true
     visible: root.showsDependencies
@@ -102,30 +99,13 @@ ColumnLayout {
       }
     }
 
-    RowLayout {
+    Text {
       Layout.fillWidth: true
-      spacing: Style.spacing.lg
-
-      Text {
-        Layout.fillWidth: true
-        text: root.depsInstalling
-          ? "Finish the install in the terminal. The card refreshes when it closes."
-          : "Runs " + root.depsInstallCommand + " in a terminal."
-        color: Color.muted
-        wrapMode: Text.Wrap
-        font.family: Style.font.family
-        font.pixelSize: Style.font.caption
-      }
-
-      Button {
-        text: root.depsInstalling ? "Installing..." : "Install packages"
-        enabled: root.depsInstallEnabled
-        opacity: root.depsInstallEnabled ? 1 : 0.6
-        bordered: true
-        foreground: Color.accent
-        fontFamily: Style.font.family
-        onClicked: root.actionRequested(Setup.INSTALL_DEPS)
-      }
+      text: "Add each named package through Omarchy Install. Open SUPER+SPACE, then Install, then Package."
+      color: Color.muted
+      wrapMode: Text.Wrap
+      font.family: Style.font.family
+      font.pixelSize: Style.font.caption
     }
   }
 

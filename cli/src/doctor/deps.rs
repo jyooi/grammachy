@@ -1,11 +1,9 @@
-//! The system packages Grammachy leans on, and the one route that adds them.
+//! The system packages Grammachy leans on.
 //!
-//! The plugin never runs `sudo` or `pacman` itself. Every package goes
-//! through `omarchy pkg add <package>`, which installs only what is missing,
-//! asks for the password itself, and verifies the result. The setup card and
-//! the Engines page launch that command in a visible terminal; `doctor` lists
-//! every package here with its state so a reviewer sees the whole set in one
-//! place.
+//! The plugin does not install packages itself. A missing package is named.
+//! Add it through Omarchy Install. Open SUPER+SPACE, then Install, then
+//! Package. `doctor` lists every package here with its state so a reviewer
+//! sees the whole set in one place.
 //!
 //! `ui/deps.js` carries the same table for the shell, because the setup card
 //! must know the required packages before `bin/grammachy` exists.
@@ -16,8 +14,9 @@ use serde::Serialize;
 
 use super::facts::Facts;
 
-/// The command that installs any package, before the package name.
-pub const INSTALL_COMMAND: &str = "omarchy pkg add";
+/// The shared tail of every install hint, kept equal to `ui/deps.js`.
+pub const INSTALL_HINT_TAIL: &str =
+    "through Omarchy Install. Open SUPER+SPACE, then Install, then Package.";
 
 /// What part of Grammachy needs a package.
 pub const USED_BY_BOOTSTRAP: &str = "bootstrap";
@@ -92,13 +91,16 @@ impl Dependency {
         if self.present {
             return self.purpose.to_string();
         }
-        format!("{} Run: {}", self.purpose, self.install_command)
+        format!("{} {}", self.purpose, self.install_command)
     }
 }
 
-/// The exact command that installs one or more packages.
-pub fn install_command(packages: &[&str]) -> String {
-    format!("{INSTALL_COMMAND} {}", packages.join(" "))
+/// The text that names one or more packages and points at Omarchy Install.
+pub fn install_hint(packages: &[&str]) -> String {
+    if packages.is_empty() {
+        return String::new();
+    }
+    format!("Add {} {}", packages.join(" and "), INSTALL_HINT_TAIL)
 }
 
 /// The table for one machine.
@@ -111,7 +113,7 @@ pub fn table(facts: &Facts) -> Vec<Dependency> {
             purpose: spec.purpose,
             required: spec.required,
             present: facts.has_binary(spec.probe),
-            install_command: install_command(&[spec.package]),
+            install_command: install_hint(&[spec.package]),
             used_by: spec.used_by.to_vec(),
         })
         .collect()
