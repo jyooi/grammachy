@@ -77,6 +77,9 @@ The Local LLM and Cloud LLM engines were removed (HUF-240).
   See `ui/anchor.js` and `cli/src/setup/bindings.rs`.
   The two trigger keys are remappable settings, `quickHotkey` and `composeHotkey`.
   `bindings::Hotkeys::resolve` reads them through `StoredSettings` and uses the spec section 2 defaults for an empty or missing value.
+- `cli/src/setup/menu.rs` writes the `apps.grammachy` row into the Omarchy menu extension.
+  Omarchy infers the parent from the dotted id, so the row sits under Apps.
+  The action summons with `{"mode":"quick"}`, the same payload as the quick hotkey.
 - Settings storage is the plugin entry in `shell.json`, read through `Overlay.setting` and written through `Overlay.persistSetting`.
   Every write carries the whole entry, because `shell.updateEntryInline` replaces rather than merges.
   The manifest `barWidget.defaults` and `schema` are documentation only.

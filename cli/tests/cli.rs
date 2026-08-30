@@ -386,9 +386,9 @@ fn setup_writes_the_block_and_the_entry_and_remove_takes_them_out() {
     assert!(std::fs::read_to_string(&bindings)
         .unwrap()
         .contains("-- grammachy begin"));
-    assert!(std::fs::read_to_string(&menu)
-        .unwrap()
-        .contains("grammachy.compose"));
+    let menu_text = std::fs::read_to_string(&menu).unwrap();
+    assert!(menu_text.contains("apps.grammachy"));
+    assert!(!menu_text.contains("grammachy.compose"));
 
     let removed = run_setup(&["setup", "--remove"], &home);
 

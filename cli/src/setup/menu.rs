@@ -1,10 +1,12 @@
-//! The `grammachy.compose` row in the Omarchy menu, spec sections 2 and 10.
+//! The `apps.grammachy` row in the Omarchy menu, spec sections 2 and 10.
 //!
 //! The extension file is JSONC whose object keys are the row ids. Omarchy
-//! infers a row's parent from its dotted id, so `grammachy.compose` would ask
-//! for a `grammachy` submenu that nothing else creates. The row therefore names
-//! `"parent": "root"` itself, which keeps the id spec section 10 fixes and
-//! still puts one reachable row on the root menu.
+//! infers a row's parent from its dotted id, so `apps.grammachy` sits under
+//! Apps. The Apps submenu is provider-driven. Static children declared in
+//! JSONC survive provider refreshes.
+//!
+//! The action sends `{"mode":"quick"}`, the same payload as the quick
+//! hotkey, so `Overlay.open()` shows the default surface.
 //!
 //! The block sits directly inside the opening brace, so the new member never
 //! needs a comma in front of it and the members already in the file keep their
@@ -21,7 +23,10 @@ use crate::setup::block::{self, Anchor, Block};
 pub const PATH_ENV: &str = "GRAMMACHY_MENU_JSONC";
 
 /// The row id spec section 10 fixes.
-pub const ENTRY_ID: &str = "grammachy.compose";
+pub const ENTRY_ID: &str = "apps.grammachy";
+
+/// Nerd Font `md-spellcheck`, shown in the Apps submenu icon column.
+const ENTRY_ICON: char = '\u{f04c6}';
 
 /// What an extension file holds when `setup` has to create one.
 const EMPTY_DOCUMENT: &str = "{\n}\n";
@@ -43,13 +48,12 @@ pub fn block() -> Block {
     // The payload is JSON inside a JSON string inside a single quoted shell
     // word, so the quotes are escaped once for the menu file and the shell
     // takes the rest as it stands.
-    let action =
-        format!("omarchy-shell shell summon {PLUGIN_ID} '{{\\\"mode\\\":\\\"compose\\\"}}'");
+    let action = format!("omarchy-shell shell summon {PLUGIN_ID} '{{\\\"mode\\\":\\\"quick\\\"}}'");
     Block {
         markers: block::JSONC,
         body: format!(
-            "  \"{ENTRY_ID}\": {{\"icon\":\"\",\"label\":\"Grammachy compose\",\
-             \"parent\":\"root\",\"action\":\"{action}\"}},\n"
+            "  \"{ENTRY_ID}\": {{\"icon\":\"{ENTRY_ICON}\",\"label\":\"Grammachy\",\
+             \"action\":\"{action}\"}},\n"
         ),
     }
 }
@@ -132,10 +136,12 @@ mod tests {
 
         let document = parse(&with);
 
-        assert_eq!(document[ENTRY_ID]["parent"], "root");
+        assert!(document[ENTRY_ID].get("parent").is_none());
+        assert_eq!(document[ENTRY_ID]["label"], "Grammachy");
+        assert_eq!(document[ENTRY_ID]["icon"], ENTRY_ICON.to_string());
         assert_eq!(
             document[ENTRY_ID]["action"],
-            "omarchy-shell shell summon io.github.jyooi.grammachy '{\"mode\":\"compose\"}'"
+            "omarchy-shell shell summon io.github.jyooi.grammachy '{\"mode\":\"quick\"}'"
         );
     }
 
@@ -149,7 +155,7 @@ mod tests {
 
         let document = parse(&with);
         assert_eq!(document["personal"]["label"], "Personal");
-        assert_eq!(document[ENTRY_ID]["label"], "Grammachy compose");
+        assert_eq!(document[ENTRY_ID]["label"], "Grammachy");
     }
 
     #[test]
@@ -161,5 +167,32 @@ mod tests {
 
         assert_eq!(once, twice);
         assert_eq!(twice.matches(ENTRY_ID).count(), 1);
+    }
+
+    #[test]
+    fn an_old_compose_block_is_replaced_by_the_apps_row() {
+        let old = Block {
+            markers: block::JSONC,
+            body: "  \"grammachy.compose\": {\"icon\":\"\",\"label\":\"Grammachy compose\",\
+             \"parent\":\"root\",\"action\":\"omarchy-shell shell summon io.github.jyooi.grammachy '{\\\"mode\\\":\\\"compose\\\"}'\"},\n"
+                .to_string(),
+        };
+        let original = "{\n  // a comment\n}\n";
+        let with_old = old.ensure(original, Anchor::InsideOpeningBrace).unwrap();
+        assert!(with_old.contains("grammachy.compose"));
+
+        let with_new = block()
+            .ensure(&with_old, Anchor::InsideOpeningBrace)
+            .unwrap();
+        let document = parse(&with_new);
+
+        assert!(document.get("grammachy.compose").is_none());
+        assert_eq!(document[ENTRY_ID]["label"], "Grammachy");
+        assert!(document[ENTRY_ID].get("parent").is_none());
+        assert_eq!(
+            document[ENTRY_ID]["action"],
+            "omarchy-shell shell summon io.github.jyooi.grammachy '{\"mode\":\"quick\"}'"
+        );
+        assert_eq!(with_new.matches("// grammachy begin").count(), 1);
     }
 }

@@ -63,6 +63,9 @@ Then write the hotkeys and the menu entry (spec section 10):
 
 The command edits `~/.config/hypr/bindings.lua` and the Omarchy menu extension.
 It then reloads Hyprland.
+The menu row is Apps > Grammachy.
+It opens the quick popup.
+That surface matches SUPER + SHIFT + Q.
 Press SUPER + SHIFT + Q on a selection to confirm the hotkeys.
 Both hotkeys are defaults, not fixed keys: spec section 7 lists `quickHotkey` and `composeHotkey`, remappable from Settings.
 
@@ -462,8 +465,8 @@ omarchy-shell shell summon io.github.jyooi.grammachy '{"mode":"compose"}'
 omarchy-shell shell summon io.github.jyooi.grammachy '{"mode":"compose","text":"I has two book."}'
 ```
 
-SUPER + ALT + Q once `grammachy setup` has written the bindings, and the `Grammachy compose` row of the Omarchy menu.
-The first command, the hotkey, and the menu row open the kept Draft.
+SUPER + ALT + Q after `grammachy setup` writes the bindings.
+The first command and the hotkey open the kept Draft.
 Only the payload with a `text` sets a new Draft, and a confirm appears when a Draft is already there.
 
 ### The Draft and the Check
