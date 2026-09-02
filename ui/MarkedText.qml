@@ -139,6 +139,7 @@ Flickable {
 
             Text {
               id: word
+              textFormat: Text.PlainText
               text: token.modelData.word
               color: token.wordColor
               font.family: root.fontFamily
@@ -149,6 +150,7 @@ Flickable {
             Text {
               id: blanks
               x: word.implicitWidth
+              textFormat: Text.PlainText
               text: token.modelData.blanks
               color: root.textColor
               font.family: root.fontFamily

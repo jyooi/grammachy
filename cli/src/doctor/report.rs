@@ -349,14 +349,14 @@ fn ready_line(facts: &Facts, engine: EngineSlug) -> String {
             "Harper runs inside the companion binary and needs nothing installed.".to_string()
         }
         EngineSlug::Languagetool => {
-            let address = &facts.languagetool_address;
-            match facts.languagetool_unit {
-                UnitState::Running => {
+            match (facts.languagetool_unit, &facts.languagetool_address) {
+                (UnitState::Running, Some(address)) => {
                     format!("LanguageTool is installed and its unit runs on {address}.")
                 }
-                _ => format!(
-                    "LanguageTool is installed. The next Check starts it on {address}, which takes a moment."
-                ),
+                (UnitState::Running, None) => {
+                    "LanguageTool is installed and its unit is opening its loopback port.".to_string()
+                }
+                _ => "LanguageTool is installed. The next Check starts it on a private loopback port, which takes a moment.".to_string(),
             }
         }
     }

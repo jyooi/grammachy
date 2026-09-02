@@ -64,6 +64,7 @@ ColumnLayout {
 
       Text {
         Layout.fillWidth: true
+        textFormat: Text.PlainText
         text: root.metaText
         color: Color.muted
         elide: Text.ElideRight
@@ -74,6 +75,7 @@ ColumnLayout {
       Text {
         Layout.fillWidth: true
         visible: root.noteText.length > 0
+        textFormat: Text.PlainText
         text: root.noteText
         color: Color.accent
         elide: Text.ElideRight

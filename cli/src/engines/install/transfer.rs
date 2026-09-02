@@ -7,8 +7,13 @@
 //! The transfer itself is `curl`, the same tool `bin/bootstrap.sh` uses for the
 //! binary (spec section 10). `curl` resumes an interrupted transfer and
 //! retries a failed one, which the HTTP client of the CLI does not. The
-//! download runs into a `.part` file, renamed only when it is whole and its
-//! sha256 matches the pin.
+//! download runs into a `.part` file, renamed only when it is whole, its size
+//! is the pinned one, and its sha256 matches the pin.
+//!
+//! The transfer is bounded the way the bootstrap one is: https only, on the
+//! first request and on every redirect, the pinned size as the byte limit,
+//! and clocks that end a stalled or endless response. A transfer that stops
+//! on a clock keeps its `.part` file, so the next Install resumes it.
 
 use std::path::Path;
 use std::process::Command;
@@ -24,11 +29,24 @@ pub enum Transfer {
     Cancelled,
 }
 
-/// What fetches one URL into one path.
+/// What fetches one URL into one path, within one byte limit.
 ///
 /// The real one is [`curl`]. Tests hand in their own, which is how the step is
 /// covered without reaching the network.
-pub type Downloader = Box<dyn Fn(&str, &Path) -> Result<Transfer, String> + Send + Sync>;
+pub type Downloader = Box<dyn Fn(&str, &Path, u64) -> Result<Transfer, String> + Send + Sync>;
+
+/// How long curl may spend on connecting.
+pub const CONNECT_TIMEOUT_SECONDS: u64 = 30;
+
+/// The wall clock of one curl attempt. An attempt that runs out of it keeps
+/// its `.part` file and the next Install resumes. curl retries up to three
+/// times, so one Install is bounded to four attempts.
+pub const MAX_TIME_SECONDS: u64 = 1_800;
+
+/// An attempt slower than this many bytes per second for [`STALL_SECONDS`] is
+/// a stall and ends. This bound also applies per curl attempt.
+pub const STALL_BYTES_PER_SECOND: u64 = 10_240;
+pub const STALL_SECONDS: u64 = 30;
 
 /// What stops a transient user unit.
 ///
@@ -55,10 +73,28 @@ const POLL_MS: u64 = 100;
 /// curl runs as a child rather than through `output()`, because a cancel has to
 /// reach it: the signal handler only sets a flag, and this loop is what turns
 /// that flag into a dead child and a kept `.part` file.
-pub fn curl(url: &str, path: &Path) -> Result<Transfer, String> {
+pub fn curl(url: &str, path: &Path, max_bytes: u64) -> Result<Transfer, String> {
     let mut child = Command::new("curl")
         .arg("--fail")
         .arg("--location")
+        // https on the first request and on every redirect, nothing else.
+        .arg("--proto")
+        .arg("=https")
+        .arg("--proto-redir")
+        .arg("=https")
+        .arg("--tlsv1.2")
+        .arg("--connect-timeout")
+        .arg(CONNECT_TIMEOUT_SECONDS.to_string())
+        .arg("--max-time")
+        .arg(MAX_TIME_SECONDS.to_string())
+        .arg("--speed-limit")
+        .arg(STALL_BYTES_PER_SECOND.to_string())
+        .arg("--speed-time")
+        .arg(STALL_SECONDS.to_string())
+        // The pinned size bounds the response. A resume asks for the rest of
+        // the file, which is smaller still.
+        .arg("--max-filesize")
+        .arg(max_bytes.to_string())
         .arg("--retry")
         .arg("3")
         // No progress meter. Nothing drains stderr until the transfer is over,
@@ -168,29 +204,32 @@ pub enum Failure {
     Cancelled(String),
 }
 
-/// Rename the `.part` file only when its digest matches the pin.
+/// Rename the `.part` file only when its size and its digest match the pin.
 ///
-/// A mismatch deletes the partial. Those bytes are whole and wrong, so a resume
-/// would ask for a range past the end of the file and re-hash the same wrong
-/// bytes for ever: only a clean start can recover, and the next transfer is
-/// what makes it. A cancel is the other case and keeps its `.part` file.
+/// The size is checked first, because it is free and a wrong length never
+/// hashes right. A mismatch of either deletes the partial. Those bytes are
+/// whole and wrong, so a resume would ask for a range past the end of the
+/// file and re-hash the same wrong bytes for ever. Only a clean start can
+/// recover, and the next transfer is what makes it. A cancel is the other
+/// case and keeps its `.part` file.
 pub(crate) fn promote(
     partial: &Path,
     final_path: &Path,
     expected_sha256: &str,
+    expected_size: u64,
 ) -> Result<(), String> {
+    let actual_size = std::fs::metadata(partial)
+        .map(|data| data.len())
+        .map_err(|error| format!("{} could not be read: {error}", partial.display()))?;
+    if actual_size != expected_size {
+        let next = remove_wrong_partial(partial);
+        return Err(format!(
+            "The downloaded file is not the pinned size. Expected {expected_size} bytes, got {actual_size}. {next}"
+        ));
+    }
     let actual = digest::sha256_path(partial)?;
     if !actual.eq_ignore_ascii_case(expected_sha256) {
-        let next = match std::fs::remove_file(partial) {
-            Ok(()) => format!(
-                "{} was deleted, so the next download starts over.",
-                partial.display()
-            ),
-            Err(error) => format!(
-                "{} could not be deleted ({error}). Remove it before the next download.",
-                partial.display()
-            ),
-        };
+        let next = remove_wrong_partial(partial);
         return Err(format!(
             "The downloaded file does not match the pinned digest. Expected {expected_sha256}, got {actual}. {next}"
         ));
@@ -202,6 +241,20 @@ pub(crate) fn promote(
             final_path.display()
         )
     })
+}
+
+/// Delete a whole and wrong `.part` file, and say what the next download does.
+pub(crate) fn remove_wrong_partial(partial: &Path) -> String {
+    match std::fs::remove_file(partial) {
+        Ok(()) => format!(
+            "{} was deleted, so the next download starts over.",
+            partial.display()
+        ),
+        Err(error) => format!(
+            "{} could not be deleted ({error}). Remove it before the next download.",
+            partial.display()
+        ),
+    }
 }
 
 #[cfg(test)]
@@ -216,7 +269,13 @@ mod tests {
         let final_path = directory.join("archive.zip");
         std::fs::write(&partial, bytes).expect("the part file is written");
 
-        promote(&partial, &final_path, &digest::sha256_hex(bytes)).expect("the digest matches");
+        promote(
+            &partial,
+            &final_path,
+            &digest::sha256_hex(bytes),
+            bytes.len() as u64,
+        )
+        .expect("the digest matches");
 
         assert_eq!(std::fs::read(&final_path).unwrap(), bytes);
         assert!(!partial.exists());
@@ -235,10 +294,38 @@ mod tests {
         let expected = digest::sha256_hex(b"other bytes");
         let actual = digest::sha256_hex(bytes);
 
-        let error = promote(&partial, &final_path, &expected).expect_err("the digest differs");
+        let error = promote(&partial, &final_path, &expected, bytes.len() as u64)
+            .expect_err("the digest differs");
 
         assert!(error.contains(&expected), "{error}");
         assert!(error.contains(&actual), "{error}");
+        assert!(!final_path.exists());
+        assert!(!partial.exists(), "the wrong bytes were deleted");
+    }
+
+    /// A wrong length is refused before the digest runs, and the file goes
+    /// the same way a wrong digest does.
+    #[test]
+    fn a_wrong_size_is_refused_before_the_digest() {
+        let directory = scratch("size-mismatch");
+        let bytes = b"small fake archive";
+        let partial = directory.join("archive.zip.part");
+        let final_path = directory.join("archive.zip");
+        std::fs::write(&partial, bytes).expect("the part file is written");
+
+        let error = promote(
+            &partial,
+            &final_path,
+            &digest::sha256_hex(bytes),
+            bytes.len() as u64 + 1,
+        )
+        .expect_err("the size differs");
+
+        assert!(error.contains("not the pinned size"), "{error}");
+        assert!(
+            !error.contains("digest"),
+            "the size check ran first: {error}"
+        );
         assert!(!final_path.exists());
         assert!(!partial.exists(), "the wrong bytes were deleted");
     }

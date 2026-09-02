@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use grammachy::args::{CheckOptions, NativeLanguage};
 use grammachy::engine::Engine;
-use grammachy::engines::languagetool::{Config, LanguageTool};
+use grammachy::engines::languagetool::{Config, Endpoint, LanguageTool};
 
 /// A stub that answers "no matches" and hands the request body back.
 struct Recorder {
@@ -51,7 +51,7 @@ impl Recorder {
     /// Run one Check and answer the form body the adapter sent.
     fn record(&self, text: &str, native: NativeLanguage) -> String {
         let adapter = LanguageTool::new(Config {
-            address: self.address.clone(),
+            endpoint: Endpoint::fixed(&self.address).expect("the stub is on loopback"),
             timeout: Duration::from_secs(5),
             start_unit: false,
             startup_budget: Duration::from_millis(0),

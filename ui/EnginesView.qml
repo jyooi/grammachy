@@ -114,6 +114,7 @@ ColumnLayout {
             spacing: Style.spacing.sm
 
             Text {
+              textFormat: Text.PlainText
               text: row.name + " " + String(row.modelData.version)
               color: Color.popups.text
               elide: Text.ElideRight
@@ -132,6 +133,7 @@ ColumnLayout {
 
             Text {
               visible: row.runtimeMissing
+              textFormat: Text.PlainText
               text: Deps.needsHint(row.missingPackages)
               color: Color.urgent
               font.family: Style.font.family
@@ -144,6 +146,7 @@ ColumnLayout {
           Text {
             visible: row.runtimeMissing
             Layout.fillWidth: true
+            textFormat: Text.PlainText
             text: Deps.installHint(Deps.packagesOf(row.missingPackages))
             color: Color.muted
             wrapMode: Text.Wrap
@@ -153,6 +156,7 @@ ColumnLayout {
 
           Text {
             Layout.fillWidth: true
+            textFormat: Text.PlainText
             text: Engines.hint(row.modelData, row.running, row.live)
             color: Color.muted
             elide: Text.ElideRight
@@ -280,6 +284,7 @@ ColumnLayout {
 
     Text {
       Layout.fillWidth: true
+      textFormat: Text.PlainText
       text: root.note ? String(root.note.title) : ""
       // A cancel is what the reader asked for, so it never wears the colour
       // of something that went wrong.
@@ -292,6 +297,7 @@ ColumnLayout {
 
     Text {
       Layout.fillWidth: true
+      textFormat: Text.PlainText
       text: root.note ? String(root.note.body) : ""
       color: Color.muted
       wrapMode: Text.Wrap
@@ -302,6 +308,7 @@ ColumnLayout {
     Text {
       Layout.fillWidth: true
       visible: Boolean(root.note) && String(root.note.message).length > 0
+      textFormat: Text.PlainText
       text: root.note ? String(root.note.message) : ""
       color: Color.muted
       wrapMode: Text.Wrap
@@ -316,6 +323,7 @@ ColumnLayout {
     Layout.fillWidth: true
     Layout.topMargin: Style.spacing.xs
     visible: root.directory.length > 0
+    textFormat: Text.PlainText
     text: Engines.bytes(root.freeBytes) + " free in " + root.directory
     color: Color.muted
     elide: Text.ElideMiddle

@@ -1,12 +1,14 @@
 //! What a local-server engine needs to start and reach its own server.
 //!
 //! `languagetool` talks HTTP to a server on the loopback interface and starts
-//! it itself as a transient user unit when the port does not answer. Spec
-//! section 4 names the unit, `grammachy-languagetool`; spec section 10 fixes
-//! the mechanism: `systemd-run --user` only, so removing the plugin leaves no
-//! unit file behind.
+//! it itself as a transient user unit when the unit is inactive, on a port
+//! [`free_loopback_port`] picks. Spec section 4 names the unit,
+//! `grammachy-languagetool`. Spec section 10 fixes the mechanism:
+//! `systemd-run --user` only, so removing the plugin leaves no unit file
+//! behind.
 
 use std::io::ErrorKind;
+use std::net::TcpListener;
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -71,6 +73,23 @@ pub fn start_unit(
     Err(StartFailure(format!(
         "systemd-run could not start {unit}: {message}"
     )))
+}
+
+/// A loopback port nothing listens on right now, for a unit to bind.
+///
+/// The kernel picks it, so two units never ask for the same one and no port
+/// is fixed for another process to sit on ahead of time. The listener is
+/// dropped before the answer, and [`crate::engines::listener`] is what
+/// proves, before every request, that the unit and not a bystander took it.
+pub fn free_loopback_port() -> Result<u16, StartFailure> {
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .map_err(|error| StartFailure(format!("no loopback port is free: {error}")))?;
+    let port = listener
+        .local_addr()
+        .map_err(|error| StartFailure(format!("the loopback port is unknown: {error}")))?
+        .port();
+    drop(listener);
+    Ok(port)
 }
 
 /// Where a server keeps the files it only needs while the session lasts.

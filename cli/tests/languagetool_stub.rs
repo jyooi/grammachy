@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use grammachy::args::CheckOptions;
 use grammachy::engine::{Engine, EngineFailure};
-use grammachy::engines::languagetool::{Config, LanguageTool};
+use grammachy::engines::languagetool::{Config, Endpoint, LanguageTool};
 
 /// How the stub answers one request.
 enum Answer {
@@ -96,7 +96,7 @@ fn read_request(stream: &mut TcpStream) {
 
 fn adapter(address: &str, timeout: Duration) -> LanguageTool {
     LanguageTool::new(Config {
-        address: address.to_string(),
+        endpoint: Endpoint::fixed(address).expect("the stub is on loopback"),
         timeout,
         start_unit: false,
         startup_budget: Duration::from_millis(0),

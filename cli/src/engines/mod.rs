@@ -7,4 +7,5 @@
 pub mod harper;
 pub mod install;
 pub mod languagetool;
+pub mod listener;
 pub mod local;

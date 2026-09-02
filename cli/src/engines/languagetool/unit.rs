@@ -24,7 +24,7 @@
 //! systemd-run --user --unit=grammachy-languagetool --collect \
 //!   -- <jvm>/bin/java \
 //!      -cp <tree>/languagetool-server.jar:<tree>/libs/* \
-//!      org.languagetool.server.HTTPServer --port 8081 --config <properties>
+//!      org.languagetool.server.HTTPServer --port <port> --config <properties>
 //! ```
 //!
 //! The `libs/*` wildcard is expanded by the JVM and never by a shell, so it
@@ -39,7 +39,7 @@
 //! ```text
 //! systemd-run --user --unit=grammachy-languagetool --collect \
 //!   --setenv=JAVA_HOME=<jvm> \
-//!   -- /usr/bin/languagetool --http --port 8081 --config <properties>
+//!   -- /usr/bin/languagetool --http --port <port> --config <properties>
 //! ```
 //!
 //! Two sharp edges of that launcher:

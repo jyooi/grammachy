@@ -12,26 +12,42 @@
 //! not in base and would be one more pacman step in front of a feature whose
 //! whole point is that it needs none.
 //!
+//! Before `bsdtar` runs, [`super::zip::admit`] reads the central directory
+//! and refuses an archive whose members would land outside the pinned tree,
+//! or exceed the members and unpacked bytes the row pins. `bsdtar` refuses
+//! absolute and `..` paths of its own accord, and the admission makes the
+//! same rule explicit and adds the bounds.
+//!
 //! [`Extractor`] is the seam: no test unpacks a real 250 MB archive.
 
 use std::path::Path;
 use std::process::Command;
 
-/// What unpacks one archive into one directory.
+use super::zip::{self, Admission};
+
+/// What unpacks one archive into one directory, within one admission.
 ///
-/// The real one is [`bsdtar`]. Tests hand in their own, which is how the
-/// install step is covered without an archive tool and without the network.
-pub type Extractor = Box<dyn Fn(&Path, &Path) -> Result<(), String> + Send + Sync>;
+/// The real one admits the archive and runs [`bsdtar`]. Tests hand in their
+/// own, which is how the install step is covered without an archive tool and
+/// without the network.
+pub type Extractor = Box<dyn Fn(&Path, &Path, &Admission) -> Result<(), String> + Send + Sync>;
 
 /// The extractor this run uses.
 pub fn extractor() -> Extractor {
-    Box::new(bsdtar)
+    Box::new(|archive, directory, admission| {
+        zip::admit(archive, admission)?;
+        bsdtar(archive, directory)
+    })
 }
 
 /// Unpack one archive into one directory, which must already exist.
 pub fn bsdtar(archive: &Path, directory: &Path) -> Result<(), String> {
     let output = Command::new("bsdtar")
         .arg("--extract")
+        // The archive is admitted already, and these keep an unpack inside
+        // the staging directory whatever a member says about itself.
+        .arg("--no-same-owner")
+        .arg("--no-same-permissions")
         .arg("--file")
         .arg(archive)
         .arg("--directory")

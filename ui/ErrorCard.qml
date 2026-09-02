@@ -33,6 +33,7 @@ ColumnLayout {
 
   Text {
     Layout.fillWidth: true
+    textFormat: Text.PlainText
     text: root.title
     color: Color.urgent
     wrapMode: Text.Wrap
@@ -43,6 +44,7 @@ ColumnLayout {
 
   Text {
     Layout.fillWidth: true
+    textFormat: Text.PlainText
     text: root.body
     color: Color.popups.text
     wrapMode: Text.Wrap
@@ -55,6 +57,7 @@ ColumnLayout {
   Text {
     Layout.fillWidth: true
     visible: root.showsDiagnosis
+    textFormat: Text.PlainText
     text: root.diagnosis
     color: Color.accent
     wrapMode: Text.Wrap
@@ -66,6 +69,7 @@ ColumnLayout {
   Text {
     Layout.fillWidth: true
     visible: root.message.length > 0
+    textFormat: Text.PlainText
     text: root.message
     color: Color.muted
     wrapMode: Text.Wrap

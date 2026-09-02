@@ -327,6 +327,7 @@ BorderSurface {
 
         Text {
           Layout.alignment: Qt.AlignHCenter
+          textFormat: Text.PlainText
           text: root.chunkCount === 0
             ? "Splitting the draft into chunks..."
             : "Checking chunk " + root.chunkNumber + " of " + root.chunkCount + "..."
@@ -360,6 +361,7 @@ BorderSurface {
         Text {
           Layout.alignment: Qt.AlignHCenter
           visible: root.issueCount > 0
+          textFormat: Text.PlainText
           text: root.issueCount + (root.issueCount === 1 ? " issue so far" : " issues so far")
           color: Color.muted
           font.family: Style.font.family
@@ -391,6 +393,7 @@ BorderSurface {
 
         Text {
           Layout.fillWidth: true
+          textFormat: Text.PlainText
           text: "Compose already holds a draft of " + Format.units(root.draftUnits)
             + ". The new text is " + Format.units(root.pendingDraft.length)
             + ". The draft is kept in memory only, so replacing it loses it."
@@ -456,6 +459,7 @@ BorderSurface {
           Layout.fillWidth: true
           horizontalAlignment: Text.AlignHCenter
           wrapMode: Text.Wrap
+          textFormat: Text.PlainText
           text: root.sourceText.length + " characters checked, " + root.engine
             + ", " + Format.elapsed(root.elapsedMs)
           color: Color.muted
@@ -474,6 +478,7 @@ BorderSurface {
 
         Text {
           Layout.fillWidth: true
+          textFormat: Text.PlainText
           text: root.noticeTitle
           color: Color.urgent
           wrapMode: Text.Wrap
@@ -484,6 +489,7 @@ BorderSurface {
 
         Text {
           Layout.fillWidth: true
+          textFormat: Text.PlainText
           text: root.noticeBody
           color: Color.popups.text
           wrapMode: Text.Wrap
@@ -494,6 +500,7 @@ BorderSurface {
         Text {
           Layout.fillWidth: true
           visible: root.engineMessage.length > 0
+          textFormat: Text.PlainText
           text: root.engineMessage
           color: Color.muted
           wrapMode: Text.Wrap
@@ -509,6 +516,7 @@ BorderSurface {
     Text {
       Layout.fillWidth: true
       visible: root.editing && root.refusal.length > 0
+      textFormat: Text.PlainText
       text: root.refusal
       color: root.draftUnits > root.draftCapUnits ? Color.urgent : Color.muted
       wrapMode: Text.Wrap

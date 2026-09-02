@@ -82,6 +82,7 @@ BorderSurface {
       anchors.left: parent.left
       width: view.width
       visible: editor.text.length === 0
+      textFormat: Text.PlainText
       text: root.placeholderText
       color: Qt.darker(root.foreground, 1.6)
       wrapMode: Text.Wrap

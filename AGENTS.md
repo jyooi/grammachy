@@ -46,6 +46,8 @@ The Local LLM and Cloud LLM engines were removed (HUF-240).
   Harper counts `char`s, so `cli/src/engines/harper/lints.rs` converts through `text::utf16_offsets`.
 - Engines implement the `Engine` trait in `cli/src/engine.rs` and live under `cli/src/engines/`.
   Every adapter hands its Issues to `issues::normalise`, which owns the sort, overlap, and no-op guarantees of spec 5.1.
+- The `languagetool` adapter never trusts a port. `cli/src/engines/listener.rs` proves, before every request, that the unit's own process holds the loopback listener.
+  Fixtures that name `127.0.0.1:8081` are sample text only.
 - Only `languagetool` and `harper` are `EngineSlug` variants.
   A stored engine the CLI does not recognise falls back to the default rather than failing (`cli/tests/settings.rs`).
 - Settings resolve in `cli/src/settings.rs`: flags, then the plugin entry in `$HOME/.config/omarchy/shell.json`, then spec 7 defaults.
@@ -68,6 +70,9 @@ The Local LLM and Cloud LLM engines were removed (HUF-240).
   Every QML file in `ui/` only draws.
   `ui/*.js` owns capture, settings, keymap, errors, and other logic.
   Both surfaces (`quick`, `compose`) share one `phase`, one Check, and one key map.
+- Every `Text` whose `text` is not a string literal sets `textFormat: Text.PlainText`.
+  The Selection, the Issues, and the error messages are strings the plugin did not write.
+  `cli/tests/overlay_text.rs` enforces it.
 - Name every new `phase` in `Overlay.keyMode`.
   An unnamed phase uses `MODE_IDLE`.
   `keymap.js` then maps Esc to close and ignores Accept, Skip, and Apply.
@@ -92,9 +97,9 @@ The Local LLM and Cloud LLM engines were removed (HUF-240).
 
 - No test may reach a real engine server, a real systemd unit, a real config file, a real compositor, or the network.
   Stub binaries and the seams below are the only route.
-- Seams: `GRAMMACHY_LANGUAGETOOL_ADDRESS`, `GRAMMACHY_LANGUAGETOOL_START=never`, `GRAMMACHY_ENGINE_STOP=never`, `GRAMMACHY_ENGINES_DIR`, `GRAMMACHY_ENGINE_BASE_URL`, `GRAMMACHY_ENGINE_SHA256`, `GRAMMACHY_ENGINE_SIZE_BYTES`, `GRAMMACHY_SHELL_JSON`, `GRAMMACHY_BINDINGS_LUA`, `GRAMMACHY_MENU_JSONC`, `GRAMMACHY_HYPRCTL_RELOAD=never`, and the `GRAMMACHY_BOOTSTRAP_*` set in `bin/bootstrap.sh`.
+- Seams: `GRAMMACHY_LANGUAGETOOL_ADDRESS` (loopback only, debug builds only), `GRAMMACHY_LANGUAGETOOL_START=never` (debug builds only), `GRAMMACHY_ENGINE_STOP=never`, `GRAMMACHY_ENGINES_DIR`, `GRAMMACHY_ENGINE_BASE_URL`, `GRAMMACHY_ENGINE_SHA256`, `GRAMMACHY_ENGINE_SIZE_BYTES`, `GRAMMACHY_SHELL_JSON`, `GRAMMACHY_BINDINGS_LUA`, `GRAMMACHY_MENU_JSONC`, `GRAMMACHY_HYPRCTL_RELOAD=never`, and the `GRAMMACHY_BOOTSTRAP_*` set in `bin/bootstrap.sh`.
 - `cli/tests/engine_install.rs` owns its whole binary because it pins a digest for the process.
-  `languagetool_live.rs` skips when its port is silent.
+  `languagetool_live.rs` skips when the `grammachy-languagetool` user unit is not active.
 - Debug builds of the `harper` adapter time out at 60 s so CI can load the dictionary.
   The shipped binary keeps the spec limit of 10 s.
   `cli/tests/harper_lazy.rs` guards that the dictionary loads only inside `Harper::check`.
