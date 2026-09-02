@@ -139,12 +139,12 @@ fn text_over_the_limit_prints_text_too_long() {
     assert_eq!(envelope(&result)["error"]["code"], "text_too_long");
 }
 
-/// stdin is read only as far as the largest text any verb accepts, so a
-/// producer that never stops cannot fill memory. One byte past the cap is
-/// refused, and the message names the cap.
+/// stdin is read only as far as the overlay may capture, so a producer that
+/// never stops cannot fill memory. One byte past the cap is refused, and the
+/// message names the cap.
 #[test]
 fn stdin_past_the_byte_cap_prints_bad_arguments() {
-    let cap = 50_000 * 3;
+    let cap = grammachy::chunk::MAX_STDIN_BYTES as usize;
     let result = run(&["check"], &"a".repeat(cap + 1));
 
     assert_eq!(result.status, 1);

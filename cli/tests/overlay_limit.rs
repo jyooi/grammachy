@@ -13,7 +13,7 @@
 //! the two assertions about it stay source-scanning guards.
 
 use grammachy::args::EngineSlug;
-use grammachy::chunk::MAX_DRAFT_UTF16_UNITS;
+use grammachy::chunk::{MAX_DRAFT_UTF16_UNITS, MAX_STDIN_BYTES};
 
 const SLUGS: [EngineSlug; 2] = [EngineSlug::Languagetool, EngineSlug::Harper];
 
@@ -189,6 +189,25 @@ fn the_capture_bound_holds_more_than_the_draft_cap() {
     assert!(
         bound >= MAX_DRAFT_UTF16_UNITS * 4,
         "the capture bound {bound} must be four times the Draft cap {MAX_DRAFT_UTF16_UNITS}"
+    );
+}
+
+/// The CLI must read every byte the overlay may capture.
+///
+/// The overlay writes the whole captured text to `grammachy check` on stdin,
+/// and only the too-long card of spec section 6 cuts it. A stdin cap under
+/// the capture bound turns an oversize Selection into `bad_arguments`, which
+/// draws the Setup card instead of the too-long one.
+#[test]
+fn the_cli_reads_every_byte_the_capture_may_hold() {
+    let Some(bound) = node_capture_limit() else {
+        eprintln!("skipped: node is not on PATH, so ui/capture.js cannot be run");
+        return;
+    };
+
+    assert!(
+        MAX_STDIN_BYTES >= bound as u64,
+        "the stdin cap {MAX_STDIN_BYTES} must hold the capture bound {bound}"
     );
 }
 

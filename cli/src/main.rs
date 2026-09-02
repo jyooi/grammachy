@@ -173,23 +173,16 @@ fn first_line(error: &clap::Error) -> String {
     line.strip_prefix("error: ").unwrap_or(line).to_string()
 }
 
-/// The most bytes `check` and `chunk` read from stdin.
-///
-/// The largest text either verb accepts is a Draft of
-/// `chunk::MAX_DRAFT_UTF16_UNITS`, which is at most three bytes per unit in
-/// UTF-8. The read stops one byte past this, so a longer stdin is refused
-/// without being held in memory.
-pub const MAX_STDIN_BYTES: u64 = (chunk::MAX_DRAFT_UTF16_UNITS as u64) * 3;
-
 fn read_stdin() -> Result<String, String> {
     let mut bytes = Vec::new();
     io::stdin()
         .lock()
-        .take(MAX_STDIN_BYTES + 1)
+        .take(chunk::MAX_STDIN_BYTES + 1)
         .read_to_end(&mut bytes)
         .map_err(|error| format!("stdin could not be read: {error}"))?;
-    if bytes.len() as u64 > MAX_STDIN_BYTES {
-        return Err(format!("stdin is longer than {MAX_STDIN_BYTES} bytes."));
+    if bytes.len() as u64 > chunk::MAX_STDIN_BYTES {
+        let cap = chunk::MAX_STDIN_BYTES;
+        return Err(format!("stdin is longer than {cap} bytes."));
     }
     String::from_utf8(bytes).map_err(|_| "stdin is not valid UTF-8.".to_string())
 }

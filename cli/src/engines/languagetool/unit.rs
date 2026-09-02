@@ -212,7 +212,7 @@ fn shaped_like_ours(peer: &Peer, tree: Option<&Path>) -> Result<(), String> {
         ));
     }
 
-    let config = value_of(argv, "--config")
+    let config = rest_after(argv, " --config ")
         .ok_or_else(|| "the unit's command line names no --config".to_string())?;
     if !config.ends_with(CONFIG_SUFFIX) {
         return Err(format!(
@@ -229,7 +229,7 @@ fn shaped_like_ours(peer: &Peer, tree: Option<&Path>) -> Result<(), String> {
         })?;
         let jar = tree.join(SERVER_JAR);
         let classpath =
-            value_of(argv, "-cp").ok_or_else(|| "the JVM command names no -cp".to_string())?;
+            classpath_of(argv).ok_or_else(|| "the JVM command names no -cp".to_string())?;
         if classpath.starts_with(jar.to_string_lossy().as_ref()) {
             return Ok(());
         }
@@ -241,20 +241,34 @@ fn shaped_like_ours(peer: &Peer, tree: Option<&Path>) -> Result<(), String> {
     ))
 }
 
-/// The value after `--port` on one command line.
+/// The value after `--port` on one command line. A port holds no space, so
+/// the word after the flag is the whole value.
 fn port_of(argv: &str) -> Option<u16> {
-    value_of(argv, "--port")?.parse().ok()
-}
-
-/// The word after one flag on one command line.
-fn value_of<'a>(argv: &'a str, flag: &str) -> Option<&'a str> {
     let mut words = argv.split(' ');
     while let Some(word) = words.next() {
-        if word == flag {
-            return words.next();
+        if word == "--port" {
+            return words.next()?.parse().ok();
         }
     }
     None
+}
+
+/// Everything after one marker, to the end of the command line.
+///
+/// systemd prints `argv[]` space joined, so a path that holds a space is one
+/// word no split can find. Both shapes end on `--config`, so the value is the
+/// rest of the line.
+fn rest_after<'a>(argv: &'a str, marker: &str) -> Option<&'a str> {
+    let at = argv.find(marker)?;
+    Some(&argv[at + marker.len()..])
+}
+
+/// The classpath between `-cp` and the server class, which is where the JVM
+/// shape always puts it. A tree path that holds a space survives this.
+fn classpath_of(argv: &str) -> Option<&str> {
+    let rest = rest_after(argv, " -cp ")?;
+    let end = rest.find(&format!(" {SERVER_CLASS}"))?;
+    Some(&rest[..end])
 }
 
 /// Whether one whole word is on one command line.
@@ -437,6 +451,25 @@ mod tests {
             refused.contains("not the command this plugin starts"),
             "{refused}"
         );
+    }
+
+    /// systemd prints `argv[]` space joined, so a home directory that holds a
+    /// space must not make the proof refuse a unit this plugin started.
+    #[test]
+    fn a_tree_path_that_holds_a_space_still_passes() {
+        let tree = Path::new("/home/jia yi/.local/share/grammachy/engines/languagetool");
+        let config = "/run/user/1000/a b/grammachy/languagetool.properties";
+        let argv = format!(
+            "/usr/lib/jvm/default/bin/java -cp {0}/{SERVER_JAR}:{0}/libs/* \
+{SERVER_CLASS} --port 8081 --config {config}",
+            tree.display()
+        );
+
+        shaped_like_ours(
+            &peer(true, "/usr/lib/jvm/default/bin/java", &argv),
+            Some(tree),
+        )
+        .expect("a path with a space is one word of the command line");
     }
 
     /// The port on the command line must be the port the unit listens on, or
