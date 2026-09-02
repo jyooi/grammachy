@@ -1,27 +1,41 @@
-//! The loopback listener a transient user unit owns.
+//! The loopback listener a transient user unit owns, and the proof that one
+//! connection reached it.
 //!
 //! A local-server engine must never post a Selection to a port that another
 //! process bound. So the adapter never trusts a port number. Before every
-//! request it asks systemd whether the unit is active and which control group
-//! it runs in. It reads the processes of that group.
+//! request it asks systemd four things about the unit. Is it active? Which
+//! process is its main one? Is it transient? What command does it run?
 //!
-//! Then it reads which loopback socket in `LISTEN` state one of those
-//! processes holds. That socket is the endpoint. No socket, no request.
+//! Then it reads which loopback socket in `LISTEN` state that main process
+//! holds. That socket is the endpoint. No socket, no request.
 //!
-//! The machine is read through `systemctl --user show`, `/sys/fs/cgroup`,
-//! `/proc/<pid>/fd`, and `/proc/net/tcp` plus `tcp6`. Every parser here is a
-//! pure function of the text it reads, so the tests hand in text.
+//! A listener read before the request is not the socket the request uses.
+//! So the second half is [`accepted_by`]. Once the adapter is connected, it
+//! reads the server end of that very connection from `/proc/net/tcp`. Then
+//! it proves that the same main process holds that end. The request goes
+//! over the connection only after that proof.
+//!
+//! So nothing that takes the port between the two reads can receive the
+//! text. What this cannot prove is that no other program of the same user
+//! started the unit under this name with the same command. A program that
+//! runs as the user already reads the primary selection and the clipboard
+//! directly. That is outside what a loopback check can protect.
+//!
+//! The machine is read through `systemctl --user show`, `/proc/<pid>/fd`, and
+//! `/proc/net/tcp` plus `tcp6`. Every parser here is a pure function of the
+//! text it reads, so the tests hand in text.
 
 use std::collections::HashSet;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
-use std::path::Path;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpStream};
 use std::process::Command;
+use std::thread::sleep;
+use std::time::{Duration, Instant};
 
 /// What the unit owns right now.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Owned {
-    /// The unit is active and this is its loopback listener.
-    Listening(SocketAddr),
+    /// The unit is active and its main process holds this loopback listener.
+    Listening(Peer),
     /// The unit is active and its loopback listener is not open yet.
     Starting,
     /// The unit is not active, so nothing on the machine speaks for it.
@@ -30,10 +44,33 @@ pub enum Owned {
     Unknown(String),
 }
 
-/// One listening TCP socket on the loopback interface.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Listener {
+/// The listener one unit's main process holds, and how the unit was started.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Peer {
     pub address: SocketAddr,
+    /// The main process of the unit, which must hold every socket the
+    /// adapter talks to.
+    pub pid: u32,
+    /// Whether `systemd-run` made the unit, rather than a unit file.
+    pub transient: bool,
+    pub exec_start: ExecStart,
+}
+
+/// The `path=` and `argv[]=` of the `ExecStart` line `systemctl show` prints.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ExecStart {
+    pub path: String,
+    /// The argument vector as one space-joined line, the way systemd prints
+    /// it, with the program as its first word.
+    pub argv: String,
+}
+
+/// One TCP socket on the loopback interface, as `/proc/net/tcp` lists it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Socket {
+    pub local: SocketAddr,
+    pub remote: SocketAddr,
+    pub listening: bool,
     pub inode: u64,
 }
 
@@ -42,14 +79,25 @@ pub struct Listener {
 pub struct UnitFacts {
     pub active_state: String,
     pub main_pid: u32,
-    pub control_group: String,
+    pub transient: bool,
+    pub exec_start: ExecStart,
 }
 
 /// The `LISTEN` state in `/proc/net/tcp`.
 const LISTEN: &str = "0A";
 
-/// Where the unified cgroup hierarchy is mounted.
-const CGROUP_ROOT: &str = "/sys/fs/cgroup";
+/// The `ESTABLISHED` state in `/proc/net/tcp`.
+const ESTABLISHED: &str = "01";
+
+/// How long [`accepted_by`] waits for the server to accept the connection.
+///
+/// A connection the server did not accept yet sits in its queue with no
+/// inode, so the proof has to wait for the `accept`. A JVM under load takes
+/// milliseconds. This is far above that and far below the Check timeout.
+const ACCEPT_BUDGET: Duration = Duration::from_secs(2);
+
+/// Time between two reads while the server accepts.
+const ACCEPT_PROBE: Duration = Duration::from_millis(10);
 
 /// Read the machine and answer what the unit owns.
 pub fn owned_listener(unit: &str) -> Owned {
@@ -60,13 +108,54 @@ pub fn owned_listener(unit: &str) -> Owned {
     if !is_active(&facts.active_state) {
         return Owned::Inactive;
     }
+    if facts.main_pid == 0 {
+        return Owned::Starting;
+    }
 
-    let pids = unit_pids(&facts);
-    let inodes: HashSet<u64> = pids.iter().flat_map(|pid| socket_inodes(*pid)).collect();
-    let listeners = loopback_listeners();
-    match owned_by(&listeners, &inodes) {
-        Some(address) => Owned::Listening(address),
+    let inodes = socket_inodes(facts.main_pid);
+    match owned_by(&loopback_sockets(), &inodes) {
+        Some(address) => Owned::Listening(Peer {
+            address,
+            pid: facts.main_pid,
+            transient: facts.transient,
+            exec_start: facts.exec_start,
+        }),
         None => Owned::Starting,
+    }
+}
+
+/// Prove that the server end of `stream` is a socket the process `pid` holds.
+///
+/// The server end is the `ESTABLISHED` row whose local address is the one the
+/// stream connected to and whose remote address is the stream's own. Its
+/// inode is the file the server process holds. The check waits for the server
+/// to accept, because the row carries no inode before that.
+pub fn accepted_by(stream: &TcpStream, pid: u32) -> Result<(), String> {
+    let client = stream
+        .local_addr()
+        .map_err(|error| format!("the connection has no local address: {error}"))?;
+    let server = stream
+        .peer_addr()
+        .map_err(|error| format!("the connection has no peer address: {error}"))?;
+
+    let deadline = Instant::now() + ACCEPT_BUDGET;
+    loop {
+        if let Some(inode) = accepted_inode(&loopback_sockets(), server, client) {
+            return if socket_inodes(pid).contains(&inode) {
+                Ok(())
+            } else {
+                Err(format!(
+                    "the connection to {server} was accepted by a process other than {pid}, the main process of the unit"
+                ))
+            };
+        }
+        if Instant::now() >= deadline {
+            return Err(format!(
+                "the connection to {server} was not accepted within {} s",
+                ACCEPT_BUDGET.as_secs()
+            ));
+        }
+        sleep(ACCEPT_PROBE);
     }
 }
 
@@ -77,7 +166,7 @@ fn unit_facts(unit: &str) -> Result<UnitFacts, String> {
             "--user",
             "show",
             unit,
-            "--property=ActiveState,MainPID,ControlGroup",
+            "--property=ActiveState,MainPID,Transient,ExecStart",
         ])
         .output()
         .map_err(|error| format!("systemctl --user could not run: {error}"))?;
@@ -100,49 +189,41 @@ pub fn parse_show(text: &str) -> UnitFacts {
         match key.trim() {
             "ActiveState" => facts.active_state = value.trim().to_string(),
             "MainPID" => facts.main_pid = value.trim().parse().unwrap_or(0),
-            "ControlGroup" => facts.control_group = value.trim().to_string(),
+            "Transient" => facts.transient = value.trim() == "yes",
+            "ExecStart" => facts.exec_start = parse_exec_start(value),
             _ => {}
         }
     }
     facts
 }
 
+/// The `path=` and `argv[]=` fields of one `ExecStart` value.
+///
+/// systemd prints `{ path=/usr/bin/x ; argv[]=/usr/bin/x --flag ; ... }`.
+/// Each field ends at the next ` ; `, so a path with a space survives.
+pub fn parse_exec_start(value: &str) -> ExecStart {
+    let field = |name: &str| -> String {
+        let Some(start) = value.find(name) else {
+            return String::new();
+        };
+        let rest = &value[start + name.len()..];
+        let end = rest.find(" ; ").unwrap_or(rest.len());
+        rest[..end].trim_end_matches(" }").trim().to_string()
+    };
+    ExecStart {
+        path: field("path="),
+        argv: field("argv[]="),
+    }
+}
+
 pub fn is_active(state: &str) -> bool {
     matches!(state, "active" | "activating" | "reloading")
 }
 
-/// The processes of the unit: its control group, or its main process alone
-/// when the group cannot be read.
-fn unit_pids(facts: &UnitFacts) -> Vec<u32> {
-    if !facts.control_group.is_empty() {
-        let procs = Path::new(CGROUP_ROOT)
-            .join(facts.control_group.trim_start_matches('/'))
-            .join("cgroup.procs");
-        if let Ok(text) = std::fs::read_to_string(procs) {
-            let pids = parse_pids(&text);
-            if !pids.is_empty() {
-                return pids;
-            }
-        }
-    }
-    if facts.main_pid > 0 {
-        vec![facts.main_pid]
-    } else {
-        Vec::new()
-    }
-}
-
-/// One pid per line, as `cgroup.procs` prints them.
-pub fn parse_pids(text: &str) -> Vec<u32> {
-    text.lines()
-        .filter_map(|line| line.trim().parse().ok())
-        .collect()
-}
-
 /// The socket inodes one process holds open.
-fn socket_inodes(pid: u32) -> Vec<u64> {
+fn socket_inodes(pid: u32) -> HashSet<u64> {
     let Ok(entries) = std::fs::read_dir(format!("/proc/{pid}/fd")) else {
-        return Vec::new();
+        return HashSet::new();
     };
     entries
         .filter_map(|entry| entry.ok())
@@ -160,37 +241,46 @@ pub fn socket_inode(target: &str) -> Option<u64> {
         .ok()
 }
 
-/// Every listening loopback socket on the machine, both address families.
-fn loopback_listeners() -> Vec<Listener> {
-    let mut listeners = Vec::new();
+/// Every loopback TCP socket on the machine, both address families.
+fn loopback_sockets() -> Vec<Socket> {
+    let mut sockets = Vec::new();
     if let Ok(text) = std::fs::read_to_string("/proc/net/tcp") {
-        listeners.extend(parse_proc_net_tcp(&text));
+        sockets.extend(parse_proc_net_tcp(&text));
     }
     if let Ok(text) = std::fs::read_to_string("/proc/net/tcp6") {
-        listeners.extend(parse_proc_net_tcp(&text));
+        sockets.extend(parse_proc_net_tcp(&text));
     }
-    listeners
+    sockets
 }
 
-/// The listening loopback sockets of one `/proc/net/tcp` or `tcp6` table.
+/// The loopback sockets of one `/proc/net/tcp` or `tcp6` table, in the
+/// `LISTEN` and `ESTABLISHED` states.
 ///
 /// Each row is `sl local_address rem_address st ... uid timeout inode`. The
 /// address is hex in the byte order of the machine. This binary ships for
 /// little-endian machines only, so the hex is read as little-endian bytes.
-pub fn parse_proc_net_tcp(text: &str) -> Vec<Listener> {
+pub fn parse_proc_net_tcp(text: &str) -> Vec<Socket> {
     text.lines()
         .skip(1)
         .filter_map(|line| {
             let fields: Vec<&str> = line.split_whitespace().collect();
-            if fields.len() < 10 || fields[3] != LISTEN {
+            if fields.len() < 10 {
                 return None;
             }
-            let address = parse_local_address(fields[1])?;
+            let listening = match fields[3] {
+                LISTEN => true,
+                ESTABLISHED => false,
+                _ => return None,
+            };
+            let local = parse_address(fields[1])?;
+            let remote = parse_address(fields[2])?;
             let inode = fields[9].parse().ok()?;
-            address
-                .ip()
-                .is_loopback()
-                .then_some(Listener { address, inode })
+            local.ip().is_loopback().then_some(Socket {
+                local,
+                remote,
+                listening,
+                inode,
+            })
         })
         .collect()
 }
@@ -199,7 +289,7 @@ pub fn parse_proc_net_tcp(text: &str) -> Vec<Listener> {
 ///
 /// An IPv4-mapped IPv6 address answers as the IPv4 one, so the URL the
 /// adapter builds is the plain `127.0.0.1:port`.
-fn parse_local_address(field: &str) -> Option<SocketAddr> {
+fn parse_address(field: &str) -> Option<SocketAddr> {
     let (hex, port) = field.split_once(':')?;
     let port = u16::from_str_radix(port, 16).ok()?;
     let ip = match hex.len() {
@@ -224,92 +314,168 @@ fn parse_local_address(field: &str) -> Option<SocketAddr> {
     Some(SocketAddr::new(ip, port))
 }
 
-/// The first listener whose socket one of the unit's processes holds.
-pub fn owned_by(listeners: &[Listener], inodes: &HashSet<u64>) -> Option<SocketAddr> {
-    listeners
+/// The first listener whose socket is one of `inodes`.
+pub fn owned_by(sockets: &[Socket], inodes: &HashSet<u64>) -> Option<SocketAddr> {
+    sockets
         .iter()
-        .find(|listener| inodes.contains(&listener.inode))
-        .map(|listener| listener.address)
+        .find(|socket| socket.listening && inodes.contains(&socket.inode))
+        .map(|socket| socket.local)
+}
+
+/// The inode of the server end of one accepted connection, or `None` while
+/// the connection waits in the accept queue.
+pub fn accepted_inode(sockets: &[Socket], server: SocketAddr, client: SocketAddr) -> Option<u64> {
+    sockets
+        .iter()
+        .find(|socket| !socket.listening && socket.local == server && socket.remote == client)
+        .map(|socket| socket.inode)
+        .filter(|inode| *inode != 0)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::net::TcpListener;
+    use std::sync::mpsc;
 
     const TCP: &str = "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n\
    0: 0100007F:1F91 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 55555 1 0000000000000000 100 0 0 10 0\n\
    1: 00000000:0016 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 10811 1 0000000000000000 100 0 0 10 0\n\
-   2: 0100007F:A8C2 0100007F:1F91 01 00000000:00000000 00:00000000 00000000  1000        0 55556 1 0000000000000000 100 0 0 10 0\n";
+   2: 0100007F:1F91 0100007F:A8C2 01 00000000:00000000 00:00000000 00000000  1000        0 55557 1 0000000000000000 100 0 0 10 0\n\
+   3: 0100007F:A8C2 0100007F:1F91 01 00000000:00000000 00:00000000 00000000  1000        0 55556 1 0000000000000000 100 0 0 10 0\n\
+   4: 0100007F:1F91 0100007F:A8C3 01 00000000:00000000 00:00000000 00000000  1000        0 0 1 0000000000000000 100 0 0 10 0\n\
+   5: 0100007F:1F91 0100007F:A8C4 06 00000000:00000000 00:00000000 00000000  1000        0 0 1 0000000000000000 100 0 0 10 0\n";
 
     const TCP6: &str = "  sl  local_address                         remote_address                        st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n\
    0: 0000000000000000FFFF00000100007F:1F91 00000000000000000000000000000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 77777 1 0000000000000000 100 0 0 10 0\n\
    1: 00000000000000000000000001000000:1F92 00000000000000000000000000000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 77778 1 0000000000000000 100 0 0 10 0\n\
    2: 00000000000000000000000000000000:0050 00000000000000000000000000000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 77779 1 0000000000000000 100 0 0 10 0\n";
 
+    fn address(text: &str) -> SocketAddr {
+        text.parse().unwrap()
+    }
+
     #[test]
-    fn only_listening_loopback_rows_are_read() {
-        let listeners = parse_proc_net_tcp(TCP);
+    fn only_loopback_rows_in_listen_or_established_state_are_read() {
+        let sockets = parse_proc_net_tcp(TCP);
 
         assert_eq!(
-            listeners,
-            [Listener {
-                address: "127.0.0.1:8081".parse().unwrap(),
-                inode: 55555
-            }]
+            sockets.iter().map(|s| s.inode).collect::<Vec<_>>(),
+            [55555, 55557, 55556, 0]
         );
+        assert!(sockets[0].listening);
+        assert_eq!(sockets[0].local, address("127.0.0.1:8081"));
+        assert!(!sockets[1].listening);
+        assert_eq!(sockets[1].remote, address("127.0.0.1:43202"));
     }
 
     #[test]
     fn a_mapped_ipv4_listener_answers_as_ipv4_and_ipv6_loopback_as_itself() {
-        let listeners = parse_proc_net_tcp(TCP6);
+        let sockets = parse_proc_net_tcp(TCP6);
 
         assert_eq!(
-            listeners,
+            sockets
+                .iter()
+                .map(|socket| (socket.local, socket.inode))
+                .collect::<Vec<_>>(),
             [
-                Listener {
-                    address: "127.0.0.1:8081".parse().unwrap(),
-                    inode: 77777
-                },
-                Listener {
-                    address: "[::1]:8082".parse().unwrap(),
-                    inode: 77778
-                },
+                (address("127.0.0.1:8081"), 77777),
+                (address("[::1]:8082"), 77778),
             ]
         );
     }
 
     #[test]
     fn the_listener_a_unit_process_holds_is_the_owned_one() {
-        let listeners = parse_proc_net_tcp(TCP);
+        let sockets = parse_proc_net_tcp(TCP);
         let held: HashSet<u64> = [55555, 55556].into_iter().collect();
         let other: HashSet<u64> = [10811].into_iter().collect();
+        // An established socket is never a listener, whoever holds it.
+        let established: HashSet<u64> = [55557].into_iter().collect();
+
+        assert_eq!(owned_by(&sockets, &held), Some(address("127.0.0.1:8081")));
+        assert_eq!(owned_by(&sockets, &other), None);
+        assert_eq!(owned_by(&sockets, &established), None);
+    }
+
+    /// The server end of a connection is the row whose local address is the
+    /// server's and whose remote address is the client's. A row with inode 0
+    /// is a connection that still waits in the accept queue.
+    #[test]
+    fn the_server_end_of_a_connection_is_read_by_both_addresses() {
+        let sockets = parse_proc_net_tcp(TCP);
+        let server = address("127.0.0.1:8081");
 
         assert_eq!(
-            owned_by(&listeners, &held),
-            Some("127.0.0.1:8081".parse().unwrap())
+            accepted_inode(&sockets, server, address("127.0.0.1:43202")),
+            Some(55557)
         );
-        assert_eq!(owned_by(&listeners, &other), None);
+        assert_eq!(
+            accepted_inode(&sockets, server, address("127.0.0.1:43203")),
+            None,
+            "still in the accept queue"
+        );
+        assert_eq!(
+            accepted_inode(&sockets, server, address("127.0.0.1:43204")),
+            None,
+            "a closing connection is not an accepted one"
+        );
+        assert_eq!(
+            accepted_inode(&sockets, address("127.0.0.1:43202"), server),
+            Some(55556),
+            "the addresses swapped name the client end, a different socket"
+        );
     }
 
     #[test]
     fn the_show_output_is_read_by_key() {
         let facts = parse_show(
-            "ActiveState=active\nMainPID=4242\nControlGroup=/user.slice/user-1000.slice/user@1000.service/app.slice/grammachy-languagetool.service\n",
+            "ActiveState=active\nMainPID=4242\nTransient=yes\nExecStart={ path=/usr/lib/jvm/default/bin/java ; argv[]=/usr/lib/jvm/default/bin/java -cp /home/x/a b/x.jar org.languagetool.server.HTTPServer --port 8081 ; ignore_errors=no ; start_time=[n/a] ; stop_time=[n/a] ; pid=0 ; code=(null) ; status=0/0 }\n",
         );
 
         assert_eq!(facts.active_state, "active");
         assert_eq!(facts.main_pid, 4242);
-        assert!(facts
-            .control_group
-            .ends_with("grammachy-languagetool.service"));
+        assert!(facts.transient);
+        assert_eq!(facts.exec_start.path, "/usr/lib/jvm/default/bin/java");
+        assert_eq!(
+            facts.exec_start.argv,
+            "/usr/lib/jvm/default/bin/java -cp /home/x/a b/x.jar org.languagetool.server.HTTPServer --port 8081"
+        );
         assert!(is_active(&facts.active_state));
         assert!(!is_active("inactive"));
+
+        let file_unit = parse_show("ActiveState=active\nMainPID=1\nTransient=no\nExecStart=\n");
+        assert!(!file_unit.transient);
+        assert_eq!(file_unit.exec_start, ExecStart::default());
     }
 
     #[test]
-    fn socket_links_and_pid_lists_are_read() {
+    fn socket_links_are_read() {
         assert_eq!(socket_inode("socket:[55555]"), Some(55555));
         assert_eq!(socket_inode("/dev/null"), None);
-        assert_eq!(parse_pids("4242\n4243\n\n"), [4242, 4243]);
+    }
+
+    /// The proof runs against a listener this process holds: the accepted
+    /// end is ours, so our pid passes and any other pid is refused.
+    #[test]
+    fn a_connection_is_proven_against_the_process_that_accepted_it() {
+        let server = TcpListener::bind("127.0.0.1:0").expect("a loopback port is free");
+        let address = server.local_addr().unwrap();
+        let (release, released) = mpsc::channel::<()>();
+        let accepting = std::thread::spawn(move || {
+            let (accepted, _) = server.accept().expect("the client connects");
+            // Hold the server end open until the proofs below are done.
+            let _ = released.recv();
+            drop(accepted);
+        });
+
+        let stream = TcpStream::connect(address).expect("the listener answers");
+
+        accepted_by(&stream, std::process::id()).expect("this process accepted it");
+        let refused = accepted_by(&stream, 1).expect_err("init did not accept it");
+        assert!(refused.contains("other than 1"), "{refused}");
+
+        let _ = release.send(());
+        accepting.join().unwrap();
     }
 }

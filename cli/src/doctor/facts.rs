@@ -56,7 +56,7 @@ impl Facts {
                 .ok()
                 .map(|home| PathBuf::from(home).join("bin/java")),
             languagetool_address: match listener::owned_listener(languagetool::unit::UNIT_NAME) {
-                Owned::Listening(address) => Some(address.to_string()),
+                Owned::Listening(peer) => Some(peer.address.to_string()),
                 _ => None,
             },
             languagetool_unit: unit_state(languagetool::unit::UNIT_NAME),

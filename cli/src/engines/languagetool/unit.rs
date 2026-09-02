@@ -56,6 +56,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::engines::install;
+use crate::engines::listener::Peer;
 pub use crate::engines::local::StartFailure;
 use crate::engines::local::{self, ServerCommand};
 
@@ -148,20 +149,76 @@ pub fn java_home() -> Result<String, StartFailure> {
     )))
 }
 
+/// Where the server properties file lives while the session lasts.
+pub fn config_path() -> PathBuf {
+    local::runtime_directory()
+        .join("grammachy")
+        .join("languagetool.properties")
+}
+
 /// Write the server properties file and answer its path.
 ///
 /// `maxTextLength` is set here because the HTTP server reads it from a
 /// properties file, not from a flag (spec section 4).
 pub fn write_config() -> Result<PathBuf, StartFailure> {
-    let directory = local::runtime_directory().join("grammachy");
-    fs::create_dir_all(&directory).map_err(|error| {
+    let path = config_path();
+    let directory = path.parent().expect("the config path has a directory");
+    fs::create_dir_all(directory).map_err(|error| {
         StartFailure(format!("{} is not writable: {error}", directory.display()))
     })?;
 
-    let path = directory.join("languagetool.properties");
     fs::write(&path, format!("maxTextLength={MAX_TEXT_LENGTH}\n"))
         .map_err(|error| StartFailure(format!("{} is not writable: {error}", path.display())))?;
     Ok(path)
+}
+
+/// Prove that the running unit is one this plugin started.
+///
+/// The unit must be transient, because `start` only ever makes transient
+/// units. Its `ExecStart` must be a command line this build would run on
+/// this machine. That is the installed tree or the pacman launcher, on the
+/// port the unit was given, with the properties file of this session.
+///
+/// A unit that fails this was made by something else under the same name.
+/// Whoever made it, the Selection does not go to it.
+pub fn launched_here(peer: &Peer) -> Result<(), String> {
+    if !peer.transient {
+        return Err("the unit is not transient, so systemd-run did not make it".to_string());
+    }
+    let port = port_of(&peer.exec_start.argv)
+        .ok_or_else(|| "the unit's command line names no --port".to_string())?;
+    let java_home = java_home().map_err(|StartFailure(why)| why)?;
+    let config = config_path();
+    let mut candidates = Vec::new();
+    if let Some(tree) = install::installed("languagetool") {
+        candidates.push(tree_command(&tree, port, &config, java_home.clone()));
+    }
+    if Path::new(PACKAGE_LAUNCHER).is_file() {
+        candidates.push(package_command(port, &config, java_home));
+    }
+    let matches = candidates.iter().any(|candidate| {
+        candidate.program == peer.exec_start.path
+            && candidate.command_line() == peer.exec_start.argv
+    });
+    if matches {
+        Ok(())
+    } else {
+        Err(format!(
+            "the unit runs {}, which is not the command this plugin starts",
+            peer.exec_start.argv
+        ))
+    }
+}
+
+/// The value after `--port` on one command line.
+fn port_of(argv: &str) -> Option<u16> {
+    let mut words = argv.split(' ');
+    while let Some(word) = words.next() {
+        if word == "--port" {
+            return words.next()?.parse().ok();
+        }
+    }
+    None
 }
 
 /// Start the transient unit, or answer `Ok(())` when it already runs.
@@ -235,6 +292,71 @@ mod tests {
             [("JAVA_HOME".to_string(), "/usr/lib/jvm/default".to_string())]
         );
         assert!(!command.arguments.contains(&"--public".to_string()));
+    }
+
+    fn peer(transient: bool, program: &str, argv: &str) -> Peer {
+        Peer {
+            address: "127.0.0.1:8081".parse().unwrap(),
+            pid: 4242,
+            transient,
+            exec_start: crate::engines::listener::ExecStart {
+                path: program.to_string(),
+                argv: argv.to_string(),
+            },
+        }
+    }
+
+    /// A unit file under the same name, or a transient unit that runs some
+    /// other program, is not one this plugin started.
+    #[test]
+    fn a_unit_this_plugin_did_not_start_is_refused() {
+        let launcher = format!(
+            "{PACKAGE_LAUNCHER} --http --port 8081 --config {}",
+            config_path().display()
+        );
+        let file_unit = peer(false, PACKAGE_LAUNCHER, &launcher);
+        let refused = launched_here(&file_unit).expect_err("a unit file is not transient");
+        assert!(refused.contains("not transient"), "{refused}");
+
+        let no_port = peer(true, "/usr/bin/nc", "/usr/bin/nc -l 127.0.0.1 8081");
+        let refused = launched_here(&no_port).expect_err("no port");
+        assert!(refused.contains("no --port"), "{refused}");
+
+        let other = peer(true, "/usr/bin/nc", "/usr/bin/nc -l --port 8081");
+        let refused = launched_here(&other).expect_err("another program");
+        assert!(
+            refused.contains("not the command this plugin starts"),
+            "{refused}"
+        );
+    }
+
+    /// On a machine with the pacman launcher, the exact command `start`
+    /// would run passes, and the same command against another properties
+    /// file does not.
+    #[test]
+    fn the_launcher_command_of_this_session_passes() {
+        if !Path::new(PACKAGE_LAUNCHER).is_file() || java_home().is_err() {
+            return;
+        }
+        let expected = package_command(8081, &config_path(), java_home().unwrap());
+        let ours = peer(true, &expected.program, &expected.command_line());
+        launched_here(&ours).expect("the command this plugin starts");
+
+        let elsewhere = package_command(8081, Path::new("/tmp/x.properties"), java_home().unwrap());
+        let refused = launched_here(&peer(true, &elsewhere.program, &elsewhere.command_line()))
+            .expect_err("another properties file");
+        assert!(refused.contains("not the command"), "{refused}");
+    }
+
+    #[test]
+    fn the_port_is_read_from_the_command_line() {
+        assert_eq!(
+            port_of("/usr/bin/x --http --port 43210 --config /a"),
+            Some(43210)
+        );
+        assert_eq!(port_of("/usr/bin/x --port"), None);
+        assert_eq!(port_of("/usr/bin/x --port many"), None);
+        assert_eq!(port_of("/usr/bin/x"), None);
     }
 
     /// LanguageTool is opt in now, so a machine with neither the tree nor the

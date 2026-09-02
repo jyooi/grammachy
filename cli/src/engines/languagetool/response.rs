@@ -7,6 +7,22 @@ use crate::envelope::{Category, Issue};
 use crate::issues::normalise;
 use crate::text::utf16_slice;
 
+/// The most matches one answer contributes.
+///
+/// A Check is at most 5,000 UTF-16 units and two Issues never overlap, so no
+/// answer that survives `normalise` holds more than that. Matches past this
+/// are not read.
+pub const MAX_MATCHES: usize = 5_000;
+
+/// The longest `reason` an Issue carries, in characters. A LanguageTool
+/// message is one or two sentences. A longer one is cut here.
+pub const MAX_REASON_CHARS: usize = 1_000;
+
+/// The longest `fix` an Issue carries, in UTF-16 units: the whole Check
+/// limit. A replacement longer than the text it could replace is not a fix,
+/// and a match that offers one is dropped.
+pub const MAX_FIX_UTF16: usize = 5_000;
+
 /// Only the fields the adapter reads. LanguageTool sends many more.
 #[derive(Debug, Clone, Deserialize)]
 pub struct CheckResponse {
@@ -102,8 +118,9 @@ fn depth_of(rule: Option<&Rule>) -> Depth {
 /// own id, so it is removed, and the whitespace is collapsed to one space so a
 /// wrapped message stays one line in the inspector.
 fn reason_of(message: &str, rule_id: &str) -> String {
+    let message: String = message.chars().take(MAX_REASON_CHARS).collect();
     let stripped = if rule_id.is_empty() {
-        message.to_string()
+        message
     } else {
         message.replace(rule_id, "")
     };
@@ -121,8 +138,8 @@ fn reason_of(message: &str, rule_id: &str) -> String {
 /// Turn one match into an Issue, or drop it.
 ///
 /// A match is dropped when it is style, when its span does not address the sent
-/// text, when it carries no suggestion, or when its first suggestion is the
-/// text that is already there.
+/// text, when it carries no suggestion, when its first suggestion is the text
+/// that is already there, or when that suggestion is longer than a Check.
 fn issue_of(text: &str, item: &Match) -> Option<Issue> {
     let category = match depth_of(item.rule.as_ref()) {
         Depth::Style => return None,
@@ -135,7 +152,7 @@ fn issue_of(text: &str, item: &Match) -> Option<Issue> {
     let original = utf16_slice(text, start, end)?;
 
     let fix = item.replacements.first()?.value.clone();
-    if fix == original {
+    if fix == original || fix.encode_utf16().count() > MAX_FIX_UTF16 {
         return None;
     }
 
@@ -157,12 +174,13 @@ fn issue_of(text: &str, item: &Match) -> Option<Issue> {
 ///
 /// [`normalise`] keeps every guarantee of spec section 5.1: sorted by `start`,
 /// never overlapping because the earlier Issue wins, and never carrying a `fix`
-/// equal to the `original`.
+/// equal to the `original`. Only the first [`MAX_MATCHES`] matches are read.
 pub fn issues_from(text: &str, response: &CheckResponse) -> Vec<Issue> {
     normalise(
         response
             .matches
             .iter()
+            .take(MAX_MATCHES)
             .filter_map(|item| issue_of(text, item))
             .collect(),
     )
@@ -182,6 +200,60 @@ mod tests {
             reason_of("Did you mean\n'books'?", "CD_NN"),
             "Did you mean 'books'?"
         );
+    }
+
+    fn a_match(offset: usize, length: usize, fix: &str, message: &str) -> Match {
+        Match {
+            offset,
+            length,
+            message: message.to_string(),
+            replacements: vec![Replacement {
+                value: fix.to_string(),
+            }],
+            rule: None,
+        }
+    }
+
+    /// An answer is read only as far as the caps: matches past the count
+    /// cap are not read, a reason is cut, and an oversize fix drops its match.
+    #[test]
+    fn an_answer_is_read_within_the_caps() {
+        let text = "a".repeat(MAX_MATCHES + 200);
+        let matches: Vec<Match> = (0..MAX_MATCHES + 100)
+            .map(|index| a_match(index, 1, "b", "Use b."))
+            .collect();
+        let response = CheckResponse { matches };
+
+        let issues = issues_from(&text, &response);
+
+        assert_eq!(issues.len(), MAX_MATCHES);
+        // Every Issue came from the first MAX_MATCHES matches.
+        assert!(issues.iter().all(|issue| issue.start < MAX_MATCHES));
+
+        let long_reason = "x".repeat(MAX_REASON_CHARS + 50);
+        let cut = issues_from(
+            "ab",
+            &CheckResponse {
+                matches: vec![a_match(0, 1, "c", &long_reason)],
+            },
+        );
+        assert_eq!(cut[0].reason.chars().count(), MAX_REASON_CHARS);
+
+        let long_fix = "y".repeat(MAX_FIX_UTF16 + 1);
+        let dropped = issues_from(
+            "ab",
+            &CheckResponse {
+                matches: vec![a_match(0, 1, &long_fix, "Use y.")],
+            },
+        );
+        assert!(dropped.is_empty());
+        let kept = issues_from(
+            "ab",
+            &CheckResponse {
+                matches: vec![a_match(0, 1, &long_fix[1..], "Use y.")],
+            },
+        );
+        assert_eq!(kept.len(), 1);
     }
 
     #[test]

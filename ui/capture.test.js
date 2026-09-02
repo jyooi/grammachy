@@ -19,6 +19,7 @@ const path = require("node:path")
 const { spawnSync } = require("node:child_process")
 
 const Capture = require("./capture.js")
+const Limits = require("./limits.js")
 const { readCheck } = require("./errors.js")
 
 // ------------------------------------------------------------- the stub CLI
@@ -644,4 +645,58 @@ test("the empty state prints one line and names the kept text", () => {
   assert.equal(Capture.NOTHING_NEW,
     "No new selection. Highlight text and press SUPER + SHIFT + Q, or paste here.")
   assert.equal(Capture.CHECK_LAST_AGAIN, "Check last text again")
+})
+
+// ------------------------------------------------------------- the bounds
+
+test("every paste is bounded in bytes and in time before the shell collects it", () => {
+  assert.deepEqual(Capture.primaryCommand(), [
+    "sh", "-c", "timeout 5 wl-paste --primary --no-newline | head -c 65536"
+  ])
+  assert.deepEqual(Capture.fallbackCommand(), [
+    "sh", "-c", "timeout 5 wl-paste --no-newline | head -c 65536"
+  ])
+  assert.deepEqual(Capture.borrowCommand(), [
+    "sh", "-c", "timeout 5 wl-paste --no-newline | head -c 1048576"
+  ])
+})
+
+test("the capture bound is past any Selection the Check takes", () => {
+  // A UTF-16 unit is at most three bytes of UTF-8.
+  assert.ok(Capture.CAPTURE_LIMIT_BYTES >= Limits.CHECK_LIMIT_UNITS * 3)
+  assert.ok(Capture.CLIPBOARD_BORROW_LIMIT_BYTES > Capture.CAPTURE_LIMIT_BYTES)
+})
+
+test("the paste command runs within its bounds", () => {
+  const command = Capture.pasteCommand(false, 8)
+  const run = spawnSync(command[0], command.slice(1), {
+    env: { PATH: process.env.PATH },
+    encoding: "utf8",
+    // A stub wl-paste that never stops would hang without the bounds.
+    shell: false
+  })
+  // `wl-paste` is not here or has no display, so the pipeline answers with
+  // nothing. The point is that it ends and that the shape is one `sh` runs.
+  assert.equal(typeof run.stdout, "string")
+  assert.ok(run.stdout.length <= 8)
+})
+
+test("the UTF-8 length counts what head counted", () => {
+  assert.equal(Capture.utf8Bytes(""), 0)
+  assert.equal(Capture.utf8Bytes("abc"), 3)
+  assert.equal(Capture.utf8Bytes("\u00e9"), 2)
+  assert.equal(Capture.utf8Bytes("\u4e2d"), 3)
+  assert.equal(Capture.utf8Bytes("\ud83d\ude00"), 4)
+  assert.equal(Capture.utf8Bytes(Buffer.from("a\u00e9\u4e2d\ud83d\ude00").toString()), 10)
+})
+
+test("a borrowed clipboard at its bound is not borrowed", () => {
+  const bound = Capture.CLIPBOARD_BORROW_LIMIT_BYTES
+  assert.equal(Capture.borrowOverflowed("x".repeat(bound - 4)), false)
+  assert.equal(Capture.borrowOverflowed("x".repeat(bound - 3)), true)
+  assert.equal(Capture.borrowOverflowed("x".repeat(bound)), true)
+  // A cut multi-byte tail comes back as U+FFFD, three bytes.
+  assert.equal(Capture.borrowOverflowed("x".repeat(bound - 3) + "\ufffd"), true)
+  assert.equal(Capture.borrowOverflowed(""), false)
+  assert.equal(Capture.borrowOverflowed(undefined), false)
 })
