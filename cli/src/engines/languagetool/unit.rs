@@ -251,11 +251,16 @@ fn rest_after<'a>(argv: &'a str, marker: &str) -> Option<&'a str> {
     Some(&argv[at + marker.len()..])
 }
 
-/// The `--config` value, which ends at the next flag or at the end of the
-/// line. A path that holds a space survives this, and a later flag cannot
-/// stand in for the value the server reads.
+/// The `--config` value the server reads, which ends at the next flag or at
+/// the end of the line. A path that holds a space survives this, and a later
+/// flag cannot stand in for the value.
+///
+/// The last `--config` wins, because the option parser of the server takes
+/// the last one. A proof that read the first would pass a command line whose
+/// server reads another file.
 fn config_of(argv: &str) -> Option<&str> {
-    let rest = rest_after(argv, " --config ")?;
+    let at = argv.rfind(" --config ")? + " --config ".len();
+    let rest = &argv[at..];
     Some(match rest.find(" --") {
         Some(end) => &rest[..end],
         None => rest,
@@ -466,6 +471,21 @@ mod tests {
             refused.contains("not the command this plugin starts"),
             "{refused}"
         );
+    }
+
+    /// The server takes the last `--config`, so the proof has to read that
+    /// one. A first flag with a good path must not cover a second with a
+    /// crafted one.
+    #[test]
+    fn the_last_config_flag_is_the_one_proven() {
+        let argv = format!(
+            "{PACKAGE_LAUNCHER} --http --port 8081 --config {CONFIG} --config /tmp/evil.properties"
+        );
+
+        let refused = shaped_like_ours(&peer(true, PACKAGE_LAUNCHER, &argv), None)
+            .expect_err("the server reads /tmp/evil.properties");
+
+        assert!(refused.contains("/tmp/evil.properties"), "{refused}");
     }
 
     /// The suffix has to sit on a directory boundary. A directory whose name

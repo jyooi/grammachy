@@ -50,8 +50,9 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
 /// The most bytes of one `/v2/check` answer the adapter reads.
 ///
 /// A Check is at most 5,000 UTF-16 units and a match is a few hundred bytes,
-/// so a real answer is well under 1 MiB. Anything past this is not an answer
-/// to the question that was asked, and it is refused before it is parsed.
+/// so a real answer of 4 MiB is far past every answer this adapter asks for.
+/// Anything past this is not an answer to the question that was asked, and it
+/// is refused before it is parsed.
 pub const MAX_RESPONSE_BYTES: u64 = 4 * 1024 * 1024;
 
 /// Where the adapter sends a Check.
@@ -180,6 +181,22 @@ fn not_ours(unit: &str, why: &str) -> EngineFailure {
     EngineFailure::Unavailable(format!(
         "The unit {unit} is not one Grammachy started: {why}. Stop it with: systemctl --user stop {unit}"
     ))
+}
+
+/// The tail of the timeout message that names the ports the unit does hold.
+/// A JVM with a debug agent binds one of those before the server port, so
+/// naming them turns a bare timeout into a diagnosis.
+fn other_ports(held: &[u16]) -> String {
+    if held.is_empty() {
+        return String::new();
+    }
+    format!(
+        ", and it listens on {}",
+        held.iter()
+            .map(u16::to_string)
+            .collect::<Vec<_>>()
+            .join(", ")
+    )
 }
 
 /// A read or write that ran out of its socket timeout.
@@ -330,7 +347,7 @@ impl LanguageTool {
 
         let peer = match listener::owned_listener(unit) {
             Owned::Listening(peer) => peer,
-            Owned::Starting => self.wait_for_listener(unit)?,
+            Owned::Starting(_) => self.wait_for_listener(unit)?,
             Owned::Foreign(why) => return Err(not_ours(unit, &why)),
             Owned::Unknown(why) => return Err(EngineFailure::Unavailable(why)),
             Owned::Inactive => {
@@ -354,6 +371,7 @@ impl LanguageTool {
     /// Poll the unit until it owns a listener, within the startup budget.
     fn wait_for_listener(&self, unit: &str) -> Result<Peer, EngineFailure> {
         let deadline = Instant::now() + self.config.startup_budget;
+        let mut held;
         loop {
             match listener::owned_listener(unit) {
                 Owned::Listening(peer) => return Ok(peer),
@@ -364,12 +382,13 @@ impl LanguageTool {
                         "LanguageTool stopped before it answered: the unit {unit} is inactive"
                     )))
                 }
-                Owned::Starting => {}
+                Owned::Starting(ports) => held = ports,
             }
             if Instant::now() >= deadline {
                 return Err(EngineFailure::Unavailable(format!(
-                    "LanguageTool did not open a loopback listener within {} s: the unit {unit} is active without one",
-                    self.config.startup_budget.as_secs()
+                    "LanguageTool did not open a loopback listener within {} s: the unit {unit} is active without one{}",
+                    self.config.startup_budget.as_secs(),
+                    other_ports(&held)
                 )));
             }
             sleep(PROBE_INTERVAL);

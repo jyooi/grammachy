@@ -38,12 +38,14 @@ use std::time::{Duration, Instant};
 pub enum Owned {
     /// The unit is active and its main process holds this loopback listener.
     Listening(Peer),
-    /// The unit is active and its loopback listener is not open yet.
-    Starting,
-    /// The unit is active, and either its command line or the listener it
-    /// holds is not one this plugin runs. A command line with no `--port`
-    /// answers this before any socket is read. The message says which fact
-    /// refused it.
+    /// The unit is active and holds no loopback listener on the port its own
+    /// command line names. The ports it does hold ride along, so the caller
+    /// can name them when the startup budget ends.
+    Starting(Vec<u16>),
+    /// The unit is active and its command line is not one this plugin runs,
+    /// so no port on it names the server. The message says why. A unit that
+    /// only has not bound its port yet answers [`Owned::Starting`], because a
+    /// JVM binds a debug agent port before the server one.
     Foreign(String),
     /// The unit is not active, so nothing on the machine speaks for it.
     Inactive,
@@ -116,7 +118,7 @@ pub fn owned_listener(unit: &str) -> Owned {
         return Owned::Inactive;
     }
     if facts.main_pid == 0 {
-        return Owned::Starting;
+        return Owned::Starting(Vec::new());
     }
 
     let Some(port) = port_of(&facts.exec_start.argv) else {
@@ -132,23 +134,15 @@ pub fn owned_listener(unit: &str) -> Owned {
             transient: facts.transient,
             exec_start: facts.exec_start,
         }),
-        None => match held_ports(&sockets, &inodes) {
-            held if held.is_empty() => Owned::Starting,
-            held => Owned::Foreign(format!(
-                "the unit's command line names port {port}, and it listens on {}",
-                held.iter()
-                    .map(u16::to_string)
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            )),
-        },
+        None => Owned::Starting(held_ports(&sockets, &inodes)),
     }
 }
 
 /// Every loopback port the holder of `inodes` listens on.
 ///
-/// A unit that holds none is still starting. A unit that holds some, but not
-/// the one its own command line names, is not one this plugin started.
+/// A unit that has not bound its own port yet is still starting, whatever
+/// else it holds. These ports go into the message the wait prints when the
+/// startup budget ends.
 pub fn held_ports(sockets: &[Socket], inodes: &HashSet<u64>) -> Vec<u16> {
     sockets
         .iter()
@@ -461,8 +455,8 @@ mod tests {
         assert_eq!(owned_by(&sockets, &established, 8081), None);
     }
 
-    /// A unit that holds no loopback listener is still starting, and one
-    /// that holds another port is not one this plugin started.
+    /// The ports one process listens on go into the timeout message of the
+    /// wait, so a unit that binds another port first is diagnosable.
     #[test]
     fn the_ports_one_process_listens_on_separate_starting_from_foreign() {
         let sockets = parse_proc_net_tcp(TWO_LISTENERS);

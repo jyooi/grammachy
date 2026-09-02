@@ -189,13 +189,18 @@ mod tests {
         fresh_directory(&staging).expect("a tree");
         assert!(fs::read_dir(&staging).unwrap().next().is_none());
 
+        // The removal must not follow the link and empty its target.
+        let target = directory.join("target");
+        fs::create_dir(&target).unwrap();
+        fs::write(target.join("marker"), b"keep me").unwrap();
         fs::remove_dir(&staging).unwrap();
-        symlink(&directory, &staging).unwrap();
+        symlink(&target, &staging).unwrap();
         fresh_directory(&staging).expect("a link");
         assert!(!fs::symlink_metadata(&staging)
             .unwrap()
             .file_type()
             .is_symlink());
+        assert_eq!(fs::read(target.join("marker")).unwrap(), b"keep me");
 
         fs::remove_dir(&staging).unwrap();
         fs::write(&staging, b"a file").unwrap();

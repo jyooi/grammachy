@@ -118,13 +118,13 @@ fn depth_of(rule: Option<&Rule>) -> Depth {
 /// own id, so it is removed, and the whitespace is collapsed to one space so a
 /// wrapped message stays one line in the inspector.
 fn reason_of(message: &str, rule_id: &str) -> String {
-    let message: String = message.chars().take(MAX_REASON_CHARS).collect();
     let stripped = if rule_id.is_empty() {
-        message
+        message.to_string()
     } else {
         message.replace(rule_id, "")
     };
-    let collapsed = stripped.split_whitespace().collect::<Vec<_>>().join(" ");
+    let cut: String = stripped.chars().take(MAX_REASON_CHARS).collect();
+    let collapsed = cut.split_whitespace().collect::<Vec<_>>().join(" ");
     // Removing the id can leave an empty bracket pair behind.
     collapsed
         .replace("( )", "")
@@ -189,6 +189,20 @@ pub fn issues_from(text: &str, response: &CheckResponse) -> Vec<Issue> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The id is removed before the cut, so an id that would straddle the
+    /// cut cannot leave half of itself in the reason.
+    #[test]
+    fn a_rule_id_across_the_cut_is_still_removed() {
+        let rule_id = "MORFOLOGIK_RULE_EN_US";
+        let filler = "a ".repeat(MAX_REASON_CHARS / 2 - 4);
+        let message = format!("{filler}{rule_id} tail");
+
+        let reason = reason_of(&message, rule_id);
+
+        assert!(!reason.contains("MORFOLOGIK"), "{reason}");
+        assert!(reason.chars().count() <= MAX_REASON_CHARS);
+    }
 
     #[test]
     fn a_message_keeps_its_prose_and_loses_the_rule_id() {
