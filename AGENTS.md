@@ -70,7 +70,8 @@ The Local LLM and Cloud LLM engines were removed (HUF-240).
   Every QML file in `ui/` only draws.
   `ui/*.js` owns capture, settings, keymap, errors, and other logic.
   Both surfaces (`quick`, `compose`) share one `phase`, one Check, and one key map.
-- Every `Text` whose `text` is not a string literal sets `textFormat: Text.PlainText`, because the Selection, the Issues, and the error messages are strings the plugin did not write.
+- Every `Text` whose `text` is not a string literal sets `textFormat: Text.PlainText`.
+  The Selection, the Issues, and the error messages are strings the plugin did not write.
   `cli/tests/overlay_text.rs` enforces it.
 - Name every new `phase` in `Overlay.keyMode`.
   An unnamed phase uses `MODE_IDLE`.

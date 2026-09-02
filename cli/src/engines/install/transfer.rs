@@ -38,12 +38,13 @@ pub type Downloader = Box<dyn Fn(&str, &Path, u64) -> Result<Transfer, String> +
 /// How long curl may spend on connecting.
 pub const CONNECT_TIMEOUT_SECONDS: u64 = 30;
 
-/// The wall clock of one transfer. A transfer that runs out of it keeps its
-/// `.part` file and the next Install resumes.
+/// The wall clock of one curl attempt. An attempt that runs out of it keeps
+/// its `.part` file and the next Install resumes. curl retries up to three
+/// times, so one Install is bounded to four attempts.
 pub const MAX_TIME_SECONDS: u64 = 1_800;
 
-/// A transfer slower than this many bytes per second for [`STALL_SECONDS`] is
-/// a stall and ends.
+/// An attempt slower than this many bytes per second for [`STALL_SECONDS`] is
+/// a stall and ends. This bound also applies per curl attempt.
 pub const STALL_BYTES_PER_SECOND: u64 = 10_240;
 pub const STALL_SECONDS: u64 = 30;
 
