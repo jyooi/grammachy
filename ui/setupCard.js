@@ -7,9 +7,10 @@
 // This file owns the whole route from cli.lock's text and one run of
 // bin/bootstrap.sh to the card ui/SetupCard.qml draws: `readLock` reads the
 // two fields the card needs from cli.lock, and `card` turns those fields
-// plus the run's state into the title, the body, and what the card offers. A cli.lock with
-// no sha256 yet pins no release, so there is no Install button and the
-// body points at the developer path instead (docs/dev.md section 18).
+// plus the run's state into the title, the body, and what the card offers.
+// A cli.lock with no sha256 yet pins no release, so there is no Install
+// button and the body points at the developer path instead (docs/dev.md
+// section 18).
 
 var ASSET = "grammachy-x86_64-linux"
 
