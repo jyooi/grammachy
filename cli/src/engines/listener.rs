@@ -7,7 +7,9 @@
 //! process is its main one? Is it transient? What command does it run?
 //!
 //! Then it reads which loopback socket in `LISTEN` state that main process
-//! holds. That socket is the endpoint. No socket, no request.
+//! holds on the port the unit's own command line names. One process may hold
+//! more than one listener, so the port is what picks the server. That socket
+//! is the endpoint. No socket, no request.
 //!
 //! A listener read before the request is not the socket the request uses.
 //! So the second half is [`accepted_by`]. Once the adapter is connected, it
@@ -112,8 +114,14 @@ pub fn owned_listener(unit: &str) -> Owned {
         return Owned::Starting;
     }
 
+    let Some(port) = port_of(&facts.exec_start.argv) else {
+        return Owned::Unknown(format!(
+            "the unit {unit} runs a command line with no --port, so it is not one Grammachy started"
+        ));
+    };
+
     let inodes = socket_inodes(facts.main_pid);
-    match owned_by(&loopback_sockets(), &inodes) {
+    match owned_by(&loopback_sockets(), &inodes, port) {
         Some(address) => Owned::Listening(Peer {
             address,
             pid: facts.main_pid,
@@ -314,12 +322,33 @@ fn parse_address(field: &str) -> Option<SocketAddr> {
     Some(SocketAddr::new(ip, port))
 }
 
-/// The first listener whose socket is one of `inodes`.
-pub fn owned_by(sockets: &[Socket], inodes: &HashSet<u64>) -> Option<SocketAddr> {
+/// The listener on `port` whose socket is one of `inodes`.
+///
+/// The port comes from the unit's own command line, because one process may
+/// hold more than one loopback listener. A JVM with a debug agent holds two,
+/// and the first row of `/proc/net/tcp` is then the wrong one.
+pub fn owned_by(sockets: &[Socket], inodes: &HashSet<u64>, port: u16) -> Option<SocketAddr> {
     sockets
         .iter()
-        .find(|socket| socket.listening && inodes.contains(&socket.inode))
+        .find(|socket| {
+            socket.listening && socket.local.port() == port && inodes.contains(&socket.inode)
+        })
         .map(|socket| socket.local)
+}
+
+/// The value after `--port` on one command line. A port holds no space, so
+/// the word after the flag is the whole value.
+///
+/// This is the one parser of the port. [`owned_listener`] reads it to find
+/// the right listener, and `unit::launched_here` reads it to prove the shape.
+pub fn port_of(argv: &str) -> Option<u16> {
+    let mut words = argv.split(' ');
+    while let Some(word) = words.next() {
+        if word == "--port" {
+            return words.next()?.parse().ok();
+        }
+    }
+    None
 }
 
 /// The inode of the server end of one accepted connection, or `None` while
@@ -350,6 +379,12 @@ mod tests {
    0: 0000000000000000FFFF00000100007F:1F91 00000000000000000000000000000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 77777 1 0000000000000000 100 0 0 10 0\n\
    1: 00000000000000000000000001000000:1F92 00000000000000000000000000000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 77778 1 0000000000000000 100 0 0 10 0\n\
    2: 00000000000000000000000000000000:0050 00000000000000000000000000000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 77779 1 0000000000000000 100 0 0 10 0\n";
+
+    /// One process holds two loopback listeners: a debug agent on 5005 and
+    /// the server on 8081, with the debug row first.
+    const TWO_LISTENERS: &str = "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n\
+   0: 0100007F:138D 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 66661 1 0000000000000000 100 0 0 10 0\n\
+   1: 0100007F:1F91 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 66662 1 0000000000000000 100 0 0 10 0\n";
 
     fn address(text: &str) -> SocketAddr {
         text.parse().unwrap()
@@ -393,9 +428,47 @@ mod tests {
         // An established socket is never a listener, whoever holds it.
         let established: HashSet<u64> = [55557].into_iter().collect();
 
-        assert_eq!(owned_by(&sockets, &held), Some(address("127.0.0.1:8081")));
-        assert_eq!(owned_by(&sockets, &other), None);
-        assert_eq!(owned_by(&sockets, &established), None);
+        assert_eq!(
+            owned_by(&sockets, &held, 8081),
+            Some(address("127.0.0.1:8081"))
+        );
+        assert_eq!(owned_by(&sockets, &other, 22), None);
+        assert_eq!(owned_by(&sockets, &established, 8081), None);
+    }
+
+    /// A JVM with a debug agent holds two loopback listeners, and the debug
+    /// one may come first. The unit's own `--port` picks the server.
+    #[test]
+    fn the_port_of_the_command_line_picks_the_listener() {
+        let sockets = parse_proc_net_tcp(TWO_LISTENERS);
+        let held: HashSet<u64> = [66661, 66662].into_iter().collect();
+        let port = port_of(
+            "/usr/lib/jvm/default/bin/java -cp /x/languagetool-server.jar \
+org.languagetool.server.HTTPServer --port 8081 --config /run/x.properties",
+        )
+        .expect("the command line names a port");
+
+        assert_eq!(port, 8081);
+        assert_eq!(
+            owned_by(&sockets, &held, port),
+            Some(address("127.0.0.1:8081"))
+        );
+        // The debug listener is the first row, and it is never the answer.
+        assert_eq!(
+            owned_by(&sockets, &held, 5005),
+            Some(address("127.0.0.1:5005"))
+        );
+    }
+
+    #[test]
+    fn the_port_is_read_from_the_command_line() {
+        assert_eq!(
+            port_of("/usr/bin/x --http --port 43210 --config /a"),
+            Some(43210)
+        );
+        assert_eq!(port_of("/usr/bin/x --port"), None);
+        assert_eq!(port_of("/usr/bin/x --port many"), None);
+        assert_eq!(port_of("/usr/bin/x"), None);
     }
 
     /// The server end of a connection is the row whose local address is the

@@ -56,7 +56,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::engines::install;
-use crate::engines::listener::Peer;
+use crate::engines::listener::{self, Peer};
 pub use crate::engines::local::StartFailure;
 use crate::engines::local::{self, ServerCommand};
 
@@ -203,8 +203,8 @@ fn shaped_like_ours(peer: &Peer, tree: Option<&Path>) -> Result<(), String> {
     }
     let argv = peer.exec_start.argv.as_str();
 
-    let port =
-        port_of(argv).ok_or_else(|| "the unit's command line names no --port".to_string())?;
+    let port = listener::port_of(argv)
+        .ok_or_else(|| "the unit's command line names no --port".to_string())?;
     if port != peer.address.port() {
         return Err(format!(
             "the unit's command line names port {port}, and it listens on port {}",
@@ -239,18 +239,6 @@ fn shaped_like_ours(peer: &Peer, tree: Option<&Path>) -> Result<(), String> {
         "the unit runs {}, which is not the command this plugin starts",
         peer.exec_start.argv
     ))
-}
-
-/// The value after `--port` on one command line. A port holds no space, so
-/// the word after the flag is the whole value.
-fn port_of(argv: &str) -> Option<u16> {
-    let mut words = argv.split(' ');
-    while let Some(word) = words.next() {
-        if word == "--port" {
-            return words.next()?.parse().ok();
-        }
-    }
-    None
 }
 
 /// Everything after one marker, to the end of the command line.
@@ -512,17 +500,6 @@ mod tests {
 
         assert!(refused.contains("9999"), "{refused}");
         assert!(refused.contains("8081"), "{refused}");
-    }
-
-    #[test]
-    fn the_port_is_read_from_the_command_line() {
-        assert_eq!(
-            port_of("/usr/bin/x --http --port 43210 --config /a"),
-            Some(43210)
-        );
-        assert_eq!(port_of("/usr/bin/x --port"), None);
-        assert_eq!(port_of("/usr/bin/x --port many"), None);
-        assert_eq!(port_of("/usr/bin/x"), None);
     }
 
     /// LanguageTool is opt in now, so a machine with neither the tree nor the
