@@ -1,26 +1,29 @@
 //! End to end runs against a real LanguageTool server.
 //!
-//! Every case skips when `127.0.0.1:8081` is silent, so CI stays green on a
-//! machine without the `languagetool` package (spec section 13).
+//! Every case skips unless the `grammachy-languagetool` user unit is active,
+//! so CI stays green on a machine without the `languagetool` package (spec
+//! section 13). A developer starts the unit with one Check by hand, so the
+//! suite never starts a real unit itself.
 //!
 //! The cold start case is `#[ignore]` because it stops and starts a systemd
 //! unit. Run it by hand with
 //! `cargo test --test languagetool_live -- --ignored --nocapture`.
 
 use std::io::Write;
-use std::net::{SocketAddr, TcpStream};
 use std::path::Path;
 use std::process::{Command, Stdio};
-use std::time::Duration;
 
 use serde_json::Value;
 
-const ADDRESS: &str = "127.0.0.1:8081";
+const UNIT: &str = "grammachy-languagetool";
 
-/// Whether a LanguageTool server answers on the port the spec fixes.
-fn server_answers() -> bool {
-    let address: SocketAddr = ADDRESS.parse().expect("the address is valid");
-    TcpStream::connect_timeout(&address, Duration::from_millis(300)).is_ok()
+/// Whether the plugin-owned LanguageTool unit is active in the user manager.
+fn unit_is_active() -> bool {
+    Command::new("systemctl")
+        .args(["--user", "is-active", UNIT])
+        .output()
+        .map(|output| String::from_utf8_lossy(&output.stdout).trim() == "active")
+        .unwrap_or(false)
 }
 
 /// Run the binary with `text` on stdin and answer the parsed envelope.
@@ -81,8 +84,8 @@ fn assert_sorted_and_disjoint(envelope: &Value) {
 
 #[test]
 fn a_real_check_finds_the_tense_mistake() {
-    if !server_answers() {
-        eprintln!("skipped: no LanguageTool on {ADDRESS}");
+    if !unit_is_active() {
+        eprintln!("skipped: the {UNIT} unit is not active");
         return;
     }
 
@@ -102,8 +105,8 @@ fn a_real_check_finds_the_tense_mistake() {
 
 #[test]
 fn a_correct_sentence_finds_nothing() {
-    if !server_answers() {
-        eprintln!("skipped: no LanguageTool on {ADDRESS}");
+    if !unit_is_active() {
+        eprintln!("skipped: the {UNIT} unit is not active");
         return;
     }
 
@@ -114,8 +117,8 @@ fn a_correct_sentence_finds_nothing() {
 
 #[test]
 fn spans_survive_surrogate_pairs_and_crlf() {
-    if !server_answers() {
-        eprintln!("skipped: no LanguageTool on {ADDRESS}");
+    if !unit_is_active() {
+        eprintln!("skipped: the {UNIT} unit is not active");
         return;
     }
 
@@ -128,8 +131,8 @@ fn spans_survive_surrogate_pairs_and_crlf() {
 
 #[test]
 fn the_second_check_reuses_the_running_unit() {
-    if !server_answers() {
-        eprintln!("skipped: no LanguageTool on {ADDRESS}");
+    if !unit_is_active() {
+        eprintln!("skipped: the {UNIT} unit is not active");
         return;
     }
 
@@ -146,9 +149,9 @@ fn the_second_check_reuses_the_running_unit() {
 #[ignore = "stops and starts the grammachy-languagetool unit"]
 fn a_cold_start_brings_the_unit_up() {
     let _ = Command::new("systemctl")
-        .args(["--user", "stop", "grammachy-languagetool"])
+        .args(["--user", "stop", UNIT])
         .status();
-    assert!(!server_answers(), "the unit is stopped before the Check");
+    assert!(!unit_is_active(), "the unit is stopped before the Check");
 
     let text = "He go to school yesterday.";
     let envelope = check(text);
@@ -159,11 +162,7 @@ fn a_cold_start_brings_the_unit_up() {
     );
     assert_spans_slice_back(text, &envelope);
 
-    let active = Command::new("systemctl")
-        .args(["--user", "is-active", "grammachy-languagetool"])
-        .output()
-        .expect("systemctl runs");
-    assert_eq!(String::from_utf8_lossy(&active.stdout).trim(), "active");
+    assert!(unit_is_active(), "the Check started the unit");
 
     // The second Check reuses what the first one started.
     assert!(!check(text)["issues"].as_array().expect("issues").is_empty());

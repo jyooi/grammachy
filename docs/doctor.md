@@ -158,7 +158,7 @@ Dependency fields:
 
 The first missing piece in that order is the diagnosis.
 When nothing is missing, the diagnosis says the engine can run.
-For `languagetool` it also names the address its unit answers on.
+For `languagetool` it also names the loopback address its unit owns while it runs.
 
 ## Testing
 

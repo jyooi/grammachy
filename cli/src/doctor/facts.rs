@@ -9,6 +9,7 @@ use std::process::Command;
 
 use crate::engines::install;
 use crate::engines::languagetool;
+use crate::engines::listener::{self, Owned};
 
 /// Whether a transient unit runs right now.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -34,8 +35,8 @@ pub struct Facts {
     pub languagetool_launcher: Option<PathBuf>,
     /// The `bin/java` the launcher runs, through `JAVA_HOME` or the default JVM.
     pub java: Option<PathBuf>,
-    /// The address the `languagetool` adapter talks to.
-    pub languagetool_address: String,
+    /// The loopback listener the `languagetool` unit owns, when it runs one.
+    pub languagetool_address: Option<String>,
     pub languagetool_unit: UnitState,
     /// The binaries on `PATH` that stand for the system packages of
     /// [`super::deps`]. The Java runtime counts through `java` above, because
@@ -54,7 +55,10 @@ impl Facts {
             java: languagetool::unit::java_home()
                 .ok()
                 .map(|home| PathBuf::from(home).join("bin/java")),
-            languagetool_address: languagetool::Config::from_env().address,
+            languagetool_address: match listener::owned_listener(languagetool::unit::UNIT_NAME) {
+                Owned::Listening(address) => Some(address.to_string()),
+                _ => None,
+            },
             languagetool_unit: unit_state(languagetool::unit::UNIT_NAME),
             binaries: super::deps::SPECS
                 .iter()

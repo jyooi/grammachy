@@ -26,7 +26,7 @@ fn ready() -> Facts {
         )),
         languagetool_launcher: None,
         java: Some(PathBuf::from("/usr/lib/jvm/default/bin/java")),
-        languagetool_address: "127.0.0.1:8081".to_string(),
+        languagetool_address: None,
         languagetool_unit: UnitState::Stopped,
         binaries: vec![
             "curl".to_string(),
@@ -281,7 +281,7 @@ fn every_engine_slug_gets_its_own_ready_diagnosis() {
     let languagetool = Report::new(&facts, EngineSlug::Languagetool);
     assert!(languagetool.ready);
     assert!(
-        languagetool.diagnosis.contains("127.0.0.1:8081"),
+        languagetool.diagnosis.contains("private loopback port"),
         "{}",
         languagetool.diagnosis
     );
@@ -299,10 +299,16 @@ fn every_engine_slug_gets_its_own_ready_diagnosis() {
 fn a_running_unit_changes_the_ready_diagnosis() {
     let mut facts = ready();
     facts.languagetool_unit = UnitState::Running;
+    facts.languagetool_address = Some("127.0.0.1:43111".to_string());
 
     assert!(Report::new(&facts, EngineSlug::Languagetool)
         .diagnosis
-        .contains("its unit runs on 127.0.0.1:8081"));
+        .contains("its unit runs on 127.0.0.1:43111"));
+
+    facts.languagetool_address = None;
+    assert!(Report::new(&facts, EngineSlug::Languagetool)
+        .diagnosis
+        .contains("opening its loopback port"));
 }
 
 #[test]

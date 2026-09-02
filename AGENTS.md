@@ -98,7 +98,7 @@ The Local LLM and Cloud LLM engines were removed (HUF-240).
   Stub binaries and the seams below are the only route.
 - Seams: `GRAMMACHY_LANGUAGETOOL_ADDRESS` (loopback only, debug builds only), `GRAMMACHY_LANGUAGETOOL_START=never` (debug builds only), `GRAMMACHY_ENGINE_STOP=never`, `GRAMMACHY_ENGINES_DIR`, `GRAMMACHY_ENGINE_BASE_URL`, `GRAMMACHY_ENGINE_SHA256`, `GRAMMACHY_ENGINE_SIZE_BYTES`, `GRAMMACHY_SHELL_JSON`, `GRAMMACHY_BINDINGS_LUA`, `GRAMMACHY_MENU_JSONC`, `GRAMMACHY_HYPRCTL_RELOAD=never`, and the `GRAMMACHY_BOOTSTRAP_*` set in `bin/bootstrap.sh`.
 - `cli/tests/engine_install.rs` owns its whole binary because it pins a digest for the process.
-  `languagetool_live.rs` skips when its port is silent.
+  `languagetool_live.rs` skips when the `grammachy-languagetool` user unit is not active.
 - Debug builds of the `harper` adapter time out at 60 s so CI can load the dictionary.
   The shipped binary keeps the spec limit of 10 s.
   `cli/tests/harper_lazy.rs` guards that the dictionary loads only inside `Harper::check`.
