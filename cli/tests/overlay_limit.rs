@@ -204,7 +204,7 @@ fn the_cli_reads_every_byte_the_capture_may_hold() {
     let bound = node_capture_limit() as u64;
 
     assert!(
-        MAX_STDIN_BYTES >= bound + 3,
+        MAX_STDIN_BYTES >= bound + 6,
         "the stdin cap {MAX_STDIN_BYTES} must hold the capture bound {bound} and the re-encoding"
     );
 }

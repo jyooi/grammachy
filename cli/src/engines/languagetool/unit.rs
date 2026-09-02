@@ -242,15 +242,6 @@ fn shaped_like_ours(peer: &Peer, tree: Option<&Path>) -> Result<(), String> {
     ))
 }
 
-/// Everything after one marker, to the end of the command line.
-///
-/// systemd prints `argv[]` space joined, so a path that holds a space is one
-/// word no split can find.
-fn rest_after<'a>(argv: &'a str, marker: &str) -> Option<&'a str> {
-    let at = argv.find(marker)?;
-    Some(&argv[at + marker.len()..])
-}
-
 /// The `--config` value the server reads, which ends at the next flag or at
 /// the end of the line. A path that holds a space survives this, and a later
 /// flag cannot stand in for the value.
@@ -267,12 +258,28 @@ fn config_of(argv: &str) -> Option<&str> {
     })
 }
 
-/// The classpath between `-cp` and the server class, which is where the JVM
-/// shape always puts it. A tree path that holds a space survives this.
+/// Every spelling of the classpath flag the JVM takes.
+const CLASSPATH_FLAGS: [&str; 3] = [" -cp ", " -classpath ", " --class-path "];
+
+/// The classpath the JVM loads the server class from, which sits between the
+/// last classpath flag and the class name. A tree path that holds a space
+/// survives this.
+///
+/// The last flag wins, because the JVM takes the last one before the main
+/// class. A value that still names any spelling of the flag refuses, because
+/// only one of them can be the one the JVM used.
 fn classpath_of(argv: &str) -> Option<&str> {
-    let rest = rest_after(argv, " -cp ")?;
-    let end = rest.find(&format!(" {SERVER_CLASS}"))?;
-    Some(&rest[..end])
+    let class = argv.find(&format!(" {SERVER_CLASS}"))?;
+    let head = &argv[..class];
+    let at = CLASSPATH_FLAGS
+        .iter()
+        .filter_map(|flag| head.rfind(flag).map(|at| at + flag.len()))
+        .max()?;
+    let value = &head[at..];
+    CLASSPATH_FLAGS
+        .iter()
+        .all(|flag| !value.contains(flag))
+        .then_some(value)
 }
 
 /// Whether one whole word is on one command line.
@@ -471,6 +478,30 @@ mod tests {
             refused.contains("not the command this plugin starts"),
             "{refused}"
         );
+    }
+
+    /// The JVM takes the last classpath flag before the main class, so a
+    /// first flag with the installed tree must not cover a second one.
+    #[test]
+    fn a_second_classpath_flag_is_refused() {
+        let tree = Path::new(TREE);
+        for flag in ["-cp", "-classpath", "--class-path"] {
+            let argv = format!(
+                "/usr/lib/jvm/default/bin/java -cp {TREE}/{SERVER_JAR}:{TREE}/libs/* \
+{flag} /tmp/evil.jar {SERVER_CLASS} --port 8081 --config {CONFIG}"
+            );
+
+            let refused = shaped_like_ours(
+                &peer(true, "/usr/lib/jvm/default/bin/java", &argv),
+                Some(tree),
+            )
+            .expect_err("the JVM loads /tmp/evil.jar");
+
+            assert!(
+                refused.contains("not the command this plugin starts"),
+                "{flag}: {refused}"
+            );
+        }
     }
 
     /// The server takes the last `--config`, so the proof has to read that
