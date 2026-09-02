@@ -189,19 +189,23 @@ fn the_capture_bound_holds_more_than_the_draft_cap() {
     );
 }
 
-/// The CLI must read every byte the overlay may capture.
+/// The CLI must read every byte the overlay may capture, and more.
 ///
 /// The overlay writes the whole captured text to `grammachy check` on stdin,
 /// and only the too-long card of spec section 6 cuts it. A stdin cap under
 /// the capture bound turns an oversize Selection into `bad_arguments`, which
 /// draws the Setup card instead of the too-long one.
+///
+/// The margin is what makes the relation hold on a cut character. `head -c`
+/// cuts on a byte, and the shell decodes each orphan byte to U+FFFD, which
+/// is three bytes again. Three orphan bytes therefore add six bytes.
 #[test]
 fn the_cli_reads_every_byte_the_capture_may_hold() {
-    let bound = node_capture_limit();
+    let bound = node_capture_limit() as u64;
 
     assert!(
-        MAX_STDIN_BYTES >= bound as u64,
-        "the stdin cap {MAX_STDIN_BYTES} must hold the capture bound {bound}"
+        MAX_STDIN_BYTES >= bound + 6,
+        "the stdin cap {MAX_STDIN_BYTES} must hold the capture bound {bound} and the re-encoding"
     );
 }
 

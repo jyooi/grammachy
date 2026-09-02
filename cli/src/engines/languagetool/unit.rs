@@ -212,8 +212,8 @@ fn shaped_like_ours(peer: &Peer, tree: Option<&Path>) -> Result<(), String> {
         ));
     }
 
-    let config = rest_after(argv, " --config ")
-        .ok_or_else(|| "the unit's command line names no --config".to_string())?;
+    let config =
+        config_of(argv).ok_or_else(|| "the unit's command line names no --config".to_string())?;
     if !config.ends_with(CONFIG_SUFFIX) {
         return Err(format!(
             "the unit reads {config}, which is not a Grammachy properties file"
@@ -256,11 +256,21 @@ fn port_of(argv: &str) -> Option<u16> {
 /// Everything after one marker, to the end of the command line.
 ///
 /// systemd prints `argv[]` space joined, so a path that holds a space is one
-/// word no split can find. Both shapes end on `--config`, so the value is the
-/// rest of the line.
+/// word no split can find.
 fn rest_after<'a>(argv: &'a str, marker: &str) -> Option<&'a str> {
     let at = argv.find(marker)?;
     Some(&argv[at + marker.len()..])
+}
+
+/// The `--config` value, which ends at the next flag or at the end of the
+/// line. A path that holds a space survives this, and a later flag cannot
+/// stand in for the value the server reads.
+fn config_of(argv: &str) -> Option<&str> {
+    let rest = rest_after(argv, " --config ")?;
+    Some(match rest.find(" --") {
+        Some(end) => &rest[..end],
+        None => rest,
+    })
 }
 
 /// The classpath between `-cp` and the server class, which is where the JVM
@@ -449,6 +459,25 @@ mod tests {
         .expect_err("another classpath");
         assert!(
             refused.contains("not the command this plugin starts"),
+            "{refused}"
+        );
+    }
+
+    /// The `--config` value ends at the next flag, so a later argument that
+    /// carries the suffix cannot stand in for the file the server reads.
+    #[test]
+    fn a_later_flag_that_carries_the_suffix_is_refused() {
+        let argv = format!(
+            "{PACKAGE_LAUNCHER} --http --port 8081 --config /tmp/evil.properties \
+--extra /x/{CONFIG_SUFFIX}"
+        );
+
+        let refused = shaped_like_ours(&peer(true, PACKAGE_LAUNCHER, &argv), None)
+            .expect_err("the server reads /tmp/evil.properties");
+
+        assert!(refused.contains("/tmp/evil.properties"), "{refused}");
+        assert!(
+            refused.contains("not a Grammachy properties file"),
             "{refused}"
         );
     }
