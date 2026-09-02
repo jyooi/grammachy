@@ -752,6 +752,12 @@ Item {
   // reaches the source window rather than the overlay.
   function onClipboardBorrowed(text, generation) {
     if (!root.isLive(generation)) return
+    // A clipboard cut at its bound could not go back whole, so it is left
+    // where it is and no keystroke is sent.
+    if (Capture.pasteOverflowed(text)) {
+      root.showNothingNew()
+      return
+    }
     root.borrowedClipboard = typeof text === "string" ? text : ""
     root.clipboardBorrowed = true
     copyKeystroke.generation = generation
@@ -1617,12 +1623,15 @@ Item {
     }
   }
 
+  // Every paste runs the bounded command of `ui/capture.js`: a byte bound in
+  // front of the collector and a clock on the selection owner, so no
+  // producer decides how much the shell holds or how long it waits.
   Process {
     id: primaryPaste
     property int generation: 0
     property int startedGeneration: 0
     // Snapshot at start.
-    command: ["wl-paste", "--primary", "--no-newline"]
+    command: Capture.primaryCommand()
     onStarted: primaryPaste.startedGeneration = root.runGeneration
     stdout: StdioCollector {
       waitForEnd: true
@@ -1635,7 +1644,7 @@ Item {
     property int generation: 0
     property int startedGeneration: 0
     // Snapshot at start.
-    command: ["wl-paste", "--no-newline"]
+    command: Capture.borrowCommand()
     onStarted: savedClipboard.startedGeneration = root.runGeneration
     stdout: StdioCollector {
       waitForEnd: true
@@ -1670,7 +1679,7 @@ Item {
     property int generation: 0
     property int startedGeneration: 0
     // Snapshot at start.
-    command: ["wl-paste", "--no-newline"]
+    command: Capture.fallbackCommand()
     onStarted: fallbackPaste.startedGeneration = root.runGeneration
     stdout: StdioCollector {
       waitForEnd: true

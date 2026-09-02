@@ -3,9 +3,28 @@
 
 use serde::Deserialize;
 
+use crate::args::EngineSlug;
 use crate::envelope::{Category, Issue};
 use crate::issues::normalise;
 use crate::text::utf16_slice;
+
+/// The most Issues one answer contributes.
+///
+/// A Check is at most 5,000 UTF-16 units and two Issues never overlap, so no
+/// answer that survives `normalise` holds more than that. The cap counts the
+/// Issues a match yields, not the matches read, because several rules fire on
+/// one span and every one of those the reader never sees is a style or no-op
+/// match. A cap on the matches would drop real Issues behind them.
+pub const MAX_ISSUES: usize = 5_000;
+
+/// The longest `reason` an Issue carries, in characters. A LanguageTool
+/// message is one or two sentences. A longer one is cut here.
+pub const MAX_REASON_CHARS: usize = 1_000;
+
+/// The longest `fix` an Issue carries, in UTF-16 units: the whole Check
+/// limit. A replacement longer than the text it could replace is not a fix,
+/// and a match that offers one is dropped.
+pub const MAX_FIX_UTF16: usize = EngineSlug::Languagetool.check_limit_utf16();
 
 /// Only the fields the adapter reads. LanguageTool sends many more.
 #[derive(Debug, Clone, Deserialize)]
@@ -107,7 +126,8 @@ fn reason_of(message: &str, rule_id: &str) -> String {
     } else {
         message.replace(rule_id, "")
     };
-    let collapsed = stripped.split_whitespace().collect::<Vec<_>>().join(" ");
+    let cut: String = stripped.chars().take(MAX_REASON_CHARS).collect();
+    let collapsed = cut.split_whitespace().collect::<Vec<_>>().join(" ");
     // Removing the id can leave an empty bracket pair behind.
     collapsed
         .replace("( )", "")
@@ -121,8 +141,8 @@ fn reason_of(message: &str, rule_id: &str) -> String {
 /// Turn one match into an Issue, or drop it.
 ///
 /// A match is dropped when it is style, when its span does not address the sent
-/// text, when it carries no suggestion, or when its first suggestion is the
-/// text that is already there.
+/// text, when it carries no suggestion, when its first suggestion is the text
+/// that is already there, or when that suggestion is longer than a Check.
 fn issue_of(text: &str, item: &Match) -> Option<Issue> {
     let category = match depth_of(item.rule.as_ref()) {
         Depth::Style => return None,
@@ -135,7 +155,7 @@ fn issue_of(text: &str, item: &Match) -> Option<Issue> {
     let original = utf16_slice(text, start, end)?;
 
     let fix = item.replacements.first()?.value.clone();
-    if fix == original {
+    if fix == original || fix.encode_utf16().count() > MAX_FIX_UTF16 {
         return None;
     }
 
@@ -157,13 +177,14 @@ fn issue_of(text: &str, item: &Match) -> Option<Issue> {
 ///
 /// [`normalise`] keeps every guarantee of spec section 5.1: sorted by `start`,
 /// never overlapping because the earlier Issue wins, and never carrying a `fix`
-/// equal to the `original`.
+/// equal to the `original`. Only the first [`MAX_ISSUES`] Issues are kept.
 pub fn issues_from(text: &str, response: &CheckResponse) -> Vec<Issue> {
     normalise(
         response
             .matches
             .iter()
             .filter_map(|item| issue_of(text, item))
+            .take(MAX_ISSUES)
             .collect(),
     )
 }
@@ -171,6 +192,26 @@ pub fn issues_from(text: &str, response: &CheckResponse) -> Vec<Issue> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The id is removed before the cut, so an id that straddles the cut
+    /// cannot leave half of itself in the reason.
+    ///
+    /// The filler puts the cut inside the id. A cut before the strip leaves
+    /// `MORFOLOGIK_RUL` in the answer, because `replace` then finds no whole
+    /// id to remove.
+    #[test]
+    fn a_rule_id_across_the_cut_is_still_removed() {
+        let rule_id = "MORFOLOGIK_RULE_EN_US";
+        let filler = "a".repeat(MAX_REASON_CHARS - 15);
+        let message = format!("{filler} {rule_id} tail");
+
+        let reason = reason_of(&message, rule_id);
+
+        assert!(!reason.contains("MORFOLOGIK"), "{reason}");
+        assert!(!reason.contains("MORF"), "{reason}");
+        // Strip first, then cut: the filler and " tail" are all that is left.
+        assert_eq!(reason, format!("{filler} tail"));
+    }
 
     #[test]
     fn a_message_keeps_its_prose_and_loses_the_rule_id() {
@@ -182,6 +223,98 @@ mod tests {
             reason_of("Did you mean\n'books'?", "CD_NN"),
             "Did you mean 'books'?"
         );
+    }
+
+    fn a_match(offset: usize, length: usize, fix: &str, message: &str) -> Match {
+        Match {
+            offset,
+            length,
+            message: message.to_string(),
+            replacements: vec![Replacement {
+                value: fix.to_string(),
+            }],
+            rule: None,
+        }
+    }
+
+    /// An answer is read only as far as the caps: Issues past the count cap
+    /// are not kept, a reason is cut, and an oversize fix drops its match.
+    #[test]
+    fn an_answer_is_read_within_the_caps() {
+        let text = "a".repeat(MAX_ISSUES + 200);
+        let matches: Vec<Match> = (0..MAX_ISSUES + 100)
+            .map(|index| a_match(index, 1, "b", "Use b."))
+            .collect();
+        let response = CheckResponse { matches };
+
+        let issues = issues_from(&text, &response);
+
+        assert_eq!(issues.len(), MAX_ISSUES);
+        // Every Issue came from the first MAX_ISSUES matches.
+        assert!(issues.iter().all(|issue| issue.start < MAX_ISSUES));
+
+        let long_reason = "x".repeat(MAX_REASON_CHARS + 50);
+        let cut = issues_from(
+            "ab",
+            &CheckResponse {
+                matches: vec![a_match(0, 1, "c", &long_reason)],
+            },
+        );
+        assert_eq!(cut[0].reason.chars().count(), MAX_REASON_CHARS);
+
+        let long_fix = "y".repeat(MAX_FIX_UTF16 + 1);
+        let dropped = issues_from(
+            "ab",
+            &CheckResponse {
+                matches: vec![a_match(0, 1, &long_fix, "Use y.")],
+            },
+        );
+        assert!(dropped.is_empty());
+        let kept = issues_from(
+            "ab",
+            &CheckResponse {
+                matches: vec![a_match(0, 1, &long_fix[1..], "Use y.")],
+            },
+        );
+        assert_eq!(kept.len(), 1);
+    }
+
+    /// The cap counts Issues, so a run of style matches at the head of the
+    /// answer must not hide the mistakes behind it.
+    ///
+    /// A cap on the matches read answers an empty list here, and the reader
+    /// sees a clean Check on text that holds mistakes.
+    #[test]
+    fn style_matches_at_the_head_do_not_spend_the_cap() {
+        let style = Rule {
+            id: "TOO_LONG_SENTENCE".to_string(),
+            issue_type: "style".to_string(),
+            category: Some(RuleCategory {
+                id: "STYLE".to_string(),
+            }),
+        };
+        let text = "a".repeat(MAX_ISSUES + 400);
+        let mut matches: Vec<Match> = (0..MAX_ISSUES)
+            .map(|index| {
+                let mut item = a_match(index, 1, "b", "Shorten it.");
+                item.rule = Some(style.clone());
+                item
+            })
+            .collect();
+        matches.extend((MAX_ISSUES..MAX_ISSUES + 400).map(|index| {
+            let mut item = a_match(index, 1, "b", "Use b.");
+            item.rule = Some(Rule {
+                id: "HE_GO".to_string(),
+                issue_type: "grammar".to_string(),
+                category: None,
+            });
+            item
+        }));
+
+        let issues = issues_from(&text, &CheckResponse { matches });
+
+        assert_eq!(issues.len(), 400);
+        assert!(issues.iter().all(|issue| issue.start >= MAX_ISSUES));
     }
 
     #[test]

@@ -13,7 +13,7 @@
 //! the two assertions about it stay source-scanning guards.
 
 use grammachy::args::EngineSlug;
-use grammachy::chunk::MAX_DRAFT_UTF16_UNITS;
+use grammachy::chunk::{MAX_DRAFT_UTF16_UNITS, MAX_STDIN_BYTES};
 
 const SLUGS: [EngineSlug; 2] = [EngineSlug::Languagetool, EngineSlug::Harper];
 
@@ -171,4 +171,69 @@ fn the_first_n_note_is_worded_from_the_checked_text() {
         !note.contains("limitUnits"),
         "the note must not follow the live limit: {note}"
     );
+}
+
+/// The capture bound of `ui/capture.js` has to sit above the Draft cap.
+///
+/// A Selection reaches Compose, so a capture cut below the cap would put half
+/// a Draft on screen with no error. The worst case is three bytes per UTF-16
+/// unit, so a bound of four times the cap in bytes always holds more units
+/// than the cap. Rust owns the cap, so the relation lives here.
+#[test]
+fn the_capture_bound_holds_more_than_the_draft_cap() {
+    let bound = node_capture_limit();
+
+    assert!(
+        bound >= MAX_DRAFT_UTF16_UNITS * 4,
+        "the capture bound {bound} must be four times the Draft cap {MAX_DRAFT_UTF16_UNITS}"
+    );
+}
+
+/// The CLI must read every byte the overlay may capture, and more.
+///
+/// The overlay writes the whole captured text to `grammachy check` on stdin,
+/// and only the too-long card of spec section 6 cuts it. A stdin cap under
+/// the capture bound turns an oversize Selection into `bad_arguments`, which
+/// draws the Setup card instead of the too-long one.
+///
+/// The margin is what makes the relation hold on a cut character. `head -c`
+/// cuts on a byte, and the shell decodes each orphan byte to U+FFFD, which
+/// is three bytes again. Three orphan bytes therefore add six bytes.
+#[test]
+fn the_cli_reads_every_byte_the_capture_may_hold() {
+    let bound = node_capture_limit() as u64;
+
+    assert!(
+        MAX_STDIN_BYTES >= bound + 6,
+        "the stdin cap {MAX_STDIN_BYTES} must hold the capture bound {bound} and the re-encoding"
+    );
+}
+
+/// `Capture.PASTE_LIMIT_BYTES`, read by running the module under node.
+///
+/// This relation keeps the quick route on the too-long card, so a machine
+/// without node fails rather than skips.
+fn node_capture_limit() -> usize {
+    let module = format!("{}/../ui/capture.js", env!("CARGO_MANIFEST_DIR"));
+    let program = format!(
+        "const Capture = require({});\
+         process.stdout.write(String(Capture.PASTE_LIMIT_BYTES))",
+        serde_json::to_string(&module).expect("the module path is a JSON string"),
+    );
+
+    let output = std::process::Command::new("node")
+        .arg("-e")
+        .arg(program)
+        .output()
+        .unwrap_or_else(|error| {
+            panic!("node must be on PATH to read the capture bound of ui/capture.js: {error}")
+        });
+    assert!(
+        output.status.success(),
+        "node loaded ui/capture.js: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stdout)
+        .parse()
+        .expect("node answered a number")
 }

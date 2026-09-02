@@ -46,8 +46,16 @@ The Local LLM and Cloud LLM engines were removed (HUF-240).
   Harper counts `char`s, so `cli/src/engines/harper/lints.rs` converts through `text::utf16_offsets`.
 - Engines implement the `Engine` trait in `cli/src/engine.rs` and live under `cli/src/engines/`.
   Every adapter hands its Issues to `issues::normalise`, which owns the sort, overlap, and no-op guarantees of spec 5.1.
-- The `languagetool` adapter never trusts a port. `cli/src/engines/listener.rs` proves, before every request, that the unit's own process holds the loopback listener.
+- The `languagetool` adapter never trusts a port. `cli/src/engines/listener.rs` proves, before every request, that the unit's main process holds the loopback listener.
+  `unit::launched_here` proves the unit is transient and runs the command this build starts.
+  The `BoundConnector` in `cli/src/engines/languagetool/mod.rs` proves, on the connected socket, that the same process accepted it.
   Fixtures that name `127.0.0.1:8081` are sample text only.
+- Every producer the plugin reads is bounded before the read: `chunk::MAX_STDIN_BYTES`, `MAX_RESPONSE_BYTES` and the `MAX_ISSUES`, `MAX_REASON_CHARS`, and `MAX_FIX_UTF16` caps of the `languagetool` adapter, and the `wl-paste` commands of `ui/capture.js`.
+  `chunk::MAX_STDIN_BYTES` must stay above `PASTE_LIMIT_BYTES` of `ui/capture.js`, never equal to it.
+  A cut character decodes to replacement characters that are longer, so the margin is necessary.
+  `cli/tests/overlay_limit.rs` holds that margin.
+  One paste bound covers all three `wl-paste` reads, because step 2 of spec section 3 compares two of them for equality.
+- `cli/src/engines/install/guard.rs` checks every path the install writes. A symbolic link refuses.
 - Only `languagetool` and `harper` are `EngineSlug` variants.
   A stored engine the CLI does not recognise falls back to the default rather than failing (`cli/tests/settings.rs`).
 - Settings resolve in `cli/src/settings.rs`: flags, then the plugin entry in `$HOME/.config/omarchy/shell.json`, then spec 7 defaults.

@@ -527,3 +527,54 @@ fn the_empty_state_says_the_same_thing_as_the_spec() {
         "spec sections 3 and 6 record the same wording"
     );
 }
+
+/// Every `wl-paste` the overlay runs is the bounded command of
+/// `ui/capture.js`, with a byte bound in front of the collector and a clock
+/// on the selection owner, so no producer decides what the shell holds. A
+/// clipboard cut at its bound is not borrowed, because it could not go back
+/// whole.
+#[test]
+fn every_paste_runs_the_bounded_command_and_a_cut_clipboard_is_not_borrowed() {
+    let source = read("Overlay.qml");
+
+    assert!(
+        !source.contains("\"wl-paste\""),
+        "no Process names wl-paste directly: ui/capture.js builds every paste command"
+    );
+    for (process, command) in [
+        ("primaryPaste", "Capture.primaryCommand()"),
+        ("savedClipboard", "Capture.borrowCommand()"),
+        ("fallbackPaste", "Capture.fallbackCommand()"),
+    ] {
+        // The lines of this Process, up to the next `id:` of the file.
+        let start = source
+            .find(&format!("id: {process}"))
+            .unwrap_or_else(|| panic!("Overlay.qml declares {process}"));
+        let rest = &source[start..];
+        let end = rest[1..]
+            .find("\n    id: ")
+            .map(|at| at + 1)
+            .unwrap_or(rest.len());
+        let block = &rest[..end];
+        assert!(
+            block.contains(&format!("command: {command}")),
+            "{process} runs {command}: {block}"
+        );
+    }
+
+    let borrowed = function_body(&source, "onClipboardBorrowed");
+    let overflow = borrowed
+        .find("Capture.pasteOverflowed(text)")
+        .expect("the borrow asks whether the clipboard was cut");
+    let keystroke = borrowed
+        .find("copyKeystroke.running = true")
+        .expect("the borrow sends the keystroke");
+    assert!(
+        overflow < keystroke,
+        "the bound is asked before the keystroke: {borrowed}"
+    );
+    assert!(
+        borrowed.contains("root.showNothingNew()"),
+        "a cut clipboard lands on the empty state: {borrowed}"
+    );
+}

@@ -727,6 +727,9 @@ cargo clippy --all-targets -- -D warnings
 cargo test
 ```
 
+`cargo test` needs `node` on `PATH`.
+`cli/tests/overlay_limit.rs` runs `ui/capture.js` and `ui/limits.js` under node, because those files own the shell-side copy of a limit.
+
 No case reaches the network.
 
 ## 17. Removing it

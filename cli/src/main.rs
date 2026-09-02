@@ -177,7 +177,12 @@ fn read_stdin() -> Result<String, String> {
     let mut bytes = Vec::new();
     io::stdin()
         .lock()
+        .take(chunk::MAX_STDIN_BYTES + 1)
         .read_to_end(&mut bytes)
         .map_err(|error| format!("stdin could not be read: {error}"))?;
+    if bytes.len() as u64 > chunk::MAX_STDIN_BYTES {
+        let cap = chunk::MAX_STDIN_BYTES;
+        return Err(format!("stdin is longer than {cap} bytes."));
+    }
     String::from_utf8(bytes).map_err(|_| "stdin is not valid UTF-8.".to_string())
 }

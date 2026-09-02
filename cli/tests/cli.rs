@@ -139,6 +139,31 @@ fn text_over_the_limit_prints_text_too_long() {
     assert_eq!(envelope(&result)["error"]["code"], "text_too_long");
 }
 
+/// stdin is read only as far as the overlay may capture, so a producer that
+/// never stops cannot fill memory. One byte past the cap is refused, and the
+/// message names the cap.
+#[test]
+fn stdin_past_the_byte_cap_prints_bad_arguments() {
+    let cap = grammachy::chunk::MAX_STDIN_BYTES as usize;
+    let result = run(&["check"], &"a".repeat(cap + 1));
+
+    assert_eq!(result.status, 1);
+    let value = envelope(&result);
+    assert_eq!(value["error"]["code"], "bad_arguments");
+    assert!(
+        value["error"]["message"]
+            .as_str()
+            .unwrap_or("")
+            .contains(&format!("{cap} bytes")),
+        "{value}"
+    );
+
+    // The same length in the chunk verb reads as a Draft over its cap, so
+    // the byte cap never cuts a Draft the verb would take.
+    let result = run(&["chunk"], &"a".repeat(cap));
+    assert_ne!(envelope(&result)["error"]["code"], "bad_arguments");
+}
+
 #[test]
 fn an_unknown_native_language_prints_bad_arguments() {
     let result = run(&["check", "--native", "xx"], "Some text.");

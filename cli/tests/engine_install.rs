@@ -356,6 +356,69 @@ fn a_disk_with_no_room_refuses_before_it_fetches_anything() {
     assert_eq!(fetched.load(Ordering::SeqCst), 0);
 }
 
+/// A symbolic link where the `.part` file goes would make `curl --output`
+/// write through it. The install refuses before the transfer runs, and the
+/// file the link points at is untouched.
+#[test]
+fn a_linked_part_file_refuses_the_install_before_the_transfer() {
+    let _guard = serially();
+    cancel::reset();
+    pin_the_fake_release();
+    let directory = scratch("linked-part");
+    let elsewhere = directory.join("elsewhere");
+    std::fs::write(&elsewhere, b"not the install's file").unwrap();
+    std::os::unix::fs::symlink(&elsewhere, directory.join(format!("{ARCHIVE}.part"))).unwrap();
+    let fetched = Arc::new(AtomicUsize::new(0));
+    let counted = Arc::clone(&fetched);
+    let engines = engines(
+        directory.clone(),
+        Box::new(move |_url, path, _max_bytes| {
+            counted.fetch_add(1, Ordering::SeqCst);
+            std::fs::write(path, FAKE_ARCHIVE)
+                .map(|()| Transfer::Finished)
+                .map_err(|error| error.to_string())
+        }),
+        unpacks_the_release(),
+    );
+
+    let failure = engines.install(SLUG).expect_err("the part path is a link");
+
+    assert!(
+        matches!(&failure, Failure::DownloadFailed(message) if message.contains("symbolic link")),
+        "{failure:?}"
+    );
+    assert_eq!(fetched.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        std::fs::read(&elsewhere).unwrap(),
+        b"not the install's file"
+    );
+}
+
+/// The engines directory itself must be a plain directory this user owns.
+#[test]
+fn a_linked_engines_directory_refuses_the_install() {
+    let _guard = serially();
+    cancel::reset();
+    pin_the_fake_release();
+    let real = scratch("linked-directory-target");
+    let link = Path::new(env!("CARGO_TARGET_TMPDIR")).join("install-linked-directory");
+    let _ = std::fs::remove_file(&link);
+    let _ = std::fs::remove_dir_all(&link);
+    std::os::unix::fs::symlink(&real, &link).unwrap();
+    let engines = engines(link, whole(), unpacks_the_release());
+
+    let failure = engines.install(SLUG).expect_err("the directory is a link");
+
+    assert!(
+        matches!(&failure, Failure::DownloadFailed(message) if message.contains("symbolic link")),
+        "{failure:?}"
+    );
+    assert!(
+        std::fs::read_dir(&real).unwrap().next().is_none(),
+        "nothing was written through the link"
+    );
+}
+
 /// The install fetches the row's own URL and unpacks the archive it verified,
 /// so a stub server and a stub unpacker see exactly what the real ones would.
 #[test]

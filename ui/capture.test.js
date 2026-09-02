@@ -19,6 +19,7 @@ const path = require("node:path")
 const { spawnSync } = require("node:child_process")
 
 const Capture = require("./capture.js")
+const Limits = require("./limits.js")
 const { readCheck } = require("./errors.js")
 
 // ------------------------------------------------------------- the stub CLI
@@ -644,4 +645,71 @@ test("the empty state prints one line and names the kept text", () => {
   assert.equal(Capture.NOTHING_NEW,
     "No new selection. Highlight text and press SUPER + SHIFT + Q, or paste here.")
   assert.equal(Capture.CHECK_LAST_AGAIN, "Check last text again")
+})
+
+// ------------------------------------------------------------- the bounds
+
+test("every paste is bounded in bytes and in time before the shell collects it", () => {
+  assert.deepEqual(Capture.primaryCommand(), [
+    "sh", "-c", "timeout 5 wl-paste --primary --no-newline | head -c 1048576"
+  ])
+  assert.deepEqual(Capture.fallbackCommand(), [
+    "sh", "-c", "timeout 5 wl-paste --no-newline | head -c 1048576"
+  ])
+  assert.deepEqual(Capture.borrowCommand(), [
+    "sh", "-c", "timeout 5 wl-paste --no-newline | head -c 1048576"
+  ])
+})
+
+test("one bound covers every paste", () => {
+  // A UTF-16 unit is at most three bytes of UTF-8. The Draft cap is the
+  // larger bound, and `cli/tests/overlay_limit.rs` holds the paste bound
+  // above it, because only Rust owns that cap.
+  assert.ok(Capture.PASTE_LIMIT_BYTES >= Limits.CHECK_LIMIT_UNITS * 3)
+  // The borrow and the read after the keystroke are compared for equality,
+  // so they must read the same number of bytes.
+  assert.deepEqual(Capture.borrowCommand(), Capture.fallbackCommand())
+})
+
+test("the paste command cuts its output at the byte bound", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "grammachy-paste-"))
+  try {
+    // A stub `wl-paste` that writes more than the bound. `timeout` and the
+    // pipeline find it on PATH, so the cut of `head -c` is what is measured.
+    const file = path.join(directory, "wl-paste")
+    fs.writeFileSync(file, "#!/bin/sh\nprintf '%s' 0123456789abcdefghij\n")
+    fs.chmodSync(file, 0o755)
+
+    const command = Capture.pasteCommand(false, 8)
+    const run = spawnSync(command[0], command.slice(1), {
+      env: { PATH: directory + ":" + process.env.PATH },
+      encoding: "utf8",
+      shell: false
+    })
+
+    assert.equal(run.status, 0)
+    assert.equal(run.stdout, "01234567")
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true })
+  }
+})
+
+test("the UTF-8 length counts what head counted", () => {
+  assert.equal(Capture.utf8Bytes(""), 0)
+  assert.equal(Capture.utf8Bytes("abc"), 3)
+  assert.equal(Capture.utf8Bytes("\u00e9"), 2)
+  assert.equal(Capture.utf8Bytes("\u4e2d"), 3)
+  assert.equal(Capture.utf8Bytes("\ud83d\ude00"), 4)
+  assert.equal(Capture.utf8Bytes(Buffer.from("a\u00e9\u4e2d\ud83d\ude00").toString()), 10)
+})
+
+test("a borrowed clipboard at its bound is not borrowed", () => {
+  const bound = Capture.PASTE_LIMIT_BYTES
+  assert.equal(Capture.pasteOverflowed("x".repeat(bound - 4)), false)
+  assert.equal(Capture.pasteOverflowed("x".repeat(bound - 3)), true)
+  assert.equal(Capture.pasteOverflowed("x".repeat(bound)), true)
+  // A cut multi-byte tail arrives as U+FFFD, three bytes.
+  assert.equal(Capture.pasteOverflowed("x".repeat(bound - 3) + "\ufffd"), true)
+  assert.equal(Capture.pasteOverflowed(""), false)
+  assert.equal(Capture.pasteOverflowed(undefined), false)
 })

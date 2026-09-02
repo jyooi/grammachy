@@ -21,6 +21,10 @@
 //! an unauthenticated request to the upstream host, and the digest is the one
 //! the Arch `languagetool` package pins for the same file.
 //!
+//! Every path the install writes is looked at before the write (`guard`): the
+//! directory and every file must be plain and this user's own, and the
+//! staging directory is made exclusively. A symbolic link anywhere refuses.
+//!
 //! Every path and every side effect is a seam: `GRAMMACHY_ENGINES_DIR`,
 //! `GRAMMACHY_ENGINE_BASE_URL`, `GRAMMACHY_ENGINE_SHA256`,
 //! `GRAMMACHY_ENGINE_SIZE_BYTES`, plus the [`Downloader`], [`Extractor`], and
@@ -34,6 +38,7 @@ pub mod zip;
 
 mod digest;
 mod disk;
+mod guard;
 mod transfer;
 
 use std::path::{Path, PathBuf};
@@ -347,9 +352,14 @@ impl Engines {
             return self.finished_row(slug);
         }
 
+        // Nothing is written to a path that was not looked at first.
+        guard::private_directory(&self.directory).map_err(Failure::DownloadFailed)?;
+        guard::plain_file_or_absent(&paths.partial).map_err(Failure::DownloadFailed)?;
+        guard::plain_file_or_absent(&paths.archive).map_err(Failure::DownloadFailed)?;
+
         // A `.part` file longer than the pin is whole and wrong: a resume
         // would ask for bytes past the end, so it goes before the transfer.
-        let already = std::fs::metadata(&paths.partial)
+        let already = std::fs::symlink_metadata(&paths.partial)
             .map(|data| data.len())
             .unwrap_or(0);
         let already = if already > release.size_bytes {
@@ -372,12 +382,8 @@ impl Engines {
             )));
         }
 
-        std::fs::create_dir_all(&self.directory).map_err(|error| {
-            Failure::DownloadFailed(format!(
-                "{} could not be created: {error}",
-                self.directory.display()
-            ))
-        })?;
+        // The transfer appends to a file this process made.
+        guard::create_if_absent(&paths.partial).map_err(Failure::DownloadFailed)?;
 
         match (self.download)(&release.url, &paths.partial, release.size_bytes)
             .map_err(Failure::DownloadFailed)?
@@ -413,13 +419,7 @@ impl Engines {
     fn unpack(&self, row: &CatalogueRow, release: &Release, paths: &Paths) -> Result<(), Failure> {
         let failed = |message: String| Failure::DownloadFailed(message);
 
-        let _ = std::fs::remove_dir_all(&paths.staging);
-        std::fs::create_dir_all(&paths.staging).map_err(|error| {
-            failed(format!(
-                "{} could not be created: {error}",
-                paths.staging.display()
-            ))
-        })?;
+        guard::fresh_directory(&paths.staging).map_err(failed)?;
 
         (self.extract)(&paths.archive, &paths.staging, &release.admission).map_err(failed)?;
 

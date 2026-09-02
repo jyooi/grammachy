@@ -16,6 +16,25 @@ use crate::envelope::{CheckError, ErrorBody, ErrorCode, CONTRACT_VERSION};
 /// The size limit of one Draft, in UTF-16 code units (spec section 5.2).
 pub const MAX_DRAFT_UTF16_UNITS: usize = 50_000;
 
+/// The most bytes `check` and `chunk` read from stdin.
+///
+/// The overlay writes what it captured, so this bound must be above the
+/// paste bound of `ui/capture.js`. A Selection over the Draft cap has to
+/// reach the too-long card of spec section 6, not a read that refuses first.
+/// `cli/tests/overlay_limit.rs` holds that relation.
+///
+/// The margin covers the re-encoding. `head -c` cuts on a byte, so it can
+/// leave up to three bytes of one character. The shell decodes each orphan
+/// byte to U+FFFD and writes three bytes again, which adds at most six
+/// bytes. Sixteen bytes of margin holds that with room to spare.
+///
+/// The read stops one byte past this, so a longer stdin is refused without
+/// being held in memory.
+pub const MAX_STDIN_BYTES: u64 = 1024 * 1024 + STDIN_MARGIN_BYTES;
+
+/// The margin [`MAX_STDIN_BYTES`] holds over the paste bound.
+pub const STDIN_MARGIN_BYTES: u64 = 16;
+
 /// One slice of the Draft, half open, in UTF-16 code units.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct Chunk {
