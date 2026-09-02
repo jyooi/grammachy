@@ -230,7 +230,8 @@ fn shaped_like_ours(peer: &Peer, tree: Option<&Path>) -> Result<(), String> {
         let jar = tree.join(SERVER_JAR);
         let classpath =
             classpath_of(argv).ok_or_else(|| "the JVM command names no -cp".to_string())?;
-        if classpath.starts_with(jar.to_string_lossy().as_ref()) {
+        let jar = jar.to_string_lossy();
+        if classpath == jar || classpath.starts_with(&format!("{jar}:")) {
             return Ok(());
         }
     }
@@ -436,6 +437,22 @@ mod tests {
 
         let refused = shaped_like_ours(&running, None).expect_err("no tree is installed");
         assert!(refused.contains("no LanguageTool tree"), "{refused}");
+
+        // A jar whose name only starts with the installed one is another
+        // file, so the classpath entry has to end at a colon or at the end.
+        let near = format!(
+            "/usr/lib/jvm/default/bin/java -cp {TREE}/{SERVER_JAR}.evil:/tmp/x.jar \
+{SERVER_CLASS} --port 8081 --config {CONFIG}"
+        );
+        let refused = shaped_like_ours(
+            &peer(true, "/usr/lib/jvm/default/bin/java", &near),
+            Some(tree),
+        )
+        .expect_err("another jar");
+        assert!(
+            refused.contains("not the command this plugin starts"),
+            "{refused}"
+        );
 
         let elsewhere = format!(
             "/usr/lib/jvm/default/bin/java -cp /tmp/evil.jar {SERVER_CLASS} --port 8081 --config {CONFIG}"

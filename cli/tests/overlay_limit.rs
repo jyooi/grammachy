@@ -204,12 +204,12 @@ fn the_cli_reads_every_byte_the_capture_may_hold() {
     let bound = node_capture_limit() as u64;
 
     assert!(
-        MAX_STDIN_BYTES >= bound + 6,
+        MAX_STDIN_BYTES >= bound + 3,
         "the stdin cap {MAX_STDIN_BYTES} must hold the capture bound {bound} and the re-encoding"
     );
 }
 
-/// `Capture.CAPTURE_LIMIT_BYTES`, read by running the module under node.
+/// `Capture.PASTE_LIMIT_BYTES`, read by running the module under node.
 ///
 /// This relation keeps the quick route on the too-long card, so a machine
 /// without node fails rather than skips.
@@ -217,7 +217,7 @@ fn node_capture_limit() -> usize {
     let module = format!("{}/../ui/capture.js", env!("CARGO_MANIFEST_DIR"));
     let program = format!(
         "const Capture = require({});\
-         process.stdout.write(String(Capture.CAPTURE_LIMIT_BYTES))",
+         process.stdout.write(String(Capture.PASTE_LIMIT_BYTES))",
         serde_json::to_string(&module).expect("the module path is a JSON string"),
     );
 

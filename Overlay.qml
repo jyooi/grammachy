@@ -754,7 +754,7 @@ Item {
     if (!root.isLive(generation)) return
     // A clipboard cut at its bound could not go back whole, so it is left
     // where it is and no keystroke is sent.
-    if (Capture.borrowOverflowed(text)) {
+    if (Capture.pasteOverflowed(text)) {
       root.showNothingNew()
       return
     }

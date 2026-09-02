@@ -651,22 +651,24 @@ test("the empty state prints one line and names the kept text", () => {
 
 test("every paste is bounded in bytes and in time before the shell collects it", () => {
   assert.deepEqual(Capture.primaryCommand(), [
-    "sh", "-c", "timeout 5 wl-paste --primary --no-newline | head -c 200000"
+    "sh", "-c", "timeout 5 wl-paste --primary --no-newline | head -c 1048576"
   ])
   assert.deepEqual(Capture.fallbackCommand(), [
-    "sh", "-c", "timeout 5 wl-paste --no-newline | head -c 200000"
+    "sh", "-c", "timeout 5 wl-paste --no-newline | head -c 1048576"
   ])
   assert.deepEqual(Capture.borrowCommand(), [
     "sh", "-c", "timeout 5 wl-paste --no-newline | head -c 1048576"
   ])
 })
 
-test("the capture bound is past any Selection the Check takes", () => {
+test("one bound covers every paste", () => {
   // A UTF-16 unit is at most three bytes of UTF-8. The Draft cap is the
-  // larger bound, and `cli/tests/overlay_limit.rs` holds the capture bound
+  // larger bound, and `cli/tests/overlay_limit.rs` holds the paste bound
   // above it, because only Rust owns that cap.
-  assert.ok(Capture.CAPTURE_LIMIT_BYTES >= Limits.CHECK_LIMIT_UNITS * 3)
-  assert.ok(Capture.CLIPBOARD_BORROW_LIMIT_BYTES > Capture.CAPTURE_LIMIT_BYTES)
+  assert.ok(Capture.PASTE_LIMIT_BYTES >= Limits.CHECK_LIMIT_UNITS * 3)
+  // The borrow and the read after the keystroke are compared for equality,
+  // so they must read the same number of bytes.
+  assert.deepEqual(Capture.borrowCommand(), Capture.fallbackCommand())
 })
 
 test("the paste command cuts its output at the byte bound", () => {
@@ -702,12 +704,12 @@ test("the UTF-8 length counts what head counted", () => {
 })
 
 test("a borrowed clipboard at its bound is not borrowed", () => {
-  const bound = Capture.CLIPBOARD_BORROW_LIMIT_BYTES
-  assert.equal(Capture.borrowOverflowed("x".repeat(bound - 4)), false)
-  assert.equal(Capture.borrowOverflowed("x".repeat(bound - 3)), true)
-  assert.equal(Capture.borrowOverflowed("x".repeat(bound)), true)
-  // A cut multi-byte tail comes back as U+FFFD, three bytes.
-  assert.equal(Capture.borrowOverflowed("x".repeat(bound - 3) + "\ufffd"), true)
-  assert.equal(Capture.borrowOverflowed(""), false)
-  assert.equal(Capture.borrowOverflowed(undefined), false)
+  const bound = Capture.PASTE_LIMIT_BYTES
+  assert.equal(Capture.pasteOverflowed("x".repeat(bound - 4)), false)
+  assert.equal(Capture.pasteOverflowed("x".repeat(bound - 3)), true)
+  assert.equal(Capture.pasteOverflowed("x".repeat(bound)), true)
+  // A cut multi-byte tail arrives as U+FFFD, three bytes.
+  assert.equal(Capture.pasteOverflowed("x".repeat(bound - 3) + "\ufffd"), true)
+  assert.equal(Capture.pasteOverflowed(""), false)
+  assert.equal(Capture.pasteOverflowed(undefined), false)
 })

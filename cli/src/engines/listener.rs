@@ -40,6 +40,9 @@ pub enum Owned {
     Listening(Peer),
     /// The unit is active and its loopback listener is not open yet.
     Starting,
+    /// The unit is active and holds loopback listeners, but its command line
+    /// is not one this plugin runs. The message says which fact refused it.
+    Foreign(String),
     /// The unit is not active, so nothing on the machine speaks for it.
     Inactive,
     /// systemd could not be asked.
@@ -115,21 +118,41 @@ pub fn owned_listener(unit: &str) -> Owned {
     }
 
     let Some(port) = port_of(&facts.exec_start.argv) else {
-        return Owned::Unknown(format!(
-            "the unit {unit} runs a command line with no --port, so it is not one Grammachy started"
-        ));
+        return Owned::Foreign("the unit's command line names no --port".to_string());
     };
 
     let inodes = socket_inodes(facts.main_pid);
-    match owned_by(&loopback_sockets(), &inodes, port) {
+    let sockets = loopback_sockets();
+    match owned_by(&sockets, &inodes, port) {
         Some(address) => Owned::Listening(Peer {
             address,
             pid: facts.main_pid,
             transient: facts.transient,
             exec_start: facts.exec_start,
         }),
-        None => Owned::Starting,
+        None => match held_ports(&sockets, &inodes) {
+            held if held.is_empty() => Owned::Starting,
+            held => Owned::Foreign(format!(
+                "the unit's command line names port {port}, and it listens on {}",
+                held.iter()
+                    .map(u16::to_string)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )),
+        },
     }
+}
+
+/// Every loopback port the holder of `inodes` listens on.
+///
+/// A unit that holds none is still starting. A unit that holds some, but not
+/// the one its own command line names, is not one this plugin started.
+pub fn held_ports(sockets: &[Socket], inodes: &HashSet<u64>) -> Vec<u16> {
+    sockets
+        .iter()
+        .filter(|socket| socket.listening && inodes.contains(&socket.inode))
+        .map(|socket| socket.local.port())
+        .collect()
 }
 
 /// Prove that the server end of `stream` is a socket the process `pid` holds.
@@ -434,6 +457,18 @@ mod tests {
         );
         assert_eq!(owned_by(&sockets, &other, 22), None);
         assert_eq!(owned_by(&sockets, &established, 8081), None);
+    }
+
+    /// A unit that holds no loopback listener is still starting, and one
+    /// that holds another port is not one this plugin started.
+    #[test]
+    fn the_ports_one_process_listens_on_separate_starting_from_foreign() {
+        let sockets = parse_proc_net_tcp(TWO_LISTENERS);
+        let held: HashSet<u64> = [66661, 66662].into_iter().collect();
+        let none: HashSet<u64> = [12345].into_iter().collect();
+
+        assert_eq!(held_ports(&sockets, &held), [5005, 8081]);
+        assert!(held_ports(&sockets, &none).is_empty());
     }
 
     /// A JVM with a debug agent holds two loopback listeners, and the debug

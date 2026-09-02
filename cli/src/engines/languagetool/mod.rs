@@ -174,6 +174,14 @@ impl Transport for BoundTransport {
     }
 }
 
+/// The one refusal of a unit under this name that this plugin did not start.
+/// It always names the verb that stops it, per spec section 4.
+fn not_ours(unit: &str, why: &str) -> EngineFailure {
+    EngineFailure::Unavailable(format!(
+        "The unit {unit} is not one Grammachy started: {why}. Stop it with: systemctl --user stop {unit}"
+    ))
+}
+
 /// A read or write that ran out of its socket timeout.
 fn is_timeout(error: &io::Error) -> bool {
     matches!(error.kind(), ErrorKind::TimedOut | ErrorKind::WouldBlock)
@@ -323,6 +331,7 @@ impl LanguageTool {
         let peer = match listener::owned_listener(unit) {
             Owned::Listening(peer) => peer,
             Owned::Starting => self.wait_for_listener(unit)?,
+            Owned::Foreign(why) => return Err(not_ours(unit, &why)),
             Owned::Unknown(why) => return Err(EngineFailure::Unavailable(why)),
             Owned::Inactive => {
                 if !self.config.start_unit {
@@ -338,11 +347,7 @@ impl LanguageTool {
             }
         };
 
-        unit::launched_here(&peer).map_err(|why| {
-            EngineFailure::Unavailable(format!(
-                "The unit {unit} is not one Grammachy started: {why}. Stop it with: systemctl --user stop {unit}"
-            ))
-        })?;
+        unit::launched_here(&peer).map_err(|why| not_ours(unit, &why))?;
         Ok(Target::Unit(peer))
     }
 
@@ -352,6 +357,7 @@ impl LanguageTool {
         loop {
             match listener::owned_listener(unit) {
                 Owned::Listening(peer) => return Ok(peer),
+                Owned::Foreign(why) => return Err(not_ours(unit, &why)),
                 Owned::Unknown(why) => return Err(EngineFailure::Unavailable(why)),
                 Owned::Inactive => {
                     return Err(EngineFailure::Unavailable(format!(

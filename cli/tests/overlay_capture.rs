@@ -564,7 +564,7 @@ fn every_paste_runs_the_bounded_command_and_a_cut_clipboard_is_not_borrowed() {
 
     let borrowed = function_body(&source, "onClipboardBorrowed");
     let overflow = borrowed
-        .find("Capture.borrowOverflowed(text)")
+        .find("Capture.pasteOverflowed(text)")
         .expect("the borrow asks whether the clipboard was cut");
     let keystroke = borrowed
         .find("copyKeystroke.running = true")

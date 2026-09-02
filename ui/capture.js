@@ -49,20 +49,22 @@ function copiedNothing(before, after) {
   return String(before || "") === String(after || "")
 }
 
-// The bounds on what `wl-paste` may hand the shell. The shell collects a
+// The bound on what `wl-paste` may hand the shell. The shell collects a
 // process's whole output before it looks at it, so the bound has to sit in
 // front of the collector, and the command line is what puts it there.
+//
+// One bound covers all three reads. The borrowed clipboard and the read
+// after the keystroke are compared for equality (`copiedNothing`), so two
+// different bounds would make a cut copy of the old clipboard look like a
+// new Selection.
 //
 // A Selection also goes to Compose, whose Draft cap is 50,000 UTF-16 units
 // (`chunk::MAX_DRAFT_UTF16_UNITS`). The worst case is three bytes per unit,
 // which is one BMP character outside Latin, so the bound must be more than
-// three times the cap. At 200,000 bytes a cut text holds more than 66,000
-// units. Text past the cap therefore reaches the oversize-Draft refusal of
+// three times the cap. At 1 MiB a cut text holds more than 300,000 units.
+// Text past the cap therefore reaches the oversize-Draft refusal of
 // `Overlay.qml` rather than a silent cut.
-var CAPTURE_LIMIT_BYTES = 200000
-// The borrowed clipboard goes back exactly as it was, so it may be larger.
-// A clipboard past this bound cannot go back whole, so it is not borrowed.
-var CLIPBOARD_BORROW_LIMIT_BYTES = 1048576
+var PASTE_LIMIT_BYTES = 1048576
 // How long `wl-paste` may wait on a selection owner that does not answer.
 var PASTE_TIMEOUT_SECONDS = 5
 
@@ -76,15 +78,15 @@ function pasteCommand(primary, limitBytes) {
 }
 
 function primaryCommand() {
-  return pasteCommand(true, CAPTURE_LIMIT_BYTES)
+  return pasteCommand(true, PASTE_LIMIT_BYTES)
 }
 
 function fallbackCommand() {
-  return pasteCommand(false, CAPTURE_LIMIT_BYTES)
+  return pasteCommand(false, PASTE_LIMIT_BYTES)
 }
 
 function borrowCommand() {
-  return pasteCommand(false, CLIPBOARD_BORROW_LIMIT_BYTES)
+  return pasteCommand(false, PASTE_LIMIT_BYTES)
 }
 
 // The UTF-8 length of one string, which is what `head -c` counted.
@@ -103,21 +105,20 @@ function utf8Bytes(text) {
   return bytes
 }
 
-// Whether the borrowed clipboard reached its bound. `head` cuts on a byte,
-// so the last character may have come back as a replacement character of
-// three bytes. Anything within that of the bound counts as cut, and a
-// clipboard that was cut is not borrowed, because it could not go back whole.
-function borrowOverflowed(text) {
+// Whether one read reached the bound. `head` cuts on a byte, so the last
+// character may arrive as a replacement character of three bytes. Anything
+// within that of the bound counts as cut. A clipboard that was cut is not
+// borrowed, because it could not go back whole.
+function pasteOverflowed(text) {
   if (typeof text !== "string") return false
-  return utf8Bytes(text) >= CLIPBOARD_BORROW_LIMIT_BYTES - 3
+  return utf8Bytes(text) >= PASTE_LIMIT_BYTES - 3
 }
 
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
     NOTHING_NEW: NOTHING_NEW,
     CHECK_LAST_AGAIN: CHECK_LAST_AGAIN,
-    CAPTURE_LIMIT_BYTES: CAPTURE_LIMIT_BYTES,
-    CLIPBOARD_BORROW_LIMIT_BYTES: CLIPBOARD_BORROW_LIMIT_BYTES,
+    PASTE_LIMIT_BYTES: PASTE_LIMIT_BYTES,
     PASTE_TIMEOUT_SECONDS: PASTE_TIMEOUT_SECONDS,
     kept: kept,
     isStale: isStale,
@@ -127,6 +128,6 @@ if (typeof module !== "undefined" && module.exports) {
     fallbackCommand: fallbackCommand,
     borrowCommand: borrowCommand,
     utf8Bytes: utf8Bytes,
-    borrowOverflowed: borrowOverflowed
+    pasteOverflowed: pasteOverflowed
   }
 }
