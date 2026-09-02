@@ -3,16 +3,19 @@
 
 use serde::Deserialize;
 
+use crate::args::EngineSlug;
 use crate::envelope::{Category, Issue};
 use crate::issues::normalise;
 use crate::text::utf16_slice;
 
-/// The most matches one answer contributes.
+/// The most Issues one answer contributes.
 ///
 /// A Check is at most 5,000 UTF-16 units and two Issues never overlap, so no
-/// answer that survives `normalise` holds more than that. Matches past this
-/// are not read.
-pub const MAX_MATCHES: usize = 5_000;
+/// answer that survives `normalise` holds more than that. The cap counts the
+/// Issues a match yields, not the matches read, because several rules fire on
+/// one span and every one of those the reader never sees is a style or no-op
+/// match. A cap on the matches would drop real Issues behind them.
+pub const MAX_ISSUES: usize = 5_000;
 
 /// The longest `reason` an Issue carries, in characters. A LanguageTool
 /// message is one or two sentences. A longer one is cut here.
@@ -21,7 +24,7 @@ pub const MAX_REASON_CHARS: usize = 1_000;
 /// The longest `fix` an Issue carries, in UTF-16 units: the whole Check
 /// limit. A replacement longer than the text it could replace is not a fix,
 /// and a match that offers one is dropped.
-pub const MAX_FIX_UTF16: usize = 5_000;
+pub const MAX_FIX_UTF16: usize = EngineSlug::Languagetool.check_limit_utf16();
 
 /// Only the fields the adapter reads. LanguageTool sends many more.
 #[derive(Debug, Clone, Deserialize)]
@@ -174,14 +177,14 @@ fn issue_of(text: &str, item: &Match) -> Option<Issue> {
 ///
 /// [`normalise`] keeps every guarantee of spec section 5.1: sorted by `start`,
 /// never overlapping because the earlier Issue wins, and never carrying a `fix`
-/// equal to the `original`. Only the first [`MAX_MATCHES`] matches are read.
+/// equal to the `original`. Only the first [`MAX_ISSUES`] Issues are kept.
 pub fn issues_from(text: &str, response: &CheckResponse) -> Vec<Issue> {
     normalise(
         response
             .matches
             .iter()
-            .take(MAX_MATCHES)
             .filter_map(|item| issue_of(text, item))
+            .take(MAX_ISSUES)
             .collect(),
     )
 }
@@ -234,21 +237,21 @@ mod tests {
         }
     }
 
-    /// An answer is read only as far as the caps: matches past the count
-    /// cap are not read, a reason is cut, and an oversize fix drops its match.
+    /// An answer is read only as far as the caps: Issues past the count cap
+    /// are not kept, a reason is cut, and an oversize fix drops its match.
     #[test]
     fn an_answer_is_read_within_the_caps() {
-        let text = "a".repeat(MAX_MATCHES + 200);
-        let matches: Vec<Match> = (0..MAX_MATCHES + 100)
+        let text = "a".repeat(MAX_ISSUES + 200);
+        let matches: Vec<Match> = (0..MAX_ISSUES + 100)
             .map(|index| a_match(index, 1, "b", "Use b."))
             .collect();
         let response = CheckResponse { matches };
 
         let issues = issues_from(&text, &response);
 
-        assert_eq!(issues.len(), MAX_MATCHES);
-        // Every Issue came from the first MAX_MATCHES matches.
-        assert!(issues.iter().all(|issue| issue.start < MAX_MATCHES));
+        assert_eq!(issues.len(), MAX_ISSUES);
+        // Every Issue came from the first MAX_ISSUES matches.
+        assert!(issues.iter().all(|issue| issue.start < MAX_ISSUES));
 
         let long_reason = "x".repeat(MAX_REASON_CHARS + 50);
         let cut = issues_from(
@@ -274,6 +277,44 @@ mod tests {
             },
         );
         assert_eq!(kept.len(), 1);
+    }
+
+    /// The cap counts Issues, so a run of style matches at the head of the
+    /// answer must not hide the mistakes behind it.
+    ///
+    /// A cap on the matches read answers an empty list here, and the reader
+    /// sees a clean Check on text that holds mistakes.
+    #[test]
+    fn style_matches_at_the_head_do_not_spend_the_cap() {
+        let style = Rule {
+            id: "TOO_LONG_SENTENCE".to_string(),
+            issue_type: "style".to_string(),
+            category: Some(RuleCategory {
+                id: "STYLE".to_string(),
+            }),
+        };
+        let text = "a".repeat(MAX_ISSUES + 400);
+        let mut matches: Vec<Match> = (0..MAX_ISSUES)
+            .map(|index| {
+                let mut item = a_match(index, 1, "b", "Shorten it.");
+                item.rule = Some(style.clone());
+                item
+            })
+            .collect();
+        matches.extend((MAX_ISSUES..MAX_ISSUES + 400).map(|index| {
+            let mut item = a_match(index, 1, "b", "Use b.");
+            item.rule = Some(Rule {
+                id: "HE_GO".to_string(),
+                issue_type: "grammar".to_string(),
+                category: None,
+            });
+            item
+        }));
+
+        let issues = issues_from(&text, &CheckResponse { matches });
+
+        assert_eq!(issues.len(), 400);
+        assert!(issues.iter().all(|issue| issue.start >= MAX_ISSUES));
     }
 
     #[test]
