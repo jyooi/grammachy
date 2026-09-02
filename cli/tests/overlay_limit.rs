@@ -172,3 +172,52 @@ fn the_first_n_note_is_worded_from_the_checked_text() {
         "the note must not follow the live limit: {note}"
     );
 }
+
+/// The capture bound of `ui/capture.js` has to sit above the Draft cap.
+///
+/// A Selection reaches Compose, so a capture cut below the cap would put half
+/// a Draft on screen with no error. One UTF-8 character of four bytes gives
+/// two UTF-16 units, so a bound of four times the cap in bytes always holds
+/// more units than the cap. Rust owns the cap, so the relation lives here.
+#[test]
+fn the_capture_bound_holds_more_than_the_draft_cap() {
+    let Some(bound) = node_capture_limit() else {
+        eprintln!("skipped: node is not on PATH, so ui/capture.js cannot be run");
+        return;
+    };
+
+    assert!(
+        bound >= MAX_DRAFT_UTF16_UNITS * 4,
+        "the capture bound {bound} must be four times the Draft cap {MAX_DRAFT_UTF16_UNITS}"
+    );
+}
+
+/// `Capture.CAPTURE_LIMIT_BYTES`, read by running the module under node.
+fn node_capture_limit() -> Option<usize> {
+    let module = format!("{}/../ui/capture.js", env!("CARGO_MANIFEST_DIR"));
+    let program = format!(
+        "const Capture = require({});\
+         process.stdout.write(String(Capture.CAPTURE_LIMIT_BYTES))",
+        serde_json::to_string(&module).expect("the module path is a JSON string"),
+    );
+
+    let output = match std::process::Command::new("node")
+        .arg("-e")
+        .arg(program)
+        .output()
+    {
+        Ok(output) => output,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return None,
+        Err(error) => panic!("node ran: {error}"),
+    };
+    assert!(
+        output.status.success(),
+        "node loaded ui/capture.js: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    Some(
+        String::from_utf8_lossy(&output.stdout)
+            .parse()
+            .expect("node answered a number"),
+    )
+}

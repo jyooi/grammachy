@@ -78,6 +78,10 @@ const SERVER_CLASS: &str = "org.languagetool.server.HTTPServer";
 /// Where `archlinux-java` points at the selected JVM.
 const DEFAULT_JVM: &str = "/usr/lib/jvm/default";
 
+/// The tail every Grammachy properties file has, which is what the proof of
+/// [`launched_here`] reads instead of the path of this session.
+const CONFIG_SUFFIX: &str = "grammachy/languagetool.properties";
+
 /// Read the server command from whichever LanguageTool this machine has.
 ///
 /// The installed tree wins over the pacman package, because a user who added
@@ -174,51 +178,88 @@ pub fn write_config() -> Result<PathBuf, StartFailure> {
 
 /// Prove that the running unit is one this plugin started.
 ///
-/// The unit must be transient, because `start` only ever makes transient
-/// units. Its `ExecStart` must be a command line this build would run on
-/// this machine. That is the installed tree or the pacman launcher, on the
-/// port the unit was given, with the properties file of this session.
+/// The proof reads the shape of the running command, never the environment
+/// of this process. A rebuilt command line would depend on `JAVA_HOME` and on
+/// `XDG_RUNTIME_DIR`, so a unit this plugin started under one environment
+/// would fail under another.
+///
+/// Four things must hold. The unit is transient, because `start` only ever
+/// makes transient units. Its `--port` is the port it listens on. Its
+/// `--config` is a Grammachy properties file. And its program is one of the
+/// two shapes [`server_command`] starts: the pacman launcher with `--http`,
+/// or a JVM that runs [`SERVER_CLASS`] off the installed tree's server jar.
+/// With no installed tree, the JVM shape refuses.
 ///
 /// A unit that fails this was made by something else under the same name.
 /// Whoever made it, the Selection does not go to it.
 pub fn launched_here(peer: &Peer) -> Result<(), String> {
+    shaped_like_ours(peer, install::installed("languagetool").as_deref())
+}
+
+/// [`launched_here`] against one installed tree, so the tests name their own.
+fn shaped_like_ours(peer: &Peer, tree: Option<&Path>) -> Result<(), String> {
     if !peer.transient {
         return Err("the unit is not transient, so systemd-run did not make it".to_string());
     }
-    let port = port_of(&peer.exec_start.argv)
-        .ok_or_else(|| "the unit's command line names no --port".to_string())?;
-    let java_home = java_home().map_err(|StartFailure(why)| why)?;
-    let config = config_path();
-    let mut candidates = Vec::new();
-    if let Some(tree) = install::installed("languagetool") {
-        candidates.push(tree_command(&tree, port, &config, java_home.clone()));
+    let argv = peer.exec_start.argv.as_str();
+
+    let port =
+        port_of(argv).ok_or_else(|| "the unit's command line names no --port".to_string())?;
+    if port != peer.address.port() {
+        return Err(format!(
+            "the unit's command line names port {port}, and it listens on port {}",
+            peer.address.port()
+        ));
     }
-    if Path::new(PACKAGE_LAUNCHER).is_file() {
-        candidates.push(package_command(port, &config, java_home));
+
+    let config = value_of(argv, "--config")
+        .ok_or_else(|| "the unit's command line names no --config".to_string())?;
+    if !config.ends_with(CONFIG_SUFFIX) {
+        return Err(format!(
+            "the unit reads {config}, which is not a Grammachy properties file"
+        ));
     }
-    let matches = candidates.iter().any(|candidate| {
-        candidate.program == peer.exec_start.path
-            && candidate.command_line() == peer.exec_start.argv
-    });
-    if matches {
-        Ok(())
-    } else {
-        Err(format!(
-            "the unit runs {}, which is not the command this plugin starts",
-            peer.exec_start.argv
-        ))
+
+    if peer.exec_start.path == PACKAGE_LAUNCHER && names(argv, "--http") {
+        return Ok(());
     }
+    if peer.exec_start.path.ends_with("/bin/java") && names(argv, SERVER_CLASS) {
+        let tree = tree.ok_or_else(|| {
+            "the unit runs the JVM and no LanguageTool tree is installed".to_string()
+        })?;
+        let jar = tree.join(SERVER_JAR);
+        let classpath =
+            value_of(argv, "-cp").ok_or_else(|| "the JVM command names no -cp".to_string())?;
+        if classpath.starts_with(jar.to_string_lossy().as_ref()) {
+            return Ok(());
+        }
+    }
+
+    Err(format!(
+        "the unit runs {}, which is not the command this plugin starts",
+        peer.exec_start.argv
+    ))
 }
 
 /// The value after `--port` on one command line.
 fn port_of(argv: &str) -> Option<u16> {
+    value_of(argv, "--port")?.parse().ok()
+}
+
+/// The word after one flag on one command line.
+fn value_of<'a>(argv: &'a str, flag: &str) -> Option<&'a str> {
     let mut words = argv.split(' ');
     while let Some(word) = words.next() {
-        if word == "--port" {
-            return words.next()?.parse().ok();
+        if word == flag {
+            return words.next();
         }
     }
     None
+}
+
+/// Whether one whole word is on one command line.
+fn names(argv: &str, word: &str) -> bool {
+    argv.split(' ').any(|found| found == word)
 }
 
 /// Start the transient unit, or answer `Ok(())` when it already runs.
@@ -306,14 +347,18 @@ mod tests {
         }
     }
 
+    /// The properties file of a session, which the proof reads by its tail
+    /// rather than by the runtime directory of this process.
+    const CONFIG: &str = "/run/user/1000/grammachy/languagetool.properties";
+
+    /// The tree a JVM command line names, which the tests hand in.
+    const TREE: &str = "/home/someone/.local/share/grammachy/engines/languagetool";
+
     /// A unit file under the same name, or a transient unit that runs some
     /// other program, is not one this plugin started.
     #[test]
     fn a_unit_this_plugin_did_not_start_is_refused() {
-        let launcher = format!(
-            "{PACKAGE_LAUNCHER} --http --port 8081 --config {}",
-            config_path().display()
-        );
+        let launcher = format!("{PACKAGE_LAUNCHER} --http --port 8081 --config {CONFIG}");
         let file_unit = peer(false, PACKAGE_LAUNCHER, &launcher);
         let refused = launched_here(&file_unit).expect_err("a unit file is not transient");
         assert!(refused.contains("not transient"), "{refused}");
@@ -322,7 +367,15 @@ mod tests {
         let refused = launched_here(&no_port).expect_err("no port");
         assert!(refused.contains("no --port"), "{refused}");
 
-        let other = peer(true, "/usr/bin/nc", "/usr/bin/nc -l --port 8081");
+        let no_config = peer(true, "/usr/bin/nc", "/usr/bin/nc -l --port 8081");
+        let refused = launched_here(&no_config).expect_err("no properties file");
+        assert!(refused.contains("no --config"), "{refused}");
+
+        let other = peer(
+            true,
+            "/usr/bin/nc",
+            &format!("/usr/bin/nc -l --port 8081 --config {CONFIG}"),
+        );
         let refused = launched_here(&other).expect_err("another program");
         assert!(
             refused.contains("not the command this plugin starts"),
@@ -330,22 +383,73 @@ mod tests {
         );
     }
 
-    /// On a machine with the pacman launcher, the exact command `start`
-    /// would run passes, and the same command against another properties
-    /// file does not.
+    /// The pacman launcher shape passes on any machine, because the proof
+    /// reads the command line rather than the environment.
     #[test]
-    fn the_launcher_command_of_this_session_passes() {
-        if !Path::new(PACKAGE_LAUNCHER).is_file() || java_home().is_err() {
-            return;
-        }
-        let expected = package_command(8081, &config_path(), java_home().unwrap());
-        let ours = peer(true, &expected.program, &expected.command_line());
-        launched_here(&ours).expect("the command this plugin starts");
+    fn the_launcher_shape_of_this_plugin_passes() {
+        let ours = format!("{PACKAGE_LAUNCHER} --http --port 8081 --config {CONFIG}");
+        shaped_like_ours(&peer(true, PACKAGE_LAUNCHER, &ours), None)
+            .expect("the launcher this plugin starts");
 
-        let elsewhere = package_command(8081, Path::new("/tmp/x.properties"), java_home().unwrap());
-        let refused = launched_here(&peer(true, &elsewhere.program, &elsewhere.command_line()))
+        let elsewhere = format!("{PACKAGE_LAUNCHER} --http --port 8081 --config /tmp/x.properties");
+        let refused = shaped_like_ours(&peer(true, PACKAGE_LAUNCHER, &elsewhere), None)
             .expect_err("another properties file");
-        assert!(refused.contains("not the command"), "{refused}");
+        assert!(
+            refused.contains("not a Grammachy properties file"),
+            "{refused}"
+        );
+
+        // Without `--http` the launcher starts the HTTPS server instead.
+        let https = format!("{PACKAGE_LAUNCHER} --port 8081 --config {CONFIG}");
+        let refused = shaped_like_ours(&peer(true, PACKAGE_LAUNCHER, &https), None)
+            .expect_err("the HTTPS server");
+        assert!(
+            refused.contains("not the command this plugin starts"),
+            "{refused}"
+        );
+    }
+
+    /// The JVM shape names the installed tree's server jar on its classpath,
+    /// and the JVM path itself is free, because `JAVA_HOME` may differ
+    /// between the run that started the unit and this one.
+    #[test]
+    fn the_jvm_shape_needs_the_installed_tree_on_its_classpath() {
+        let tree = Path::new(TREE);
+        let ours = format!(
+            "/usr/lib/jvm/java-21-openjdk/bin/java -cp {TREE}/{SERVER_JAR}:{TREE}/libs/* \
+{SERVER_CLASS} --port 8081 --config {CONFIG}"
+        );
+        let running = peer(true, "/usr/lib/jvm/default/bin/java", &ours);
+        shaped_like_ours(&running, Some(tree)).expect("the JVM command this plugin starts");
+
+        let refused = shaped_like_ours(&running, None).expect_err("no tree is installed");
+        assert!(refused.contains("no LanguageTool tree"), "{refused}");
+
+        let elsewhere = format!(
+            "/usr/lib/jvm/default/bin/java -cp /tmp/evil.jar {SERVER_CLASS} --port 8081 --config {CONFIG}"
+        );
+        let refused = shaped_like_ours(
+            &peer(true, "/usr/lib/jvm/default/bin/java", &elsewhere),
+            Some(tree),
+        )
+        .expect_err("another classpath");
+        assert!(
+            refused.contains("not the command this plugin starts"),
+            "{refused}"
+        );
+    }
+
+    /// The port on the command line must be the port the unit listens on, or
+    /// the proof says nothing about where the Selection goes.
+    #[test]
+    fn a_port_the_unit_does_not_listen_on_is_refused() {
+        let argv = format!("{PACKAGE_LAUNCHER} --http --port 9999 --config {CONFIG}");
+
+        let refused =
+            shaped_like_ours(&peer(true, PACKAGE_LAUNCHER, &argv), None).expect_err("another port");
+
+        assert!(refused.contains("9999"), "{refused}");
+        assert!(refused.contains("8081"), "{refused}");
     }
 
     #[test]

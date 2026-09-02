@@ -53,10 +53,13 @@ function copiedNothing(before, after) {
 // process's whole output before it looks at it, so the bound has to sit in
 // front of the collector, and the command line is what puts it there.
 //
-// A Selection is cut to the Check limit of `ui/limits.js` anyway, 5,000
-// UTF-16 units, which is at most 15,000 bytes of UTF-8. The capture bound is
-// well past that, so no Selection the Check would take is cut here.
-var CAPTURE_LIMIT_BYTES = 65536
+// A Selection also goes to Compose, whose Draft cap is 50,000 UTF-16 units
+// (`chunk::MAX_DRAFT_UTF16_UNITS`). One UTF-8 character of four bytes gives
+// two UTF-16 units, and no character gives fewer units per byte than that,
+// so 200,000 bytes always hold more than the cap. Text past the cap
+// therefore reaches the oversize-Draft refusal of `Overlay.qml` rather than
+// a silent cut.
+var CAPTURE_LIMIT_BYTES = 200000
 // The borrowed clipboard goes back exactly as it was, so it may be larger.
 // A clipboard past this bound cannot go back whole, so it is not borrowed.
 var CLIPBOARD_BORROW_LIMIT_BYTES = 1048576

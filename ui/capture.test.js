@@ -651,10 +651,10 @@ test("the empty state prints one line and names the kept text", () => {
 
 test("every paste is bounded in bytes and in time before the shell collects it", () => {
   assert.deepEqual(Capture.primaryCommand(), [
-    "sh", "-c", "timeout 5 wl-paste --primary --no-newline | head -c 65536"
+    "sh", "-c", "timeout 5 wl-paste --primary --no-newline | head -c 200000"
   ])
   assert.deepEqual(Capture.fallbackCommand(), [
-    "sh", "-c", "timeout 5 wl-paste --no-newline | head -c 65536"
+    "sh", "-c", "timeout 5 wl-paste --no-newline | head -c 200000"
   ])
   assert.deepEqual(Capture.borrowCommand(), [
     "sh", "-c", "timeout 5 wl-paste --no-newline | head -c 1048576"
@@ -662,23 +662,34 @@ test("every paste is bounded in bytes and in time before the shell collects it",
 })
 
 test("the capture bound is past any Selection the Check takes", () => {
-  // A UTF-16 unit is at most three bytes of UTF-8.
+  // A UTF-16 unit is at most three bytes of UTF-8. The Draft cap is the
+  // larger bound, and `cli/tests/overlay_limit.rs` holds the capture bound
+  // above it, because only Rust owns that cap.
   assert.ok(Capture.CAPTURE_LIMIT_BYTES >= Limits.CHECK_LIMIT_UNITS * 3)
   assert.ok(Capture.CLIPBOARD_BORROW_LIMIT_BYTES > Capture.CAPTURE_LIMIT_BYTES)
 })
 
-test("the paste command runs within its bounds", () => {
-  const command = Capture.pasteCommand(false, 8)
-  const run = spawnSync(command[0], command.slice(1), {
-    env: { PATH: process.env.PATH },
-    encoding: "utf8",
-    // A stub wl-paste that never stops would hang without the bounds.
-    shell: false
-  })
-  // `wl-paste` is not here or has no display, so the pipeline answers with
-  // nothing. The point is that it ends and that the shape is one `sh` runs.
-  assert.equal(typeof run.stdout, "string")
-  assert.ok(run.stdout.length <= 8)
+test("the paste command cuts its output at the byte bound", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "grammachy-paste-"))
+  try {
+    // A stub `wl-paste` that writes more than the bound. `timeout` and the
+    // pipeline find it on PATH, so the cut of `head -c` is what is measured.
+    const file = path.join(directory, "wl-paste")
+    fs.writeFileSync(file, "#!/bin/sh\nprintf '%s' 0123456789abcdefghij\n")
+    fs.chmodSync(file, 0o755)
+
+    const command = Capture.pasteCommand(false, 8)
+    const run = spawnSync(command[0], command.slice(1), {
+      env: { PATH: directory + ":" + process.env.PATH },
+      encoding: "utf8",
+      shell: false
+    })
+
+    assert.equal(run.status, 0)
+    assert.equal(run.stdout, "01234567")
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true })
+  }
 })
 
 test("the UTF-8 length counts what head counted", () => {
