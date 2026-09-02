@@ -27,10 +27,22 @@ fn own_uid() -> u32 {
 /// Make sure `directory` is a plain directory this user owns, and make it
 /// when it is absent.
 pub fn private_directory(directory: &Path) -> Result<(), String> {
-    fs::create_dir_all(directory)
-        .map_err(|error| format!("{} could not be created: {error}", directory.display()))?;
-    let data = fs::symlink_metadata(directory)
-        .map_err(|error| format!("{} could not be read: {error}", directory.display()))?;
+    let data = match fs::symlink_metadata(directory) {
+        Ok(data) => data,
+        Err(error) if error.kind() == ErrorKind::NotFound => {
+            fs::create_dir_all(directory).map_err(|error| {
+                format!("{} could not be created: {error}", directory.display())
+            })?;
+            fs::symlink_metadata(directory)
+                .map_err(|error| format!("{} could not be read: {error}", directory.display()))?
+        }
+        Err(error) => {
+            return Err(format!(
+                "{} could not be read: {error}",
+                directory.display()
+            ))
+        }
+    };
     if data.file_type().is_symlink() {
         return Err(format!(
             "{} is a symbolic link, and the install writes only into a plain directory it owns.",
@@ -133,6 +145,20 @@ mod tests {
         let refused = private_directory(&linked_directory).expect_err("a link");
         assert!(refused.contains("symbolic link"), "{refused}");
         assert_eq!(fs::read(&target).unwrap(), b"someone else's file");
+    }
+
+    /// A dangling link answers `NotFound` on a follow and `AlreadyExists` on
+    /// a create, so the check has to read the link itself first.
+    #[test]
+    fn a_dangling_link_at_the_directory_is_named_as_a_link() {
+        let directory = scratch("dangling");
+        let linked_directory = directory.join("engines");
+        symlink(directory.join("gone"), &linked_directory).unwrap();
+
+        let refused = private_directory(&linked_directory).expect_err("a dangling link");
+
+        assert!(refused.contains("symbolic link"), "{refused}");
+        assert!(!directory.join("gone").exists(), "nothing was created");
     }
 
     #[test]

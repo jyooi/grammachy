@@ -50,7 +50,10 @@ The Local LLM and Cloud LLM engines were removed (HUF-240).
   `unit::launched_here` proves the unit is transient and runs the command this build starts.
   The `BoundConnector` in `cli/src/engines/languagetool/mod.rs` proves, on the connected socket, that the same process accepted it.
   Fixtures that name `127.0.0.1:8081` are sample text only.
-- Every producer the plugin reads is bounded before the read: `chunk::MAX_STDIN_BYTES`, which must stay at or above the capture bound of `ui/capture.js`, `MAX_RESPONSE_BYTES` and the match caps in the `languagetool` adapter, and the `wl-paste` commands of `ui/capture.js`.
+- Every producer the plugin reads is bounded before the read: `chunk::MAX_STDIN_BYTES`, `MAX_RESPONSE_BYTES` and the match caps in the `languagetool` adapter, and the `wl-paste` commands of `ui/capture.js`.
+  `chunk::MAX_STDIN_BYTES` must stay above the capture bound of `ui/capture.js`, never equal to it.
+  A cut character decodes to replacement characters that are longer, so the margin is necessary.
+  `cli/tests/overlay_limit.rs` holds that margin.
 - `cli/src/engines/install/guard.rs` checks every path the install writes. A symbolic link refuses.
 - Only `languagetool` and `harper` are `EngineSlug` variants.
   A stored engine the CLI does not recognise falls back to the default rather than failing (`cli/tests/settings.rs`).
