@@ -738,21 +738,30 @@ The Uninstall section of `README.md` has the removal steps.
 Spec section 10 makes a release two commits.
 `.github/workflows/release.yml` builds the first commit's tag.
 `cli.lock` pins the second commit's hash.
+The bump script needs `gh` logged in, because it verifies the build attestation before it writes the pin.
 
 1. Push a tag of the form `v0.1.0`.
    The tag triggers `.github/workflows/release.yml`.
 2. Wait for the workflow to finish.
    It builds `grammachy-x86_64-linux` for the `x86_64-unknown-linux-musl` target, opt-level z, LTO, stripped.
-   It attaches the binary and a `.sha256` file to the GitHub release for that tag.
+   Every input is pinned: the actions by commit, the compiler by `cli/rust-toolchain.toml`, the crates by `Cargo.lock`, and the musl packages by version on `ubuntu-24.04`.
+   It attests the build provenance of the binary, then attaches the binary and a `.sha256` file to the GitHub release for that tag.
 3. Run the bump script with the tag:
 
    ```bash
    bin/release-lock.sh v0.1.0
    ```
 
-   The script downloads the released asset, hashes it, and rewrites `cli.lock` with the version and the sha256.
+   The script downloads the released asset and runs `gh attestation verify` on it.
+   The check demands an attestation from this repository, from `refs/tags/<tag>`, signed by `release.yml`, on a GitHub-hosted runner.
+   A failed check leaves `cli.lock` untouched.
+   On success it hashes and measures the asset and rewrites `cli.lock` with the version, the sha256, and the sizeBytes.
 4. Commit the changed `cli.lock`.
    This is the release's second commit.
+
+To move a pinned action, take the Dependabot pull request or replace the commit and the version comment together.
+To move the compiler, change `cli/rust-toolchain.toml` and let CI confirm the build.
+To move the musl packages, change `MUSL_VERSION` in `release.yml` to a version the `noble` archive publishes.
 
 `cli.lock` carries the crate version and an empty `sha256` until a later commit pins the tag asset.
 The setup card reads that empty hash as no pinned release and shows the developer path instead of an Install button.

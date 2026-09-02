@@ -6,8 +6,8 @@
 //
 // This file owns the whole route from cli.lock's text and one run of
 // bin/bootstrap.sh to the card ui/SetupCard.qml draws: `readLock` reads the
-// two fields cli.lock pins, and `card` turns those fields plus the run's
-// state into the title, the body, and what the card offers. A cli.lock with
+// two fields the card needs from cli.lock, and `card` turns those fields
+// plus the run's state into the title, the body, and what the card offers. A cli.lock with
 // no sha256 yet pins no release, so there is no Install button and the
 // body points at the developer path instead (docs/dev.md section 18).
 
@@ -59,9 +59,10 @@ function retryAfterSetup(surface, selectionText) {
   return "retryCheck"
 }
 
-// The two fields cli.lock pins, spec section 10. Text that will not parse,
-// or that carries no string for either field, reads the same as an empty
-// lock: nothing is pinned, so there is nothing to install from.
+// The two fields the card reads from cli.lock, spec section 10. The
+// sizeBytes pin is bootstrap.sh's concern, not the card's. Text that will
+// not parse, or that carries no string for either field, reads the same as
+// an empty lock: nothing is pinned, so there is nothing to install from.
 function readLock(text) {
   var parsed = null
   try {

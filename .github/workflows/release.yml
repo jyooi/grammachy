@@ -5,40 +5,55 @@ on:
     tags:
       - "v*"
 
+# Every input to the build is pinned, so a rebuilt tag makes the same bytes:
+# each action by commit, the compiler by cli/rust-toolchain.toml, the crates
+# by Cargo.lock, and the musl linker by package version on a named runner.
+# The attestation step records which commit and which run produced the
+# asset, and bin/release-lock.sh checks it before it pins the hash.
 jobs:
   build:
     name: Build and attach the release binary
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
+      id-token: write
+      attestations: write
+    env:
+      MUSL_VERSION: 1.2.4-2
     defaults:
       run:
         working-directory: cli
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - name: Install the Rust toolchain
-        run: |
-          rustup toolchain install stable --profile minimal
-          rustup target add x86_64-unknown-linux-musl
+      - name: Install the pinned Rust toolchain
+        run: rustup toolchain install
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: cli
 
-      - name: Install the musl linker
-        run: sudo apt-get update && sudo apt-get install --yes --no-install-recommends musl-tools
+      - name: Install the pinned musl linker
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            "musl=$MUSL_VERSION" "musl-dev=$MUSL_VERSION" "musl-tools=$MUSL_VERSION"
 
       - name: Build the static binary
-        run: cargo build --release --target x86_64-unknown-linux-musl
+        run: cargo build --locked --release --target x86_64-unknown-linux-musl
 
       - name: Name and hash the asset
         run: |
           cp target/x86_64-unknown-linux-musl/release/grammachy grammachy-x86_64-linux
           sha256sum grammachy-x86_64-linux > grammachy-x86_64-linux.sha256
 
+      - name: Attest the build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: cli/grammachy-x86_64-linux
+
       - name: Attach the asset to the release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           files: |
             cli/grammachy-x86_64-linux
