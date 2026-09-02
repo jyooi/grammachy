@@ -430,6 +430,10 @@ fn form_encode(value: &str) -> String {
 mod tests {
     use super::*;
     use crate::args::{EngineSlug, TargetEnglish};
+    use crate::engines::listener::ExecStart;
+    use std::io::BufRead;
+    use std::net::TcpListener;
+    use std::sync::mpsc;
 
     fn options(native: NativeLanguage) -> CheckOptions {
         CheckOptions {
@@ -491,5 +495,155 @@ mod tests {
             Config::default().endpoint,
             Endpoint::Unit("grammachy-languagetool".to_string())
         );
+    }
+
+    /// One stub `/v2/check` server on a free loopback port, in this process.
+    ///
+    /// The proof of [`BoundConnector`] reads which process accepted the
+    /// connection, so a listener this process owns is what makes the product
+    /// path testable without a systemd unit. `answer` writes the response on
+    /// the accepted socket, after the request and its body are read.
+    fn stub_server<F>(answer: F) -> (SocketAddr, mpsc::Sender<()>, std::thread::JoinHandle<()>)
+    where
+        F: FnOnce(&mut TcpStream) + Send + 'static,
+    {
+        let server = TcpListener::bind("127.0.0.1:0").expect("a loopback port is free");
+        let address = server.local_addr().unwrap();
+        let (release, released) = mpsc::channel::<()>();
+        let serving = std::thread::spawn(move || {
+            let (mut accepted, _) = server.accept().expect("the client connects");
+            read_request(&accepted);
+            answer(&mut accepted);
+            // Hold the accepted end open until the proof and the read are done.
+            let _ = released.recv_timeout(Duration::from_secs(10));
+        });
+        (address, release, serving)
+    }
+
+    /// The request head and its whole body, so the client never sees a reset.
+    fn read_request(stream: &TcpStream) {
+        let mut reader = io::BufReader::new(stream);
+        let mut length = 0usize;
+        loop {
+            let mut line = String::new();
+            if reader.read_line(&mut line).unwrap_or(0) == 0 {
+                return;
+            }
+            if let Some(value) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+                length = value.trim().parse().unwrap_or(0);
+            }
+            if line == "\r\n" || line == "\n" {
+                break;
+            }
+        }
+        let mut body = vec![0u8; length];
+        let _ = reader.read_exact(&mut body);
+    }
+
+    fn write_json(stream: &mut TcpStream, json: &str) {
+        let head = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n",
+            json.len()
+        );
+        let _ = stream.write_all(head.as_bytes());
+        let _ = stream.write_all(json.as_bytes());
+        let _ = stream.flush();
+    }
+
+    fn peer_of(address: SocketAddr, pid: u32) -> Peer {
+        Peer {
+            address,
+            pid,
+            transient: true,
+            exec_start: ExecStart::default(),
+        }
+    }
+
+    /// The product path end to end: the connector proves the accepting
+    /// process, the transport writes the request and reads the answer, and
+    /// the body parses into the matches the Check reads.
+    #[test]
+    fn the_proven_connection_carries_one_check_answer() {
+        let json = r#"{"matches":[{"offset":3,"length":2,"message":"He goes home.","replacements":[{"value":"goes"}],"rule":{"id":"HE_GO","issueType":"grammar"}}]}"#;
+        let (address, release, serving) = stub_server(move |stream| write_json(stream, json));
+        let engine = LanguageTool::new(Config::default());
+
+        let answer = engine
+            .request(
+                &Target::Unit(peer_of(address, std::process::id())),
+                "language=en-US&text=He%20go%20home.",
+            )
+            .expect("the stub answers the check");
+
+        assert_eq!(answer.matches.len(), 1);
+        assert_eq!(answer.matches[0].offset, 3);
+        assert_eq!(answer.matches[0].length, 2);
+        assert_eq!(answer.matches[0].replacements[0].value, "goes");
+
+        let _ = release.send(());
+        serving.join().unwrap();
+    }
+
+    /// A listener some other process accepted on is refused before the
+    /// request is written, which is the whole point of the connector.
+    #[test]
+    fn a_connection_another_process_accepted_is_refused() {
+        let (address, release, serving) = stub_server(move |stream| write_json(stream, "{}"));
+        let engine = LanguageTool::new(Config::default());
+
+        let failure = engine
+            .request(&Target::Unit(peer_of(address, 1)), "language=en-US&text=x")
+            .expect_err("init did not accept it");
+
+        match failure {
+            EngineFailure::Unavailable(why) => {
+                assert!(why.contains("accepted by a process other than 1"), "{why}")
+            }
+            other => panic!("{other:?}"),
+        }
+
+        let _ = release.send(());
+        serving.join().unwrap();
+    }
+
+    /// An answer past the cap is refused before it is parsed, so no producer
+    /// on the loopback port can fill memory.
+    #[test]
+    fn an_answer_past_the_byte_cap_is_refused() {
+        let (address, release, serving) = stub_server(move |stream| {
+            let head = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n",
+                MAX_RESPONSE_BYTES + 1
+            );
+            if stream.write_all(head.as_bytes()).is_err() {
+                return;
+            }
+            let chunk = vec![b'0'; 64 * 1024];
+            let mut written = 0u64;
+            while written <= MAX_RESPONSE_BYTES {
+                if stream.write_all(&chunk).is_err() {
+                    return;
+                }
+                written += chunk.len() as u64;
+            }
+        });
+        let engine = LanguageTool::new(Config::default());
+
+        let failure = engine
+            .request(
+                &Target::Unit(peer_of(address, std::process::id())),
+                "language=en-US&text=x",
+            )
+            .expect_err("the answer is past the cap");
+
+        match failure {
+            EngineFailure::Failed(why) => {
+                assert!(why.contains(&MAX_RESPONSE_BYTES.to_string()), "{why}")
+            }
+            other => panic!("{other:?}"),
+        }
+
+        let _ = release.send(());
+        serving.join().unwrap();
     }
 }

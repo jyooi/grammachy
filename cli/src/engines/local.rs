@@ -24,19 +24,6 @@ pub struct ServerCommand {
     pub environment: Vec<(String, String)>,
 }
 
-impl ServerCommand {
-    /// The program and its arguments as one space-joined line, which is how
-    /// `systemctl show` prints the `argv[]` of a running unit.
-    pub fn command_line(&self) -> String {
-        let mut line = self.program.clone();
-        for argument in &self.arguments {
-            line.push(' ');
-            line.push_str(argument);
-        }
-        line
-    }
-}
-
 /// What one unit was doing before this call.
 ///
 /// A caller that must know whose server answers the port reads this. Only a

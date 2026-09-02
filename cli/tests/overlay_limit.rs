@@ -176,15 +176,12 @@ fn the_first_n_note_is_worded_from_the_checked_text() {
 /// The capture bound of `ui/capture.js` has to sit above the Draft cap.
 ///
 /// A Selection reaches Compose, so a capture cut below the cap would put half
-/// a Draft on screen with no error. One UTF-8 character of four bytes gives
-/// two UTF-16 units, so a bound of four times the cap in bytes always holds
-/// more units than the cap. Rust owns the cap, so the relation lives here.
+/// a Draft on screen with no error. The worst case is three bytes per UTF-16
+/// unit, so a bound of four times the cap in bytes always holds more units
+/// than the cap. Rust owns the cap, so the relation lives here.
 #[test]
 fn the_capture_bound_holds_more_than_the_draft_cap() {
-    let Some(bound) = node_capture_limit() else {
-        eprintln!("skipped: node is not on PATH, so ui/capture.js cannot be run");
-        return;
-    };
+    let bound = node_capture_limit();
 
     assert!(
         bound >= MAX_DRAFT_UTF16_UNITS * 4,
@@ -200,10 +197,7 @@ fn the_capture_bound_holds_more_than_the_draft_cap() {
 /// draws the Setup card instead of the too-long one.
 #[test]
 fn the_cli_reads_every_byte_the_capture_may_hold() {
-    let Some(bound) = node_capture_limit() else {
-        eprintln!("skipped: node is not on PATH, so ui/capture.js cannot be run");
-        return;
-    };
+    let bound = node_capture_limit();
 
     assert!(
         MAX_STDIN_BYTES >= bound as u64,
@@ -212,7 +206,10 @@ fn the_cli_reads_every_byte_the_capture_may_hold() {
 }
 
 /// `Capture.CAPTURE_LIMIT_BYTES`, read by running the module under node.
-fn node_capture_limit() -> Option<usize> {
+///
+/// This relation keeps the quick route on the too-long card, so a machine
+/// without node fails rather than skips.
+fn node_capture_limit() -> usize {
     let module = format!("{}/../ui/capture.js", env!("CARGO_MANIFEST_DIR"));
     let program = format!(
         "const Capture = require({});\
@@ -220,23 +217,19 @@ fn node_capture_limit() -> Option<usize> {
         serde_json::to_string(&module).expect("the module path is a JSON string"),
     );
 
-    let output = match std::process::Command::new("node")
+    let output = std::process::Command::new("node")
         .arg("-e")
         .arg(program)
         .output()
-    {
-        Ok(output) => output,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return None,
-        Err(error) => panic!("node ran: {error}"),
-    };
+        .unwrap_or_else(|error| {
+            panic!("node must be on PATH to read the capture bound of ui/capture.js: {error}")
+        });
     assert!(
         output.status.success(),
         "node loaded ui/capture.js: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    Some(
-        String::from_utf8_lossy(&output.stdout)
-            .parse()
-            .expect("node answered a number"),
-    )
+    String::from_utf8_lossy(&output.stdout)
+        .parse()
+        .expect("node answered a number")
 }
