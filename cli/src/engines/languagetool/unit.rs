@@ -80,7 +80,7 @@ const DEFAULT_JVM: &str = "/usr/lib/jvm/default";
 
 /// The tail every Grammachy properties file has, which is what the proof of
 /// [`launched_here`] reads instead of the path of this session.
-const CONFIG_SUFFIX: &str = "grammachy/languagetool.properties";
+const CONFIG_SUFFIX: &str = "/grammachy/languagetool.properties";
 
 /// Read the server command from whichever LanguageTool this machine has.
 ///
@@ -468,13 +468,31 @@ mod tests {
         );
     }
 
+    /// The suffix has to sit on a directory boundary. A directory whose name
+    /// only ends with `grammachy` is another directory.
+    #[test]
+    fn a_directory_that_only_ends_with_the_name_is_refused() {
+        let argv = format!(
+            "{PACKAGE_LAUNCHER} --http --port 8081 \
+--config /tmp/evilgrammachy/languagetool.properties"
+        );
+
+        let refused = shaped_like_ours(&peer(true, PACKAGE_LAUNCHER, &argv), None)
+            .expect_err("another properties file");
+
+        assert!(
+            refused.contains("not a Grammachy properties file"),
+            "{refused}"
+        );
+    }
+
     /// The `--config` value ends at the next flag, so a later argument that
     /// carries the suffix cannot stand in for the file the server reads.
     #[test]
     fn a_later_flag_that_carries_the_suffix_is_refused() {
         let argv = format!(
             "{PACKAGE_LAUNCHER} --http --port 8081 --config /tmp/evil.properties \
---extra /x/{CONFIG_SUFFIX}"
+--extra /x{CONFIG_SUFFIX}"
         );
 
         let refused = shaped_like_ours(&peer(true, PACKAGE_LAUNCHER, &argv), None)

@@ -40,8 +40,10 @@ pub enum Owned {
     Listening(Peer),
     /// The unit is active and its loopback listener is not open yet.
     Starting,
-    /// The unit is active and holds loopback listeners, but its command line
-    /// is not one this plugin runs. The message says which fact refused it.
+    /// The unit is active, and either its command line or the listener it
+    /// holds is not one this plugin runs. A command line with no `--port`
+    /// answers this before any socket is read. The message says which fact
+    /// refused it.
     Foreign(String),
     /// The unit is not active, so nothing on the machine speaks for it.
     Inactive,
