@@ -82,6 +82,12 @@ const DEFAULT_JVM: &str = "/usr/lib/jvm/default";
 /// [`launched_here`] reads instead of the path of this session.
 const CONFIG_SUFFIX: &str = "/grammachy/languagetool.properties";
 
+/// The tail of every JVM this build runs the server with.
+const JAVA_TAIL: &str = "/bin/java";
+
+/// The classpath flag `tree_command` writes.
+const CLASSPATH_FLAG: &str = " -cp ";
+
 /// Read the server command from whichever LanguageTool this machine has.
 ///
 /// The installed tree wins over the pacman package, because a user who added
@@ -197,94 +203,65 @@ pub fn launched_here(peer: &Peer) -> Result<(), String> {
 }
 
 /// [`launched_here`] against one installed tree, so the tests name their own.
+///
+/// The whole command line is compared, not one flag at a time. Every shape
+/// this build starts is one exact string once the port and the properties
+/// file are known, so a crafted line cannot hide an extra jar, a second flag,
+/// or another main class between the parts a piecewise reader looks at.
 fn shaped_like_ours(peer: &Peer, tree: Option<&Path>) -> Result<(), String> {
     if !peer.transient {
         return Err("the unit is not transient, so systemd-run did not make it".to_string());
     }
     let argv = peer.exec_start.argv.as_str();
 
-    let port = listener::port_of(argv)
-        .ok_or_else(|| "the unit's command line names no --port".to_string())?;
-    if port != peer.address.port() {
-        return Err(format!(
-            "the unit's command line names port {port}, and it listens on port {}",
-            peer.address.port()
-        ));
-    }
+    let head = if peer.exec_start.path == PACKAGE_LAUNCHER {
+        format!("{PACKAGE_LAUNCHER} --http")
+    } else if peer.exec_start.path.ends_with(JAVA_TAIL) {
+        // The JVM path itself is free, because JAVA_HOME may differ between
+        // the run that started the unit and this one.
+        let at = argv.find(CLASSPATH_FLAG).ok_or_else(|| refused(peer))?;
+        let jvm = &argv[..at];
+        if !jvm.ends_with(JAVA_TAIL) {
+            return Err(refused(peer));
+        }
+        let tree = tree.ok_or_else(|| {
+            "the unit runs the JVM and no LanguageTool tree is installed".to_string()
+        })?;
+        format!(
+            "{jvm}{CLASSPATH_FLAG}{}:{} {SERVER_CLASS}",
+            tree.join(SERVER_JAR).display(),
+            tree.join("libs/*").display()
+        )
+    } else {
+        return Err(refused(peer));
+    };
 
-    let config =
-        config_of(argv).ok_or_else(|| "the unit's command line names no --config".to_string())?;
-    if !config.ends_with(CONFIG_SUFFIX) {
+    let prefix = format!("{head} --port {} --config ", peer.address.port());
+    let config = argv.strip_prefix(&prefix).ok_or_else(|| refused(peer))?;
+    if config.contains(" --") || !config.ends_with(CONFIG_SUFFIX) {
         return Err(format!(
             "the unit reads {config}, which is not a Grammachy properties file"
         ));
     }
+    Ok(())
+}
 
-    if peer.exec_start.path == PACKAGE_LAUNCHER && names(argv, "--http") {
-        return Ok(());
-    }
-    if peer.exec_start.path.ends_with("/bin/java") && names(argv, SERVER_CLASS) {
-        let tree = tree.ok_or_else(|| {
-            "the unit runs the JVM and no LanguageTool tree is installed".to_string()
-        })?;
-        let jar = tree.join(SERVER_JAR);
-        let classpath =
-            classpath_of(argv).ok_or_else(|| "the JVM command names no -cp".to_string())?;
-        let jar = jar.to_string_lossy();
-        if classpath == jar || classpath.starts_with(&format!("{jar}:")) {
-            return Ok(());
+/// Why one command line is not the one this build starts.
+///
+/// A port that does not match the listener is the one case worth its own
+/// sentence, because a unit under this name on another port is what a reader
+/// meets most often.
+fn refused(peer: &Peer) -> String {
+    let listening = peer.address.port();
+    match listener::port_of(&peer.exec_start.argv) {
+        Some(port) if port != listening => {
+            format!("the unit's command line names port {port}, and it listens on port {listening}")
         }
+        _ => format!(
+            "the unit runs {}, which is not the command this plugin starts",
+            peer.exec_start.argv
+        ),
     }
-
-    Err(format!(
-        "the unit runs {}, which is not the command this plugin starts",
-        peer.exec_start.argv
-    ))
-}
-
-/// The `--config` value the server reads, which ends at the next flag or at
-/// the end of the line. A path that holds a space survives this, and a later
-/// flag cannot stand in for the value.
-///
-/// The last `--config` wins, because the option parser of the server takes
-/// the last one. A proof that read the first would pass a command line whose
-/// server reads another file.
-fn config_of(argv: &str) -> Option<&str> {
-    let at = argv.rfind(" --config ")? + " --config ".len();
-    let rest = &argv[at..];
-    Some(match rest.find(" --") {
-        Some(end) => &rest[..end],
-        None => rest,
-    })
-}
-
-/// Every spelling of the classpath flag the JVM takes.
-const CLASSPATH_FLAGS: [&str; 3] = [" -cp ", " -classpath ", " --class-path "];
-
-/// The classpath the JVM loads the server class from, which sits between the
-/// last classpath flag and the class name. A tree path that holds a space
-/// survives this.
-///
-/// The last flag wins, because the JVM takes the last one before the main
-/// class. A value that still names any spelling of the flag refuses, because
-/// only one of them can be the one the JVM used.
-fn classpath_of(argv: &str) -> Option<&str> {
-    let class = argv.find(&format!(" {SERVER_CLASS}"))?;
-    let head = &argv[..class];
-    let at = CLASSPATH_FLAGS
-        .iter()
-        .filter_map(|flag| head.rfind(flag).map(|at| at + flag.len()))
-        .max()?;
-    let value = &head[at..];
-    CLASSPATH_FLAGS
-        .iter()
-        .all(|flag| !value.contains(flag))
-        .then_some(value)
-}
-
-/// Whether one whole word is on one command line.
-fn names(argv: &str, word: &str) -> bool {
-    argv.split(' ').any(|found| found == word)
 }
 
 /// Start the transient unit, or answer `Ok(())` when it already runs.
@@ -390,11 +367,17 @@ mod tests {
 
         let no_port = peer(true, "/usr/bin/nc", "/usr/bin/nc -l 127.0.0.1 8081");
         let refused = launched_here(&no_port).expect_err("no port");
-        assert!(refused.contains("no --port"), "{refused}");
+        assert!(
+            refused.contains("not the command this plugin starts"),
+            "{refused}"
+        );
 
         let no_config = peer(true, "/usr/bin/nc", "/usr/bin/nc -l --port 8081");
         let refused = launched_here(&no_config).expect_err("no properties file");
-        assert!(refused.contains("no --config"), "{refused}");
+        assert!(
+            refused.contains("not the command this plugin starts"),
+            "{refused}"
+        );
 
         let other = peer(
             true,
@@ -474,6 +457,29 @@ mod tests {
             Some(tree),
         )
         .expect_err("another classpath");
+        assert!(
+            refused.contains("not the command this plugin starts"),
+            "{refused}"
+        );
+    }
+
+    /// The exact match leaves no room between the classpath and the main
+    /// class, so an extra jar and another main class cannot pass behind a
+    /// copy of the server class later on the line.
+    #[test]
+    fn an_extra_jar_and_a_decoy_main_class_are_refused() {
+        let tree = Path::new(TREE);
+        let argv = format!(
+            "/usr/lib/jvm/default/bin/java -cp {TREE}/{SERVER_JAR}:{TREE}/libs/*:/tmp/evil.jar \
+Evil --port 8081 --config {CONFIG} --x {SERVER_CLASS}"
+        );
+
+        let refused = shaped_like_ours(
+            &peer(true, "/usr/lib/jvm/default/bin/java", &argv),
+            Some(tree),
+        )
+        .expect_err("the JVM runs Evil off /tmp/evil.jar");
+
         assert!(
             refused.contains("not the command this plugin starts"),
             "{refused}"

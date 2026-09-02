@@ -190,18 +190,24 @@ pub fn issues_from(text: &str, response: &CheckResponse) -> Vec<Issue> {
 mod tests {
     use super::*;
 
-    /// The id is removed before the cut, so an id that would straddle the
-    /// cut cannot leave half of itself in the reason.
+    /// The id is removed before the cut, so an id that straddles the cut
+    /// cannot leave half of itself in the reason.
+    ///
+    /// The filler puts the cut inside the id. A cut before the strip leaves
+    /// `MORFOLOGIK_RUL` in the answer, because `replace` then finds no whole
+    /// id to remove.
     #[test]
     fn a_rule_id_across_the_cut_is_still_removed() {
         let rule_id = "MORFOLOGIK_RULE_EN_US";
-        let filler = "a ".repeat(MAX_REASON_CHARS / 2 - 4);
-        let message = format!("{filler}{rule_id} tail");
+        let filler = "a".repeat(MAX_REASON_CHARS - 15);
+        let message = format!("{filler} {rule_id} tail");
 
         let reason = reason_of(&message, rule_id);
 
         assert!(!reason.contains("MORFOLOGIK"), "{reason}");
-        assert!(reason.chars().count() <= MAX_REASON_CHARS);
+        assert!(!reason.contains("MORF"), "{reason}");
+        // Strip first, then cut: the filler and " tail" are all that is left.
+        assert_eq!(reason, format!("{filler} tail"));
     }
 
     #[test]
