@@ -37,6 +37,7 @@ ColumnLayout {
 
   Text {
     Layout.fillWidth: true
+    textFormat: Text.PlainText
     text: root.title
     color: root.cardState === Setup.DONE ? Color.popups.text : Color.urgent
     wrapMode: Text.Wrap
@@ -47,6 +48,7 @@ ColumnLayout {
 
   Text {
     Layout.fillWidth: true
+    textFormat: Text.PlainText
     text: root.body
     color: Color.popups.text
     wrapMode: Text.Wrap
@@ -82,6 +84,7 @@ ColumnLayout {
         spacing: Style.spacing.sm
 
         Text {
+          textFormat: Text.PlainText
           text: String(modelData.package)
           color: Color.popups.text
           font.family: "monospace"
@@ -90,6 +93,7 @@ ColumnLayout {
 
         Text {
           Layout.fillWidth: true
+          textFormat: Text.PlainText
           text: String(modelData.purpose)
           color: Color.muted
           wrapMode: Text.Wrap
@@ -124,6 +128,7 @@ ColumnLayout {
       id: logText
 
       width: parent.width
+      textFormat: Text.PlainText
       text: root.log
       color: root.cardState === Setup.FAILED ? Color.urgent : Color.muted
       wrapMode: Text.Wrap
@@ -142,6 +147,7 @@ ColumnLayout {
     Text {
       Layout.fillWidth: true
       visible: root.installReason.length > 0
+      textFormat: Text.PlainText
       text: root.installReason
       color: Color.muted
       wrapMode: Text.Wrap

@@ -43,6 +43,7 @@ BorderSurface {
         spacing: Style.spacing.lg
 
         Text {
+          textFormat: Text.PlainText
           text: root.issue ? root.issue.original : ""
           color: Color.urgent
           font.family: Style.font.family
@@ -58,6 +59,7 @@ BorderSurface {
         }
 
         Text {
+          textFormat: Text.PlainText
           text: root.issue ? root.issue.fix : ""
           color: root.acceptedColor
           font.family: Style.font.family
@@ -77,6 +79,7 @@ BorderSurface {
           Text {
             id: category
             anchors.centerIn: parent
+            textFormat: Text.PlainText
             text: root.issue ? root.issue.category : ""
             color: Color.muted
             font.family: Style.font.family
@@ -89,6 +92,7 @@ BorderSurface {
 
       Text {
         Layout.fillWidth: true
+        textFormat: Text.PlainText
         text: root.issue ? root.issue.reason : ""
         color: Color.muted
         wrapMode: Text.Wrap
@@ -98,6 +102,7 @@ BorderSurface {
 
       Text {
         Layout.fillWidth: true
+        textFormat: Text.PlainText
         text: "Issue " + (root.focusIndex + 1) + " of " + root.issueCount
           + ". Enter accepts, Space skips, Up and Down move, A accepts all."
         color: Color.muted

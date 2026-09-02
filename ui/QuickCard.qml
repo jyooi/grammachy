@@ -317,6 +317,7 @@ BorderSurface {
 
         Text {
           Layout.fillWidth: true
+          textFormat: Text.PlainText
           text: root.noticeTitle
           color: Color.urgent
           wrapMode: Text.Wrap
@@ -327,6 +328,7 @@ BorderSurface {
 
         Text {
           Layout.fillWidth: true
+          textFormat: Text.PlainText
           text: root.noticeBody
           color: Color.popups.text
           wrapMode: Text.Wrap
@@ -385,6 +387,7 @@ BorderSurface {
           Layout.fillWidth: true
           horizontalAlignment: Text.AlignHCenter
           wrapMode: Text.Wrap
+          textFormat: Text.PlainText
           text: Capture.NOTHING_NEW
           color: Color.popups.text
           font.family: Style.font.family
@@ -425,6 +428,7 @@ BorderSurface {
           Layout.fillWidth: true
           horizontalAlignment: Text.AlignHCenter
           wrapMode: Text.Wrap
+          textFormat: Text.PlainText
           text: root.sourceText.length + " characters checked, " + root.engine + ", " + root.elapsedMs + " ms"
           color: Color.muted
           font.family: Style.font.family
@@ -483,6 +487,7 @@ BorderSurface {
           spacing: Style.spacing.lg
 
           Text {
+            textFormat: Text.PlainText
             text: root.units(root.limitUnits) + " per check"
             color: Color.accent
             font.family: Style.font.family
@@ -492,6 +497,7 @@ BorderSurface {
           Item { Layout.fillWidth: true }
 
           Text {
+            textFormat: Text.PlainText
             text: root.units(root.fullText.length) + " selected"
             color: Color.muted
             font.family: Style.font.family
@@ -511,6 +517,7 @@ BorderSurface {
         Text {
           Layout.fillWidth: true
           visible: root.engineMessage.length > 0
+          textFormat: Text.PlainText
           text: root.engineMessage
           color: Color.muted
           wrapMode: Text.Wrap
