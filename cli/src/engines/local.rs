@@ -1,10 +1,11 @@
 //! What a local-server engine needs to start and reach its own server.
 //!
 //! `languagetool` talks HTTP to a server on the loopback interface and starts
-//! it itself as a transient user unit when the port does not answer. Spec
-//! section 4 names the unit, `grammachy-languagetool`; spec section 10 fixes
-//! the mechanism: `systemd-run --user` only, so removing the plugin leaves no
-//! unit file behind.
+//! it itself as a transient user unit when the unit is inactive, on a port
+//! [`free_loopback_port`] picks. Spec section 4 names the unit,
+//! `grammachy-languagetool`. Spec section 10 fixes the mechanism:
+//! `systemd-run --user` only, so removing the plugin leaves no unit file
+//! behind.
 
 use std::io::ErrorKind;
 use std::net::TcpListener;
