@@ -78,7 +78,7 @@ fn engines(directory: PathBuf, download: Downloader, extract: Extractor) -> Engi
 
 /// A transfer that writes the whole archive at once.
 fn whole() -> Downloader {
-    Box::new(|_url, path| {
+    Box::new(|_url, path, _max_bytes| {
         std::fs::write(path, FAKE_ARCHIVE)
             .map(|()| Transfer::Finished)
             .map_err(|error| error.to_string())
@@ -87,7 +87,7 @@ fn whole() -> Downloader {
 
 /// An unpack that leaves the tree the real archive would.
 fn unpacks_the_release() -> Extractor {
-    Box::new(|_archive, into| {
+    Box::new(|_archive, into, _admission| {
         let tree = into.join(UNPACKS_INTO);
         std::fs::create_dir_all(tree.join("libs")).map_err(|error| error.to_string())?;
         std::fs::write(tree.join(ENTRY), b"jar").map_err(|error| error.to_string())?;
@@ -132,12 +132,13 @@ fn an_archive_that_does_not_match_the_pin_is_refused() {
     let counted = Arc::clone(&unpacked);
     let engines = engines(
         directory.clone(),
-        Box::new(|_url, path| {
-            std::fs::write(path, b"not the release")
+        // The same length as the pin, so the digest is what refuses it.
+        Box::new(|_url, path, _max_bytes| {
+            std::fs::write(path, FAKE_ARCHIVE.to_ascii_uppercase())
                 .map(|()| Transfer::Finished)
                 .map_err(|error| error.to_string())
         }),
-        Box::new(move |_archive, _into| {
+        Box::new(move |_archive, _into, _admission| {
             counted.fetch_add(1, Ordering::SeqCst);
             Ok(())
         }),
@@ -164,6 +165,77 @@ fn an_archive_that_does_not_match_the_pin_is_refused() {
     );
 }
 
+/// The size is checked before the digest, so a short or long file is refused
+/// without a hash, and the transfer is told the pinned size as its limit.
+#[test]
+fn an_archive_of_the_wrong_size_is_refused_before_the_digest() {
+    let _guard = serially();
+    cancel::reset();
+    pin_the_fake_release();
+    let directory = scratch("wrong-size");
+    let limit = Arc::new(Mutex::new(0u64));
+    let told = Arc::clone(&limit);
+    let engines = engines(
+        directory.clone(),
+        Box::new(move |_url, path, max_bytes| {
+            *told.lock().expect("the lock is free") = max_bytes;
+            std::fs::write(path, b"not the release")
+                .map(|()| Transfer::Finished)
+                .map_err(|error| error.to_string())
+        }),
+        unpacks_the_release(),
+    );
+
+    let failure = engines.install(SLUG).expect_err("the size differs");
+
+    assert!(
+        matches!(&failure, Failure::DownloadFailed(message)
+            if message.contains("not the pinned size") && !message.contains("digest")),
+        "{failure:?}"
+    );
+    assert_eq!(
+        *limit.lock().expect("the lock is free"),
+        FAKE_ARCHIVE.len() as u64,
+        "the transfer is bounded by the pinned size"
+    );
+    assert!(!directory.join(format!("{ARCHIVE}.part")).exists());
+}
+
+/// A `.part` file longer than the pin can never resume into the right file,
+/// so it goes before the transfer starts.
+#[test]
+fn an_oversize_part_file_is_removed_before_the_transfer() {
+    let _guard = serially();
+    cancel::reset();
+    pin_the_fake_release();
+    let directory = scratch("oversize-part");
+    let partial = directory.join(format!("{ARCHIVE}.part"));
+    std::fs::write(&partial, [b'x'; 200]).expect("the part file is written");
+    let resumed_from = Arc::new(Mutex::new(None));
+    let seen = Arc::clone(&resumed_from);
+    let engines = engines(
+        directory.clone(),
+        Box::new(move |_url, path, _max_bytes| {
+            *seen.lock().expect("the lock is free") =
+                Some(std::fs::metadata(path).map(|data| data.len()).unwrap_or(0));
+            std::fs::write(path, FAKE_ARCHIVE)
+                .map(|()| Transfer::Finished)
+                .map_err(|error| error.to_string())
+        }),
+        unpacks_the_release(),
+    );
+
+    engines
+        .install(SLUG)
+        .expect("the fresh transfer matches the pin");
+
+    assert_eq!(
+        *resumed_from.lock().expect("the lock is free"),
+        Some(0),
+        "the transfer started from nothing"
+    );
+}
+
 /// A `bsdtar` that died half way leaves a staging directory with no server jar
 /// in it. That is never renamed into place, so no half install is ever run.
 #[test]
@@ -175,7 +247,7 @@ fn an_unpack_that_left_no_server_jar_installs_nothing() {
     let engines = engines(
         directory.clone(),
         whole(),
-        Box::new(|_archive, into| {
+        Box::new(|_archive, into, _admission| {
             std::fs::create_dir_all(into.join(UNPACKS_INTO)).map_err(|error| error.to_string())
         }),
     );
@@ -201,7 +273,7 @@ fn a_cancel_keeps_the_part_file() {
     let directory = scratch("cancel");
     let engines = engines(
         directory.clone(),
-        Box::new(|_url, path| {
+        Box::new(|_url, path, _max_bytes| {
             std::fs::write(path, &FAKE_ARCHIVE[..8]).map_err(|error| error.to_string())?;
             cancel::request();
             Ok(Transfer::Cancelled)
@@ -240,7 +312,7 @@ fn installing_a_component_that_is_already_there_fetches_nothing() {
     let counted = Arc::clone(&fetched);
     let engines = engines(
         directory,
-        Box::new(move |_url, _path| {
+        Box::new(move |_url, _path, _max_bytes| {
             counted.fetch_add(1, Ordering::SeqCst);
             Ok(Transfer::Finished)
         }),
@@ -267,7 +339,7 @@ fn a_disk_with_no_room_refuses_before_it_fetches_anything() {
     let counted = Arc::clone(&fetched);
     let engines = engines(
         scratch("no-room"),
-        Box::new(move |_url, _path| {
+        Box::new(move |_url, _path, _max_bytes| {
             counted.fetch_add(1, Ordering::SeqCst);
             Ok(Transfer::Finished)
         }),
@@ -299,7 +371,7 @@ fn the_install_fetches_the_pinned_url_and_unpacks_the_verified_archive() {
     let seen = Arc::clone(&unpacked);
     let engines = engines(
         directory.clone(),
-        Box::new(move |url, path| {
+        Box::new(move |url, path, _max_bytes| {
             recorded
                 .lock()
                 .expect("the lock is free")
@@ -308,7 +380,7 @@ fn the_install_fetches_the_pinned_url_and_unpacks_the_verified_archive() {
                 .map(|()| Transfer::Finished)
                 .map_err(|error| error.to_string())
         }),
-        Box::new(move |archive, into| {
+        Box::new(move |archive, into, _admission| {
             seen.lock()
                 .expect("the lock is free")
                 .push(archive.display().to_string());

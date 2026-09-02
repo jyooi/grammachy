@@ -15,10 +15,11 @@
 //! deletes one. The pacman package stays a first-class alternative and is
 //! never touched by either verb; `doctor` reports it where it finds it.
 //!
-//! The row is pinned twice, by sha256 and by byte size.
-//! Both numbers come from an unauthenticated request to the upstream host,
-//! and the digest is the one the Arch `languagetool` package pins for the same
-//! file.
+//! The row is pinned four times: by sha256 and byte size of the archive, and
+//! by member count and unpacked bytes of its central directory. The first two
+//! bound the transfer and the last two bound the unpack. All four come from
+//! an unauthenticated request to the upstream host, and the digest is the one
+//! the Arch `languagetool` package pins for the same file.
 //!
 //! Every path and every side effect is a seam: `GRAMMACHY_ENGINES_DIR`,
 //! `GRAMMACHY_ENGINE_BASE_URL`, `GRAMMACHY_ENGINE_SHA256`,
@@ -29,6 +30,7 @@
 pub mod archive;
 pub mod cancel;
 pub mod envelope;
+pub mod zip;
 
 mod digest;
 mod disk;
@@ -43,6 +45,7 @@ pub use archive::{extractor, Extractor};
 pub use digest::sha256_hex;
 pub use envelope::{EngineEnvelope, EngineReport, EngineRow, State};
 pub use transfer::{Downloader, Failure, Stopper, Transfer, NOT_LOADED};
+pub use zip::Admission;
 
 /// Points the CLI at another engines directory. The test suite sets it, so no
 /// test writes the real one. Not a user-facing setting.
@@ -87,6 +90,11 @@ struct CatalogueRow {
     /// What the unpacked tree takes, so the free-space check measures the peak
     /// of the install rather than the archive alone.
     installed_bytes: u64,
+    /// How many members the central directory of the archive lists.
+    members: u64,
+    /// What those members unpack to, added together. The unpack refuses an
+    /// archive that says it holds more.
+    unpacked_bytes: u64,
     licence: &'static str,
     directory_name: &'static str,
     entry: &'static str,
@@ -103,6 +111,8 @@ struct CatalogueRow {
 /// same file, so two independent parties name the same bytes. `installed_bytes`
 /// is that package's installed size, which is the unpacked tree: the archive is
 /// jars, which barely compress, so the tree is not much larger than the zip.
+/// `members` and `unpacked_bytes` are read from the central directory of the
+/// pinned archive on 2026-09-02.
 const CATALOGUE: &[CatalogueRow] = &[CatalogueRow {
     slug: "languagetool",
     name: "LanguageTool",
@@ -112,6 +122,8 @@ const CATALOGUE: &[CatalogueRow] = &[CatalogueRow {
     sha256: "53600506b399bb5ffe1e4c8dec794fd378212f14aaf38ccef9b6f89314d11631",
     size_bytes: 251_998_221,
     installed_bytes: 405_074_394,
+    members: 2_032,
+    unpacked_bytes: 405_072_177,
     licence: "LGPL-2.1-or-later",
     directory_name: "LanguageTool-6.6",
     entry: "languagetool-server.jar",
@@ -129,6 +141,9 @@ pub struct Release {
     pub installed_bytes: u64,
     /// The directory the archive unpacks into, inside the staging directory.
     pub directory_name: String,
+    /// What the unpack admits: that directory, and the pinned member count
+    /// and unpacked bytes.
+    pub admission: Admission,
 }
 
 /// What the catalogue knows about this slug, or `None` for an engine that has
@@ -162,6 +177,11 @@ pub fn release(slug: &str) -> Option<Release> {
         size_bytes,
         installed_bytes,
         directory_name: row.directory_name.to_string(),
+        admission: Admission {
+            directory_name: row.directory_name.to_string(),
+            max_members: row.members,
+            max_unpacked_bytes: row.unpacked_bytes,
+        },
     })
 }
 
@@ -327,9 +347,17 @@ impl Engines {
             return self.finished_row(slug);
         }
 
+        // A `.part` file longer than the pin is whole and wrong: a resume
+        // would ask for bytes past the end, so it goes before the transfer.
         let already = std::fs::metadata(&paths.partial)
             .map(|data| data.len())
             .unwrap_or(0);
+        let already = if already > release.size_bytes {
+            transfer::remove_wrong_partial(&paths.partial);
+            0
+        } else {
+            already
+        };
         if let Some(short) = disk::shortfall(
             release.size_bytes.saturating_add(release.installed_bytes),
             already,
@@ -351,7 +379,9 @@ impl Engines {
             ))
         })?;
 
-        match (self.download)(&release.url, &paths.partial).map_err(Failure::DownloadFailed)? {
+        match (self.download)(&release.url, &paths.partial, release.size_bytes)
+            .map_err(Failure::DownloadFailed)?
+        {
             Transfer::Finished => {}
             Transfer::Cancelled => {
                 return Err(Failure::Cancelled(format!(
@@ -362,8 +392,13 @@ impl Engines {
             }
         }
 
-        transfer::promote(&paths.partial, &paths.archive, &release.sha256)
-            .map_err(Failure::DownloadFailed)?;
+        transfer::promote(
+            &paths.partial,
+            &paths.archive,
+            &release.sha256,
+            release.size_bytes,
+        )
+        .map_err(Failure::DownloadFailed)?;
         self.unpack(row, &release, &paths)?;
         self.finished_row(slug)
     }
@@ -386,7 +421,7 @@ impl Engines {
             ))
         })?;
 
-        (self.extract)(&paths.archive, &paths.staging).map_err(failed)?;
+        (self.extract)(&paths.archive, &paths.staging, &release.admission).map_err(failed)?;
 
         let unpacked = paths.staging.join(&release.directory_name);
         if !unpacked.join(row.entry).is_file() {

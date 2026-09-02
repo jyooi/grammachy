@@ -39,8 +39,8 @@ fn engines(directory: PathBuf) -> (Engines, Arc<AtomicUsize>) {
     (
         Engines {
             directory,
-            download: Box::new(|_url, _path| Ok(Transfer::Finished)),
-            extract: Box::new(|_archive, _into| Ok(())),
+            download: Box::new(|_url, _path, _max_bytes| Ok(Transfer::Finished)),
+            extract: Box::new(|_archive, _into, _admission| Ok(())),
             stop,
         },
         stops,
@@ -51,8 +51,8 @@ fn engines(directory: PathBuf) -> (Engines, Arc<AtomicUsize>) {
 fn engines_that_cannot_stop(directory: PathBuf, why: String) -> Engines {
     Engines {
         directory,
-        download: Box::new(|_url, _path| Ok(Transfer::Finished)),
-        extract: Box::new(|_archive, _into| Ok(())),
+        download: Box::new(|_url, _path, _max_bytes| Ok(Transfer::Finished)),
+        extract: Box::new(|_archive, _into, _admission| Ok(())),
         stop: Box::new(move |_unit| Err(why.clone())),
     }
 }
@@ -242,8 +242,8 @@ fn remove_stops_the_languagetool_unit_by_name() {
     let recorded = Arc::clone(&named);
     let engines = Engines {
         directory,
-        download: Box::new(|_url, _path| Ok(Transfer::Finished)),
-        extract: Box::new(|_archive, _into| Ok(())),
+        download: Box::new(|_url, _path, _max_bytes| Ok(Transfer::Finished)),
+        extract: Box::new(|_archive, _into, _admission| Ok(())),
         stop: Box::new(move |unit| {
             recorded
                 .lock()
