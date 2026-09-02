@@ -217,18 +217,15 @@ fn shaped_like_ours(peer: &Peer, tree: Option<&Path>) -> Result<(), String> {
     let head = if peer.exec_start.path == PACKAGE_LAUNCHER {
         format!("{PACKAGE_LAUNCHER} --http")
     } else if peer.exec_start.path.ends_with(JAVA_TAIL) {
-        // The JVM path itself is free, because JAVA_HOME may differ between
-        // the run that started the unit and this one.
-        let at = argv.find(CLASSPATH_FLAG).ok_or_else(|| refused(peer))?;
-        let jvm = &argv[..at];
-        if !jvm.ends_with(JAVA_TAIL) {
-            return Err(refused(peer));
-        }
+        // Which JVM is free, because JAVA_HOME may differ between the run
+        // that started the unit and this one. The program word is the path
+        // systemd ran, so no argument fits in front of the classpath.
         let tree = tree.ok_or_else(|| {
             "the unit runs the JVM and no LanguageTool tree is installed".to_string()
         })?;
         format!(
-            "{jvm}{CLASSPATH_FLAG}{}:{} {SERVER_CLASS}",
+            "{}{CLASSPATH_FLAG}{}:{} {SERVER_CLASS}",
+            peer.exec_start.path,
             tree.join(SERVER_JAR).display(),
             tree.join("libs/*").display()
         )
@@ -423,11 +420,13 @@ mod tests {
     #[test]
     fn the_jvm_shape_needs_the_installed_tree_on_its_classpath() {
         let tree = Path::new(TREE);
+        // Which JVM is free: this one is not the one `java_home` would pick.
+        let jvm = "/usr/lib/jvm/java-21-openjdk/bin/java";
         let ours = format!(
-            "/usr/lib/jvm/java-21-openjdk/bin/java -cp {TREE}/{SERVER_JAR}:{TREE}/libs/* \
+            "{jvm} -cp {TREE}/{SERVER_JAR}:{TREE}/libs/* \
 {SERVER_CLASS} --port 8081 --config {CONFIG}"
         );
-        let running = peer(true, "/usr/lib/jvm/default/bin/java", &ours);
+        let running = peer(true, jvm, &ours);
         shaped_like_ours(&running, Some(tree)).expect("the JVM command this plugin starts");
 
         let refused = shaped_like_ours(&running, None).expect_err("no tree is installed");
@@ -457,6 +456,27 @@ mod tests {
             Some(tree),
         )
         .expect_err("another classpath");
+        assert!(
+            refused.contains("not the command this plugin starts"),
+            "{refused}"
+        );
+    }
+
+    /// No JVM argument fits between the program and the classpath. A
+    /// `-javaagent` whose path ends with `/bin/java` must not pass as the
+    /// program word.
+    #[test]
+    fn a_java_agent_before_the_classpath_is_refused() {
+        let tree = Path::new(TREE);
+        let jvm = "/usr/lib/jvm/default/bin/java";
+        let argv = format!(
+            "{jvm} -javaagent:/tmp/x/bin/java -cp {TREE}/{SERVER_JAR}:{TREE}/libs/* \
+{SERVER_CLASS} --port 8081 --config {CONFIG}"
+        );
+
+        let refused = shaped_like_ours(&peer(true, jvm, &argv), Some(tree))
+            .expect_err("the JVM loads an agent from /tmp");
+
         assert!(
             refused.contains("not the command this plugin starts"),
             "{refused}"
