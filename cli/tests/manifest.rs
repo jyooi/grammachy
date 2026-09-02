@@ -37,3 +37,14 @@ fn the_manifest_version_equals_the_crate_version() {
 fn the_cli_lock_version_equals_the_crate_version() {
     assert_eq!(cli_lock()["version"], env!("CARGO_PKG_VERSION"));
 }
+
+// Section 10: a pinned release carries its byte size, so bootstrap.sh can
+// bound the download before it hashes anything.
+#[test]
+fn a_pinned_cli_lock_carries_a_positive_size() {
+    let lock = cli_lock();
+    if lock["sha256"].as_str().unwrap_or("").is_empty() {
+        return;
+    }
+    assert!(lock["sizeBytes"].as_u64().unwrap_or(0) > 0, "{lock}");
+}
