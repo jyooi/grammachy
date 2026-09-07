@@ -50,19 +50,14 @@ fn the_tracked_tree_carries_no_agent_instruction_file() {
     let offending: Vec<&String> = files
         .iter()
         .filter(|path| {
-            let mut parts = path.split('/').peekable();
-            let mut hit = false;
-            while let Some(part) = parts.next() {
-                let is_leaf = parts.peek().is_none();
-                if is_leaf {
-                    hit |= AGENT_INSTRUCTION_NAMES
-                        .iter()
-                        .any(|name| name.eq_ignore_ascii_case(part));
-                } else {
-                    hit |= AGENT_INSTRUCTION_DIRS.contains(&part);
-                }
-            }
-            hit
+            let (dirs, leaf) = path.rsplit_once('/').unwrap_or(("", path));
+            let leaf_hit = AGENT_INSTRUCTION_NAMES
+                .iter()
+                .any(|name| name.eq_ignore_ascii_case(leaf));
+            let dir_hit = dirs
+                .split('/')
+                .any(|dir| AGENT_INSTRUCTION_DIRS.contains(&dir));
+            leaf_hit || dir_hit
         })
         .collect();
 
