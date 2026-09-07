@@ -1,4 +1,4 @@
-# Project agent memory
+# Contributing to Grammachy
 
 Grammachy is a desktop grammar and style checker for Omarchy on Hyprland.
 The Rust CLI in `cli/` runs the engines and prints one JSON envelope for `check`, `chunk`, `setup`, and `engine`.
@@ -112,9 +112,18 @@ The Local LLM and Cloud LLM engines were removed (HUF-240).
   The shipped binary keeps the spec limit of 10 s.
   `cli/tests/harper_lazy.rs` guards that the dictionary loads only inside `Harper::check`.
 
+## Published tree
+
+- `omarchy plugin add` is a plain `git clone`, so every tracked file ships to every user.
+  The manifest has no packaging exclusion.
+- The tracked tree carries no agent instruction file: no `AGENTS.md`, `CLAUDE.md`, or their equivalents.
+  A coding agent that runs in or above the installed plugin directory would read one as its own instructions.
+  `cli/tests/published_tree.rs` enforces it.
+  This file is the home for that knowledge, and nothing loads it automatically.
+
 ## Maintaining this file
 
-Keep this file for knowledge useful to almost every future agent session in this project.
+Keep this file for knowledge useful to almost every contributor and agent session in this project.
 Do not repeat what the codebase already shows; point to the authoritative file or command instead.
 Prefer rewriting or pruning existing entries over appending new ones.
-When updating this file, preserve this bar for all agents and keep entries concise.
+When updating this file, preserve this bar and keep entries concise.
