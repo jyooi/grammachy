@@ -5,6 +5,20 @@ import qs.Ui
 import "format.js" as Format
 import "capture.js" as Capture
 
+// The quick popup card, spec section 6, laid out after variant B of the
+// HUF-174 prototype: hero, marked text, inspector strip, footer.
+//
+// The gear in the hero flips the body to the Settings view of spec section 7
+// and back, so the check view itself stays clean. The check state lives on
+// behind it: flipping back shows the same Issues with the same decisions.
+//
+// A failed Check swaps the body for one of the error cards of spec section 8,
+// which `ui/ErrorCard.qml` draws from a model that `ui/errors.js` owns. The
+// too-long card of section 6 is this file's own, because its size bar and its
+// handover to Compose belong to the popup rather than to that model.
+//
+// The card renders state and reports intent. Capture, the Check, the key map,
+// the clipboard, and the settings storage all live in Overlay.qml.
 BorderSurface {
   id: root
 
@@ -134,6 +148,8 @@ BorderSurface {
   implicitWidth: root.cardWidth
   implicitHeight: layout.implicitHeight + root.contentTopInset + root.contentBottomInset
 
+  // The card owns its own click so a press inside it never reaches the
+  // backdrop that closes the overlay.
   MouseArea {
     anchors.fill: parent
     onClicked: {}

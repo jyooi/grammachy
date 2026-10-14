@@ -42,6 +42,8 @@ fn defaults_apply_with_no_flags_and_no_file() {
 
     assert_eq!(options.native, NativeLanguage::None);
     assert_eq!(options.target, TargetEnglish::EnUs);
+    // Spec section 4, HUF-237: `harper` is the one engine compiled into the
+    // binary, so a fresh install checks with it and downloads nothing.
     assert_eq!(options.engine, EngineSlug::Harper);
     assert_eq!(options, CheckOptions::default());
 }
@@ -132,6 +134,10 @@ fn a_stored_value_of_the_wrong_json_type_reads_as_the_default() {
     );
 }
 
+/// HUF-240: the `openai` and `openrouter` engines are gone. A `shell.json`
+/// written by an older build may still name either one, and that stored
+/// value must fall back to the default engine rather than erroring, the way
+/// any other unrecognized `engine` value already does.
 #[test]
 fn a_stored_engine_of_a_removed_slug_falls_back_to_the_default() {
     for removed in ["openai", "openrouter"] {

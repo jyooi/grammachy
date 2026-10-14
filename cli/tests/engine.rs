@@ -75,6 +75,9 @@ fn the_row_reports_what_the_directory_actually_holds() {
     assert_eq!(row(&rows, "languagetool").path, tree.display().to_string());
 }
 
+/// A `bsdtar` that died half way leaves a directory behind, which is not an
+/// install. Only the entry file settles it, so the next Install starts over
+/// rather than running a tree with no server in it.
 #[test]
 fn a_directory_without_the_server_jar_is_not_installed() {
     let directory = scratch("half-unpacked");

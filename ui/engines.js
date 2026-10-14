@@ -1,3 +1,14 @@
+// Loaded twice: by QML as `Engines`, and by `engines.test.js` under node.
+// Nothing here may touch a QML or a node API, because each side only has one
+// of them.
+//
+// It is the shape of `ui/models.js` with the row swapped, and it says the same
+// three state words, because a component on disk and a weights file on disk
+// answer the same question. The two files stay apart because QML gives a `.js`
+// no way to import another one that a node `require` also understands, and one
+// byte formatter is a cheaper thing to keep in step than a loader that only
+// half the callers have.
+
 var CONTRACT_VERSION = 1
 
 var ABSENT = "absent"
@@ -158,6 +169,17 @@ var ROW_FIELDS = [
   "licence", "needsJava", "path", "fromPackage"
 ]
 
+// Whether two lists of rows say the same thing.
+//
+// A QML Repeater rebuilds every delegate the moment its array is replaced, and
+// the poll answers once a second, so without this the row is destroyed and
+// recreated once a second: the progress bar restarts its animation rather than
+// advancing, an open tooltip goes, and a press whose release lands after a
+// rebuild never becomes a click.
+//
+// `movingSlug` is the row an install is running on. Its `.part` length is the
+// one number the poll is there to move, and the bar reads it from its own
+// property, so a change to it alone is not a reason to rebuild the list.
 function sameRows(left, right, movingSlug) {
   var a = Array.isArray(left) ? left : []
   var b = Array.isArray(right) ? right : []

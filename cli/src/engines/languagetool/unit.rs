@@ -73,6 +73,7 @@ pub const SERVER_JAR: &str = "languagetool-server.jar";
 
 const SERVER_CLASS: &str = "org.languagetool.server.HTTPServer";
 
+/// Where `archlinux-java` points at the selected JVM.
 const DEFAULT_JVM: &str = "/usr/lib/jvm/default";
 
 const CONFIG_SUFFIX: &str = "/grammachy/languagetool.properties";
@@ -202,6 +203,9 @@ fn shaped_like_ours(peer: &Peer, tree: Option<&Path>) -> Result<(), String> {
     let head = if peer.exec_start.path == PACKAGE_LAUNCHER {
         format!("{PACKAGE_LAUNCHER} --http")
     } else if peer.exec_start.path.ends_with(JAVA_TAIL) {
+        // Which JVM is free, because JAVA_HOME may differ between the run
+        // that started the unit and this one. The program word is the path
+        // systemd ran, so no argument fits in front of the classpath.
         let tree = tree.ok_or_else(|| {
             "the unit runs the JVM and no LanguageTool tree is installed".to_string()
         })?;
@@ -460,6 +464,8 @@ Evil --port 8081 --config {CONFIG} --x {SERVER_CLASS}"
         );
     }
 
+    /// The JVM takes the last classpath flag before the main class, so a
+    /// first flag with the installed tree must not cover a second one.
     #[test]
     fn a_second_classpath_flag_is_refused() {
         let tree = Path::new(TREE);
@@ -482,6 +488,9 @@ Evil --port 8081 --config {CONFIG} --x {SERVER_CLASS}"
         }
     }
 
+    /// The server takes the last `--config`, so the proof has to read that
+    /// one. A first flag with a good path must not cover a second with a
+    /// crafted one.
     #[test]
     fn the_last_config_flag_is_the_one_proven() {
         let argv = format!(
@@ -527,6 +536,8 @@ Evil --port 8081 --config {CONFIG} --x {SERVER_CLASS}"
         );
     }
 
+    /// systemd prints `argv[]` space joined, so a home directory that holds a
+    /// space must not make the proof refuse a unit this plugin started.
     #[test]
     fn a_tree_path_that_holds_a_space_still_passes() {
         let tree = Path::new("/home/jia yi/.local/share/grammachy/engines/languagetool");
@@ -555,6 +566,8 @@ Evil --port 8081 --config {CONFIG} --x {SERVER_CLASS}"
         assert!(refused.contains("8081"), "{refused}");
     }
 
+    /// LanguageTool is opt in now, so a machine with neither the tree nor the
+    /// package is told how to add it without a password (HUF-237).
     #[test]
     fn a_machine_with_neither_names_the_install_verb() {
         if Path::new(PACKAGE_LAUNCHER).is_file() || install::installed("languagetool").is_some() {

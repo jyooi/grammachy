@@ -131,6 +131,9 @@ impl Setup {
             Err(message) => return SetupEnvelope::error(message),
         }
 
+        // The reload is what makes the two hotkeys live, but a machine with no
+        // running compositor is a fact rather than a failure: the block is on
+        // disk either way and the next Hyprland start reads it.
         steps.push(match (self.reload)() {
             Ok(()) => Step::new("reload", State::Changed, "hyprctl reload"),
             Err(message) => Step::new("reload", State::Skipped, message),

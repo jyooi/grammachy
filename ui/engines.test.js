@@ -1,3 +1,11 @@
+// Node tests for the Engines list. Spec sections 5.4, 7, and 13. HUF-237.
+// Run with `node --test ui/engines.test.js`.
+//
+// The last block runs stub binaries that print exactly what `grammachy engine`
+// prints for each verb and for each failure. A stub is the only safe seam here:
+// a test must never fetch a 250 MB release, write the real engines directory,
+// or stop the LanguageTool unit the live shell uses.
+
 const test = require("node:test")
 const assert = require("node:assert/strict")
 const fs = require("node:fs")
@@ -212,6 +220,8 @@ test("the dropdown drops the engines the list says are absent", () => {
   assert.deepEqual(whole, ENGINE_OPTIONS.map(option => option.value))
 })
 
+// A dropdown that drops its own value shows a blank box, and the stored value
+// is untouched until the reader chooses something else.
 test("the engine the reader is on stays in the list whatever the disk says", () => {
   const offered = engineOptions(unavailable([ABSENT_ROW]), "languagetool")
     .map(option => option.value)

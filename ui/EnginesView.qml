@@ -5,6 +5,19 @@ import qs.Ui
 import "engines.js" as Engines
 import "deps.js" as Deps
 
+// The Engines list of the Settings view, spec sections 5.4 and 7.
+//
+// It sits under the Engine dropdown and is drawn whatever engine is selected,
+// because the whole point is to add an engine the dropdown cannot offer yet
+// (HUF-237). One row per optional component: the name, one hint line, a bar
+// while a download runs, and the icon button that row offers.
+//
+// The row button carries an icon and no text label: the verb is the tooltip
+// and the cost is in the hint line above.
+//
+// What a row offers and what its hint says both come from `ui/engines.js`,
+// which a node test can run and this file cannot. This view draws that answer
+// and reports which button was pressed; the processes live in Overlay.qml.
 ColumnLayout {
   id: root
 

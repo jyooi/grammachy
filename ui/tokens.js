@@ -1,3 +1,7 @@
+// Loaded twice: by MarkedText.qml through `import "tokens.js" as Tokens`,
+// and by `tokens.test.js` under node. Nothing here may touch a QML or a node
+// API, because each side only has one of them.
+
 function isBlank(ch) {
   return ch !== "\n" && ch !== "\r" && /\s/.test(ch)
 }

@@ -1,3 +1,7 @@
+// Loaded twice: by the QML overlay through `import "settings.js" as Settings`,
+// and by `settings.test.js` under node. Nothing here may touch a QML or a node
+// API, because each side only has one of them.
+
 var PLUGIN_ID = "io.github.jyooi.grammachy"
 
 var DESCRIPTORS = {
@@ -30,8 +34,25 @@ var ENGINE_OPTIONS = [
   { value: "harper", label: "Harper" }
 ]
 
+// The engine a fresh install checks with, spec section 4 and HUF-237.
+//
+// It is `harper` because that is the one engine compiled into the binary: it
+// needs no download, no pacman command, and no server, so the first Check on a
+// machine that has just been set up answers. It is also where the dropdown
+// falls back when the engine it was on stops being available.
 var BUILT_IN_ENGINE = "harper"
 
+// The dropdown rows to draw, spec section 7 and HUF-237.
+//
+// An engine that is not on this machine is not offered: picking it would only
+// buy the reader an `engine_unavailable` card. `unavailable` is the list of
+// slugs `ui/engines.js` read out of `grammachy engine list`, so this file
+// never decides what is installed and only decides what that means.
+//
+// The engine the reader is already on stays in the list whatever that says.
+// A dropdown that drops its own value shows a blank box, and the stored value
+// is untouched until they choose something else, so hiding it would say the
+// setting is one thing while the file says another.
 function engineOptions(unavailable, current) {
   var missing = Array.isArray(unavailable) ? unavailable : []
   var selected = String(current === undefined ? "" : current)
@@ -60,7 +81,7 @@ function findById(entries, id) {
 }
 
 // `updateEntryInline` writes the bar layout entry first and the top level
-// `plugins` entry only when the layout has none.
+// `plugins` entry.
 function entryOf(config, pluginId) {
   var id = pluginId === undefined ? PLUGIN_ID : String(pluginId)
   if (!isPlainObject(config)) return ({})

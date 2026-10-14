@@ -1,3 +1,15 @@
+//! The freshness rule of the capture and the Clear of the popup, spec
+//! sections 3 and 6 (HUF-235).
+//!
+//! `ui/capture.test.js` drives the rule itself and counts the Checks a summon
+//! starts, but it drives the steps itself: they are only the right steps if
+//! `Overlay.qml` takes them in the same order. The overlay cannot be
+//! instantiated outside the shell's plugin loader, so this test reads the file
+//! the shell ships and holds those calls in place, the way `overlay_anchor.rs`
+//! holds the Replace in place.
+//!
+//! No test here reads the machine, touches a clipboard, or runs an engine.
+
 fn read(relative: &str) -> String {
     let path = format!("{}/../{relative}", env!("CARGO_MANIFEST_DIR"));
     std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("{relative} is readable: {error}"))
@@ -32,6 +44,9 @@ fn function_body(source: &str, name: &str) -> String {
     block_after(source, &format!("function {name}("), name)
 }
 
+/// The bug: the compositor keeps the last primary selection, so a summon with
+/// nothing highlighted read the text of the summon before it and checked it
+/// again. One rule decides that, and the capture asks it before the Check.
 #[test]
 fn a_capture_is_measured_against_the_last_consumed_one_before_any_check() {
     let source = read("Overlay.qml");
@@ -68,6 +83,10 @@ fn a_capture_is_measured_against_the_last_consumed_one_before_any_check() {
     );
 }
 
+/// Spec section 3: the capture is recorded where it is taken, and nothing more
+/// happens to the compositor there. A terminal drops its own highlight when it
+/// loses primary ownership, so a release at capture time would take the
+/// Selection away from under the Apply the reader is still deciding on.
 #[test]
 fn the_capture_is_recorded_where_it_is_taken_and_releases_nothing() {
     let source = read("Overlay.qml");
@@ -263,6 +282,10 @@ fn a_run_that_captured_nothing_records_nothing_and_releases_nothing() {
     );
 }
 
+/// Replace is the one path that outlives the close: it closes the popup, asks
+/// for the source window, and only then types over the highlight that is still
+/// there. Releasing the primary selection at the close would take that
+/// highlight away before the keystroke landed.
 #[test]
 fn a_replace_holds_the_release_back_until_it_has_typed() {
     let source = read("Overlay.qml");
@@ -302,6 +325,9 @@ fn a_replace_holds_the_release_back_until_it_has_typed() {
     );
 }
 
+/// Step 2 of spec section 3. A field with nothing selected answers Ctrl + C by
+/// leaving the clipboard as it was, so what comes back is an earlier copy
+/// rather than a Selection.
 #[test]
 fn a_ctrl_c_that_copied_nothing_is_not_a_selection() {
     let source = read("Overlay.qml");

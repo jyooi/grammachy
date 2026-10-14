@@ -43,6 +43,9 @@ pub fn path() -> Option<PathBuf> {
 
 /// The block spec section 10 puts between the two markers.
 pub fn block() -> Block {
+    // The payload is JSON inside a JSON string inside a single quoted shell
+    // word, so the quotes are escaped once for the menu file and the shell
+    // takes the rest as it stands.
     let action = format!("omarchy-shell shell summon {PLUGIN_ID} '{{\\\"mode\\\":\\\"quick\\\"}}'");
     Block {
         markers: block::JSONC,

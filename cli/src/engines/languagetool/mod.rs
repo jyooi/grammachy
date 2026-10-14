@@ -159,6 +159,7 @@ impl Transport for BoundTransport {
         Ok(amount > 0)
     }
 
+    /// One request per agent, so the connection is never pooled or reused.
     fn is_open(&mut self) -> bool {
         false
     }
@@ -170,6 +171,9 @@ fn not_ours(unit: &str, why: &str) -> EngineFailure {
     ))
 }
 
+/// The tail of the timeout message that names the ports the unit does hold.
+/// A JVM with a debug agent binds one of those before the server port, so
+/// naming them turns a bare timeout into a diagnosis.
 fn other_ports(held: &[u16]) -> String {
     if held.is_empty() {
         return String::new();

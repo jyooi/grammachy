@@ -1,3 +1,11 @@
+//! The published tree, spec section 10.
+//!
+//! `omarchy plugin add` is a plain `git clone`, so every tracked file ships to
+//! every user and the manifest has no packaging exclusion. A coding agent that
+//! runs in or above the installed plugin directory would read an agent
+//! instruction file as its own instructions, so the tracked tree carries none.
+//! `docs/contributing.md` is the home for that knowledge.
+
 use std::process::Command;
 
 const REPO: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/..");

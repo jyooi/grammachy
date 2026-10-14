@@ -92,10 +92,17 @@ pub struct UnitFacts {
     pub exec_start: ExecStart,
 }
 
+/// The `LISTEN` state in `/proc/net/tcp`.
 const LISTEN: &str = "0A";
 
+/// The `ESTABLISHED` state in `/proc/net/tcp`.
 const ESTABLISHED: &str = "01";
 
+/// How long [`accepted_by`] waits for the server to accept the connection.
+///
+/// A connection the server did not accept yet sits in its queue with no
+/// inode, so the proof has to wait for the `accept`. A JVM under load takes
+/// milliseconds. This is far above that and far below the Check timeout.
 const ACCEPT_BUDGET: Duration = Duration::from_secs(2);
 
 const ACCEPT_PROBE: Duration = Duration::from_millis(10);
@@ -479,6 +486,9 @@ org.languagetool.server.HTTPServer --port 8081 --config /run/x.properties",
         assert_eq!(port_of("/usr/bin/x"), None);
     }
 
+    /// The server end of a connection is the row whose local address is the
+    /// server's and whose remote address is the client's. A row with inode 0
+    /// is a connection that still waits in the accept queue.
     #[test]
     fn the_server_end_of_a_connection_is_read_by_both_addresses() {
         let sockets = parse_proc_net_tcp(TCP);

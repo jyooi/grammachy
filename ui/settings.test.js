@@ -34,6 +34,8 @@ test("the entry comes from the plugins array when the bar layout has none", () =
   assert.deepEqual(entryOf(config(entry, "plugins")), entry)
 })
 
+// `updateEntryInline` and `setBarWidget` both write into the bar layout, so a
+// leftover `plugins` copy must never be the one the view reads.
 test("the bar layout wins over a stale plugins copy", () => {
   const document = config({ id: PLUGIN_ID, engine: "harper" }, "right")
   document.plugins.push({ id: PLUGIN_ID, engine: "languagetool" })
@@ -97,6 +99,8 @@ test("a write keeps a known value and replaces an unknown one with the default",
   assert.equal(normalised("autoReplace", true), true)
 })
 
+// `updateEntryInline` replaces the entry, so anything the merge drops is gone
+// from the file.
 test("a write carries the other keys across", () => {
   const entry = {
     id: PLUGIN_ID,

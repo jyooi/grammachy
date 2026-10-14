@@ -187,6 +187,16 @@ fn binary_check(facts: &Facts) -> Check {
     }
 }
 
+/// LanguageTool, spec section 4 and HUF-237.
+///
+/// It is an opt-in component, so a machine that does not have it is not a
+/// broken install: the line says so and names the verb that adds it without a
+/// password. The pacman package is the alternative, and the report says which
+/// of the two answered, because only the installed tree is one
+/// `grammachy engine remove languagetool` can take away again.
+///
+/// The state word is the contract the Settings row reads: `detail` is prose
+/// and nothing may parse it.
 fn languagetool_check(facts: &Facts) -> Check {
     match (&facts.languagetool_tree, &facts.languagetool_launcher) {
         (Some(path), _) => Check {

@@ -152,6 +152,8 @@ fn write(path: &Path, change: impl FnOnce(&str) -> Result<String, String>) -> Re
     Ok(true)
 }
 
+/// The file as it stands. A file that is not there yet reads as empty, because
+/// a fresh Omarchy install may carry no user bindings at all.
 fn read(path: &Path) -> Result<String, String> {
     match std::fs::read_to_string(path) {
         Ok(content) => Ok(content),
@@ -221,6 +223,8 @@ mod tests {
 
     #[test]
     fn the_payload_needs_no_escape_inside_the_long_bracket() {
+        // A `]]` in the command would close the long bracket early. The two
+        // payloads carry none, and this is the guard if one ever does.
         for line in block(&Hotkeys::default())
             .body
             .lines()

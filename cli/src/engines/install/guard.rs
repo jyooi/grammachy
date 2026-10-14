@@ -1,9 +1,25 @@
+//! The checks on every path the install writes, made before the write.
+//!
+//! The engines directory is under HOME, and `curl --output` follows a
+//! symbolic link that stands where the `.part` file goes. So nothing here
+//! writes to a path it did not look at first. A path the install writes must
+//! be absent, or a plain file or directory this user owns. A symbolic link,
+//! a device, or another user's file refuses the install and names itself.
+//!
+//! The directory the unpack fills is made with an exclusive create, so a
+//! directory that appears between the removal and the create refuses too.
+//!
+//! What the checks cannot close is the moment between a check and the write
+//! that follows it. Only a program that runs as this user can act in that
+//! moment, and such a program already owns the directory outright.
+
 use std::fs::{self, OpenOptions};
 use std::io::ErrorKind;
 use std::os::unix::fs::MetadataExt;
 use std::path::Path;
 
 fn own_uid() -> u32 {
+    // Safety: geteuid takes no arguments and cannot fail.
     unsafe { libc::geteuid() }
 }
 
@@ -162,6 +178,7 @@ mod tests {
         fresh_directory(&staging).expect("a tree");
         assert!(fs::read_dir(&staging).unwrap().next().is_none());
 
+        // The removal must not follow the link and empty its target.
         let target = directory.join("target");
         fs::create_dir(&target).unwrap();
         fs::write(target.join("marker"), b"keep me").unwrap();

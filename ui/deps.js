@@ -1,3 +1,6 @@
+// Loaded twice: by QML as `Deps`, and by `deps.test.js` under node. Nothing
+// here may touch a QML or a node API, because each side only has one of them.
+
 var INSTALL_HINT_TAIL = "through Omarchy Install. Open SUPER+SPACE, then Install, then Package."
 
 var DEPENDENCIES = [

@@ -1,3 +1,7 @@
+// Loaded twice: by QML as `Errors`, and by `errors.test.js` under node.
+// Nothing here may touch a QML or a node API, because each side only has one
+// of them.
+
 var CONTRACT_VERSION = 1
 
 var EMPTY_SELECTION = "empty_selection"

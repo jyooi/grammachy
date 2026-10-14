@@ -87,6 +87,7 @@ fn run(args: &[&str], stdin: &str) -> Run {
     }
 }
 
+/// Clap may reject flags before it reads stdin. The child then closes the pipe.
 fn write_stdin(child: &mut Child, stdin: &[u8]) {
     let mut pipe = child.stdin.take().expect("stdin is piped");
     match pipe.write_all(stdin) {
@@ -171,6 +172,8 @@ fn an_unknown_flag_prints_bad_arguments() {
 #[test]
 fn every_valid_flag_value_is_accepted() {
     for native in ["none", "zh", "ms", "es", "fr", "de", "pt", "ja"] {
+        // The default engine runs in process and answers a result, so there
+        // is no code at all on this path (spec section 4, HUF-237).
         let result = run(&["check", "--native", native], "Some text.");
         assert_ne!(
             envelope(&result)["error"]["code"],
@@ -253,6 +256,8 @@ fn the_engine_flag_wins_over_the_stored_engine() {
     );
 }
 
+/// The acceptance criterion of HUF-240: a stored engine of a removed slug
+/// falls back to the default engine rather than erroring.
 #[test]
 fn a_stored_engine_of_a_removed_slug_falls_back_to_the_default() {
     for removed in ["openai", "openrouter"] {
@@ -277,6 +282,8 @@ fn an_unknown_stored_engine_falls_back_to_the_default() {
     let result = run_with_settings(&["check"], "He go home.", &settings);
 
     let value = envelope(&result);
+    // HUF-237: the default is Harper, which is compiled into the binary, so
+    // the fallback answers a result on a machine with nothing installed.
     assert_eq!(result.status, 0, "{value}");
     assert_eq!(value["engine"], "harper", "the default engine ran: {value}");
     assert_eq!(
@@ -300,6 +307,8 @@ fn unknown_stored_keys_are_ignored_without_error() {
     assert_eq!(value["engine"], "harper", "{value}");
 }
 
+/// The acceptance criterion of HUF-237: a fresh install runs no download and
+/// no pacman command, and the first Check answers.
 #[test]
 fn a_missing_settings_file_is_fine() {
     let missing = scratch_dir().join("absent-shell.json");

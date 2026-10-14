@@ -1,3 +1,19 @@
+//! The Engines list of spec section 5.4 makes promises no node test can reach.
+//!
+//! `ui/engines.test.js` runs the whole route against a stub binary, but it
+//! drives the verbs itself: the shared functions it calls are only the right
+//! ones if `Overlay.qml` calls the same ones. The overlay cannot be
+//! instantiated outside the shell's plugin loader, so this test reads the files
+//! the shell ships and holds those calls in place, the way `overlay_models.rs`
+//! holds the Models list.
+//!
+//! It also keeps the two halves of HUF-237 in step: the engine slug the Rust
+//! catalogue carries, the built-in engine both sides fall back to, and the
+//! state words the `doctor` report hands the Settings view.
+//!
+//! No test here installs a component, writes the engines directory, or stops a
+//! unit.
+
 use grammachy::args::{CheckOptions, EngineSlug};
 use grammachy::doctor::report;
 use grammachy::engines::install;
@@ -60,6 +76,9 @@ fn the_overlay_runs_the_three_verbs_of_the_subcommand() {
     );
 }
 
+/// Spec section 5.4: Cancel is a SIGTERM, which the CLI turns into a kept
+/// `.part` file and the `cancelled` code. Ending the process instead would
+/// orphan curl, which would carry on writing a file nobody is waiting for.
 #[test]
 fn cancel_signals_the_process_rather_than_ending_it() {
     let body = function_body(&read("Overlay.qml"), "cancelEngineInstall");

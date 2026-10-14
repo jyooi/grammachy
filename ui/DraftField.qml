@@ -2,11 +2,20 @@ import QtQuick
 import qs.Commons
 import qs.Ui
 
+// The Draft text area of Compose, spec section 9: a plain multi-line field
+// that scrolls inside the card and never grows it.
+//
+// `qs.Ui.TextField` is single line, so the chrome of a focused input is
+// rebuilt here over a `TextEdit` rather than borrowed. Everything else about
+// the Draft, including the fact that it is never written to disk, belongs to
+// Overlay.qml.
 BorderSurface {
   id: root
 
   property string text: ""
   property string placeholderText: ""
+  // The item whose `Keys.onPressed` runs the key map. The field forwards to it
+  // first, so Ctrl + Enter runs the Check rather than adding a line.
   property var keySink: null
 
   readonly property bool focused: editor.activeFocus

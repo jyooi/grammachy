@@ -56,6 +56,9 @@ jobs:
 
       - name: Lint the QML
         run: |
+          # This qmllint reports a syntax error through its exit status alone,
+          # so the loop names the file it is on. For the diagnosis itself, run
+          # the Qt 6 qmllint over the same file, as docs/dev.md describes.
           status=0
           for file in $(find . -name '*.qml' | sort); do
             echo "qmllint $file"

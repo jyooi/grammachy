@@ -1,5 +1,20 @@
+//! How much room is left for an engine component, spec section 5.3.
+//!
+//! A component is hundreds of megabytes, so the Engines list says what the
+//! disk has before the user asks for one, and `engine install` refuses rather
+//! than filling the disk and failing on the last byte.
+//!
+//! The engines directory may not exist yet, and `statvfs` answers only for a
+//! path that does. So the walk goes up to the nearest ancestor that is there,
+//! which is on the same file system as the directory that will be created.
+
 use std::path::Path;
 
+/// Free bytes on the file system that holds this path, or `None` when no
+/// ancestor of it could be asked.
+///
+/// The number is the unprivileged one, `f_bavail`, because the reserved blocks
+/// of a file system are not room a download may use.
 pub fn free_bytes(path: &Path) -> Option<u64> {
     let existing = nearest_existing(path)?;
     statvfs_available(&existing)
@@ -55,6 +70,10 @@ pub fn shortfall(size_bytes: u64, already: u64, free: Option<u64>) -> Option<Sho
 mod tests {
     use super::*;
 
+    /// A real directory answers.
+    /// A path under it that does not exist yet still answers.
+    /// The walk asks the parent on the same file system.
+    /// Two `statvfs` readings can differ when other tests write to the disk.
     #[test]
     fn a_directory_that_does_not_exist_yet_answers_for_its_parent() {
         let here = Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -79,6 +98,7 @@ mod tests {
             .collect();
         std::io::Write::write_all(&mut &file, &noise).unwrap();
         file.sync_all().unwrap();
+        // Safety: `sync` takes no arguments and only flushes caches.
         unsafe { libc::sync() };
         let answer = free_bytes(&missing);
         std::fs::remove_file(&scratch).unwrap();

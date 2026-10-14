@@ -1,3 +1,14 @@
+//! Every `Text` item that draws dynamic content must draw it as plain text.
+//!
+//! The Selection, the Issues an Engine answers, and the messages an error
+//! envelope carries are all strings the plugin did not write. A `Text` item
+//! left on its default `AutoText` mode reads markup in such a string as rich
+//! text, which can restyle the card or ask Qt to fetch an image. So every
+//! `Text` whose `text` is not a string literal declares `Text.PlainText`.
+//!
+//! `Overlay.qml` and the cards cannot be instantiated outside the shell's
+//! plugin loader, so this is a source-scanning guard, like `overlay_limit.rs`.
+
 use std::path::{Path, PathBuf};
 
 struct TextItem {

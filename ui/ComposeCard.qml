@@ -54,6 +54,8 @@ BorderSurface {
   property int cardWidth: Style.space(900)
   property int cardHeight: Style.space(600)
 
+  // The item whose `Keys.onPressed` runs the key map, handed to the Draft text
+  // area so that Ctrl + Enter reaches the card rather than the text.
   property var keySink: null
 
   signal draftEdited(string text)
@@ -147,6 +149,8 @@ BorderSurface {
   implicitWidth: root.cardWidth
   implicitHeight: root.cardHeight
 
+  // The card owns its own click so a press inside it never reaches the
+  // backdrop that closes the overlay.
   MouseArea {
     anchors.fill: parent
     onClicked: {}

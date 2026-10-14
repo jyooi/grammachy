@@ -180,6 +180,8 @@ test("an activewindow answer reads as the window that held the Selection", () =>
   assert.equal(windowAddress(window), "0x5646e7c0ee90")
 })
 
+// Hyprland answers `{}` on the desktop, and a missing `hyprctl` answers
+// nothing at all. Both mean there is no source window.
 test("no active window reads as none", () => {
   for (const stdout of ["{}", "", "\n", "null", "[]", "not json", "hyprctl: not found"]) {
     assert.equal(readActiveWindow(stdout), null, JSON.stringify(stdout))
@@ -204,6 +206,8 @@ test("no window means no address to dispatch to", () => {
   assert.equal(windowAddress({ address: "0x1; rm -rf /" }), "")
 })
 
+// Omarchy answers `configProvider: lua`, so the dispatch is Lua rather than
+// the `focuswindow address:<addr>` line the `.conf` provider takes.
 test("the focus dispatch names the window by address, in the Lua the shell takes", () => {
   assert.deepEqual(focusCommand("0x5646e7c0ee90"), [
     "hyprctl", "dispatch", 'hl.dsp.focus({ window = "address:0x5646e7c0ee90" })'
@@ -243,6 +247,8 @@ function hyprctlStub(name, focused, alive) {
     'fs.appendFileSync(LOG, args.join(" ") + "\\n")',
     'if (args[0] === "dispatch") {',
     '  const found = args[1].match(/address:(0x[0-9a-f]+)/)',
+    // A window that is gone is a warning and an exit 0, which is why the
+    // caller may not read anything into the exit status.
     '  if (found && ALIVE.indexOf(found[1]) !== -1) fs.writeFileSync(STATE, found[1])',
     '  else process.stderr.write("hl.focus: window not found\\n")',
     "  process.exit(0)",

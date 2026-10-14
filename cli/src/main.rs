@@ -63,6 +63,7 @@ impl From<SetupEnvelope> for Output {
 fn main() -> ExitCode {
     let output = match run() {
         Some(output) => output,
+        // clap printed help or the version already.
         None => return ExitCode::SUCCESS,
     };
 
@@ -76,6 +77,7 @@ fn main() -> ExitCode {
     }
 }
 
+/// `None` means clap handled the run itself, such as `--help`.
 fn run() -> Option<Output> {
     let cli = match Cli::try_parse() {
         Ok(cli) => cli,

@@ -82,6 +82,8 @@ fn a_lint_without_a_suggestion_is_dropped() {
     assert!(issues_from(&case.text, &case.lints).is_empty());
 }
 
+/// Harper counts `char`s and the contract counts UTF-16 code units, so eight
+/// astral characters move every later span eight units along.
 #[test]
 fn an_astral_character_moves_the_span() {
     let (text, issues) = issues_of("astral");

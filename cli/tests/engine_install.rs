@@ -13,6 +13,10 @@ const ARCHIVE: &str = "LanguageTool-6.6.zip";
 const UNPACKS_INTO: &str = "LanguageTool-6.6";
 const ENTRY: &str = "languagetool-server.jar";
 
+/// Pin the digest of the fake bytes for the whole process.
+///
+/// Safety: every test in this binary wants the same pin, and no other binary
+/// reads this variable, so nothing races on it.
 fn pin_the_fake_digest() {
     std::env::set_var(
         install::SHA256_ENV,
@@ -20,6 +24,14 @@ fn pin_the_fake_digest() {
     );
 }
 
+/// Pin the size of the fake bytes too.
+///
+/// `install` runs the free-space check against the pinned archive and tree
+/// sizes before it calls the downloader, so without this seam every test here
+/// would need the 650 MB the real row asks for and would fail on a small disk
+/// for a reason that has nothing to do with what it asserts.
+///
+/// Safety: as above, one variable read by this binary alone.
 fn pin_the_fake_size(bytes: u64) {
     std::env::set_var(install::SIZE_ENV, bytes.to_string());
 }
@@ -200,6 +212,8 @@ fn an_oversize_part_file_is_removed_before_the_transfer() {
     );
 }
 
+/// A `bsdtar` that died half way leaves a staging directory with no server jar
+/// in it. That is never renamed into place, so no half install is ever run.
 #[test]
 fn an_unpack_that_left_no_server_jar_installs_nothing() {
     let _guard = serially();
@@ -311,6 +325,9 @@ fn a_disk_with_no_room_refuses_before_it_fetches_anything() {
     assert_eq!(fetched.load(Ordering::SeqCst), 0);
 }
 
+/// A symbolic link where the `.part` file goes would make `curl --output`
+/// write through it. The install refuses before the transfer runs, and the
+/// file the link points at is untouched.
 #[test]
 fn a_linked_part_file_refuses_the_install_before_the_transfer() {
     let _guard = serially();

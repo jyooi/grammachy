@@ -73,6 +73,15 @@ pub const SIZE_ENV: &str = "GRAMMACHY_ENGINE_SIZE_BYTES";
 
 const DEFAULT_BASE_URL: &str = "https://languagetool.org";
 
+/// One optional component the Settings view offers.
+///
+/// `slug` is the engine slug, so a row and the `engine` setting are the same
+/// word and the Settings dropdown can ask this list whether to draw a row at
+/// all.
+///
+/// `directory_name` is what the archive unpacks into, and `entry` is the file
+/// under the installed tree that proves the unpack finished. A directory alone
+/// proves nothing: a `bsdtar` that died half way leaves one behind.
 struct CatalogueRow {
     slug: &'static str,
     name: &'static str,
@@ -314,6 +323,8 @@ impl Engines {
         guard::plain_file_or_absent(&paths.partial).map_err(Failure::DownloadFailed)?;
         guard::plain_file_or_absent(&paths.archive).map_err(Failure::DownloadFailed)?;
 
+        // A `.part` file longer than the pin is whole and wrong: a resume
+        // would ask for bytes past the end, so it goes before the transfer.
         let already = std::fs::symlink_metadata(&paths.partial)
             .map(|data| data.len())
             .unwrap_or(0);
@@ -363,6 +374,13 @@ impl Engines {
         self.finished_row(slug)
     }
 
+    /// Unpack the verified archive and rename the tree into place.
+    ///
+    /// The unpack goes into a staging directory of its own and is renamed only
+    /// once the entry file is there, so a `bsdtar` that dies half way never
+    /// leaves something the state reader would call installed. The archive
+    /// goes last: keeping it would double what the component costs on disk for
+    /// no gain, because a re-install re-checks the digest anyway.
     fn unpack(&self, row: &CatalogueRow, release: &Release, paths: &Paths) -> Result<(), Failure> {
         let failed = |message: String| Failure::DownloadFailed(message);
 
@@ -382,6 +400,9 @@ impl Engines {
             )));
         }
 
+        // A tree from an earlier install has to go first: a rename onto a
+        // directory that is there fails, and the archive digest already said
+        // these are the right bytes.
         let _ = std::fs::remove_dir_all(&paths.tree);
         std::fs::rename(&unpacked, &paths.tree).map_err(|error| {
             failed(format!(
@@ -516,6 +537,8 @@ pub fn run(verb: &EngineVerb) -> EngineEnvelope {
 mod tests {
     use super::*;
 
+    /// The one component of HUF-237, pinned twice from an unauthenticated
+    /// request the way a weights row is.
     #[test]
     fn the_languagetool_row_is_pinned_twice_and_names_its_licence() {
         assert_eq!(slugs(), ["languagetool"]);

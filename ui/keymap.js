@@ -1,3 +1,11 @@
+// Loaded twice: by Overlay.qml through `import "keymap.js" as Keymap`, and by
+// `keymap.test.js` under node. Nothing here may touch a QML or a node API,
+// because each side only has one of them.
+//
+// The Qt key codes arrive in `codes` rather than as literals, because `Qt` is
+// a QML global that node does not have. The overlay owns that one table; this
+// file owns which action a key asks for.
+
 var NONE = ""
 var CLOSE = "close"
 var ACCEPT = "accept"
@@ -26,6 +34,8 @@ function action(event, codes, mode) {
   var key = event.key
   var modifiers = Number(event.modifiers) || 0
   var control = (modifiers & codes.control) !== 0
+  // Shift is not in the mask: a reader who sees `A` in the map may well hold
+  // it down. Alt and Meta belong to the compositor, so they never land here.
   var foreign = (modifiers & (codes.alt | codes.meta)) !== 0
   var enter = key === codes.enter || key === codes.returnKey
 

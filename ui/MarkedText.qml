@@ -3,6 +3,12 @@ import qs.Commons
 import "splice.js" as Splice
 import "tokens.js" as Tokens
 
+// The whole Selection with every Issue drawn as a mark, spec section 6.
+//
+// The text is laid out as one Flow of word tokens per line rather than as one
+// Text item, because Qt rich text can underline but cannot draw a dotted
+// underline, and spelling has to read differently from grammar. A token owns
+// its own colour, its own underline, and its own click target.
 Flickable {
   id: root
 
@@ -12,6 +18,9 @@ Flickable {
   property int focusIndex: -1
 
   property color textColor: Color.popups.text
+  // Themes carry no green role, so the accepted colour is the one constant in
+  // the card. Grammachy states the Fix is applied; borrowing the accent would
+  // read as "focused" instead.
   property color acceptedColor: "#9ece6a"
   property color openColor: Color.urgent
   property color skippedColor: Color.muted

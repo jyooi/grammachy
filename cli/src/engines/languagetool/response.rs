@@ -111,6 +111,11 @@ fn depth_of(rule: Option<&Rule>) -> Depth {
     Depth::Grammar
 }
 
+/// One English sentence with no rule id (spec section 5.1).
+///
+/// LanguageTool messages are already written as prose. A few rules append their
+/// own id, so it is removed, and the whitespace is collapsed to one space so a
+/// wrapped message stays one line in the inspector.
 fn reason_of(message: &str, rule_id: &str) -> String {
     let stripped = if rule_id.is_empty() {
         message.to_string()
@@ -119,6 +124,7 @@ fn reason_of(message: &str, rule_id: &str) -> String {
     };
     let cut: String = stripped.chars().take(MAX_REASON_CHARS).collect();
     let collapsed = cut.split_whitespace().collect::<Vec<_>>().join(" ");
+    // Removing the id can leave an empty bracket pair behind.
     collapsed
         .replace("( )", "")
         .replace("()", "")

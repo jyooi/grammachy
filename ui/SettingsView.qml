@@ -32,10 +32,20 @@ ColumnLayout {
   signal engineRemoveConfirmed(string slug)
   signal engineKeepRequested()
 
+  // Dropdown writes its own `value` when the user picks a row, which drops the
+  // declarative binding. Re-asserting it on every change of the stored value
+  // is what keeps the view live for a write from outside, such as
+  // `omarchy-shell shell setBarWidget <id> engine '"harper"'`.
   onNativeLanguageChanged: nativeLanguageDropdown.value = root.nativeLanguage
   onTargetEnglishChanged: targetEnglishDropdown.value = root.targetEnglish
   onEngineChanged: engineDropdown.value = root.engine
+  // The option list narrows as the Engines list lands, and a Dropdown that
+  // has written its own `value` once no longer follows the binding, so the
+  // value is re-asserted when the rows move as well as when the setting does.
   onEnginesChanged: engineDropdown.value = root.engine
+  // A TextField that has typed its own `text` once no longer follows the
+  // binding either, so a live external write, such as a hand edit of
+  // shell.json, is re-asserted the same way.
   onQuickHotkeyChanged: quickHotkeyField.text = root.quickHotkey
   onComposeHotkeyChanged: composeHotkeyField.text = root.composeHotkey
 
@@ -78,6 +88,8 @@ ColumnLayout {
       onChanged: function(value) { root.settingChanged("targetEnglish", Settings.normalised("targetEnglish", value)) }
     }
 
+    // Spec section 7 and HUF-237: only an engine this machine has is offered.
+    // The Engines list below is where a missing one is added.
     Dropdown {
       id: engineDropdown
 
@@ -91,6 +103,10 @@ ColumnLayout {
     }
   }
 
+  // Spec section 2: the two trigger hotkeys, remappable text fields rather
+  // than a dropdown, because a Hyprland key combination is free text. A
+  // change reaches `~/.config/hypr/bindings.lua` and the compositor through
+  // `Overlay.applyHotkeys`, not through this view.
   RowLayout {
     Layout.fillWidth: true
     spacing: Style.spacing.xxl

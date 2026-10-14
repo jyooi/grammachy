@@ -29,6 +29,10 @@ fn function_body(source: &str, name: &str) -> String {
     panic!("{name} has a closing brace")
 }
 
+/// Spec section 3: the compositor still calls the source window the active one
+/// while the popup is hidden, so that is where the answer is read. The capture
+/// waits on it rather than racing it, or the card opens in the wrong place and
+/// then jumps.
 #[test]
 fn the_capture_reads_the_source_window_before_it_takes_the_selection() {
     let source = read("Overlay.qml");
@@ -84,6 +88,8 @@ fn the_quick_card_is_placed_from_the_source_window() {
         );
     }
 
+    // Hyprland reports a window in the global layout and this surface covers
+    // one monitor of it, so the placement needs the surface's own origin.
     assert!(
         source.contains("panel.screen ? panel.screen.x : 0")
             && source.contains("panel.screen ? panel.screen.y : 0"),
@@ -109,6 +115,9 @@ fn the_compose_card_stays_centred() {
     );
 }
 
+/// The acceptance criterion of this ticket: Replace types into the window the
+/// Selection came from. Closing the popup hands the keyboard to whatever the
+/// compositor picks, so the paste asks for that window by address first.
 #[test]
 fn replace_asks_for_the_source_window_before_it_types() {
     let source = read("Overlay.qml");

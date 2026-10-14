@@ -19,9 +19,11 @@ import "ui/deps.js" as Deps
 Item {
   id: root
 
+  // Handed over by the shell's panel loader.
   property var shell: null
   property var manifest: null
 
+  // The shell reads `opened` to answer isPluginOpen, and calls close().
   property bool opened: false
 
   property string surface: "quick"
@@ -85,8 +87,17 @@ Item {
 
   property var sourceWindow: null
 
+  // The capture the last Check consumed, spec section 3: the exact text and
+  // the address of the window it came from. The compositor keeps the primary
+  // selection for as long as the source window owns it, so a summon with
+  // nothing highlighted reads this text again; `ui/capture.js` is what calls
+  // that stale. It outlives a summon, because the summon after the next one
+  // reads the same selection.
   property string lastCapturedText: ""
   property string lastCapturedWindow: ""
+  // A Replace has closed the popup and has still to type, spec section 6. The
+  // source window keeps its highlight until then, so the primary selection is
+  // held back until the keystroke is out.
   property bool replacePending: false
   property bool runCaptured: false
 
@@ -128,6 +139,12 @@ Item {
   readonly property int barSize: root.barConfig ? root.barConfig.barSize : Style.bar.sizeHorizontal
   readonly property int gap: Style.gapsOut + Style.spacing.sm
 
+  // Storage is this plugin's inline entry in shell.json, spec section 7. There
+  // is no own config file. `shell.shellConfig` is reassigned on every write the
+  // shell makes, so `entry` is a live binding: a change from the Settings view,
+  // from `omarchy-shell shell setBarWidget`, or from a hand edit of the file
+  // all reach the view the same way.
+  //
   readonly property var entry: Settings.entryOf(root.shell ? root.shell.shellConfig : null, root.pluginId)
 
   function setting(name, fallback) {
@@ -135,6 +152,9 @@ Item {
   }
 
   onSettingsOpenChanged: {
+    // The Engines list is drawn whatever engine is selected, because the whole
+    // point is to add one the dropdown cannot offer yet (HUF-237). So Settings
+    // being open is the whole condition for reading it.
     if (root.settingsOpen) {
       root.refreshEngines()
       root.refreshDependencies()
@@ -149,6 +169,9 @@ Item {
     }
     root.shell.updateEntryInline(root.pluginId, Settings.mergedEntry(root.entry, name, value))
     if (name === "autoReplace") root.autoReplaceOverride = null
+    // Spec section 2: Hyprland only reads `bindings.lua` when told to, so a
+    // hotkey change re-runs `grammachy setup`, which writes the block from
+    // the Settings just stored and reloads the compositor.
     if (name === "quickHotkey" || name === "composeHotkey") root.applyHotkeys()
   }
 
@@ -376,6 +399,10 @@ Item {
     root.retryCheck()
   }
 
+  // The popup window is still hidden here, so the compositor still calls the
+  // window the user selected in the active one. That is the only moment it can
+  // be read, which is why the capture waits on the answer rather than racing
+  // it: a card that opened first would open at the wrong place and then jump.
   function startQuick() {
     root.resetRun()
     root.surface = "quick"
@@ -430,6 +457,21 @@ Item {
     root.lastCapturedWindow = window
   }
 
+  // Spec section 3: the primary selection goes when the popup closes, and not
+  // before. A terminal drops its own highlight when it loses primary
+  // ownership, and Replace pastes over that highlight, so a release at capture
+  // time would take the Selection away from under the Apply the reader is
+  // still deciding on.
+  //
+  // Only a run that took a Selection releases one, and it releases at most
+  // once, whichever exit it takes. Both rules live here rather than at each
+  // exit, so no call site can hold a different one: the close, the Clear, and
+  // the keystroke that ends a Replace all call this plainly.
+  //
+  // Replace is the one path that outlives the close: it closes the popup, asks
+  // for the source window, and only then types. `replacePending` is what makes
+  // the release wait for that keystroke, so the claim has to outlive the close
+  // that armed the wait. That is why the wait answers before the claim goes.
   function releasePrimary() {
     if (!root.runCaptured) return
     if (root.replacePending) return
@@ -502,6 +544,10 @@ Item {
     }
   }
 
+  // Step 2 of spec section 3: no primary selection, so borrow the clipboard,
+  // send Ctrl + C to the window that still holds focus, and read what lands.
+  // The popup window stays hidden until this finishes, so the keystroke
+  // reaches the source window rather than the overlay.
   function onClipboardBorrowed(text, generation) {
     if (!root.isLive(generation)) return
     if (Capture.pasteOverflowed(text)) {
@@ -524,6 +570,9 @@ Item {
     if (!root.isLive(generation)) return
     var borrowed = root.borrowedClipboard
     root.restoreBorrowedClipboard()
+    // Spec section 3: a field with nothing selected answers Ctrl + C by
+    // leaving the clipboard as it was, so what came back is an earlier copy
+    // rather than a Selection.
     if (Capture.copiedNothing(borrowed, text)) {
       root.showNothingNew()
       return
@@ -565,6 +614,9 @@ Item {
     root.absorbEngineReport(answer.report, stamp)
   }
 
+  // The rows of one answer merged into the list. The list is replaced only
+  // when it says something new, so the poll does not rebuild the row once a
+  // second and restart the bar's animation.
   function absorbEngineReport(report, stamp) {
     var settled = EnginesJs.absorbed(root.engines, report, stamp, root.engineListFloor)
     if (!settled) return
@@ -584,6 +636,8 @@ Item {
     enginePoll.start()
   }
 
+  // Cancel is a SIGTERM, which the CLI turns into a kept `.part` file and the
+  // `cancelled` code. Killing the process outright would leave curl running.
   function cancelEngineInstall() {
     if (root.engineBusy.length === 0) return
     engineActionProcess.signal(15)
@@ -623,6 +677,9 @@ Item {
     root.phaseBeforeEngineConfirm = ""
   }
 
+  // One verb at a time. Setting `command` under a process that is already
+  // running would change what the answer on its way back belongs to, and
+  // setting `running` again is a no-op, so the second verb would vanish.
   function runEngineAction(verbArgs) {
     if (engineActionProcess.running) return
     engineActionProcess.verbName = verbArgs.length > 1 ? String(verbArgs[1]) : ""
@@ -663,6 +720,7 @@ Item {
     checkProcess.generation = root.runGeneration
     checkProcess.stdinText = text
     checkProcess.command = root.checkCommand(engineSlug)
+    // Writing to stdin closes it, so every run arms the channel again.
     checkProcess.stdinEnabled = true
     checkProcess.restartQueued = checkProcess.running
     checkProcess.launchPending = true
@@ -754,6 +812,7 @@ Item {
     var engineSlug = root.setting("engine")
     root.chunkEngine = engineSlug
     chunkProcess.command = [root.binaryPath, "chunk", "--engine", engineSlug]
+    // Writing to stdin closes it, so every run arms the channel again.
     chunkProcess.stdinEnabled = true
     chunkProcess.restartQueued = chunkProcess.running
     chunkProcess.launchPending = true
@@ -1036,6 +1095,9 @@ Item {
     root.applied = false
   }
 
+  // The ask is the whole point: closing the popup hands the keyboard to
+  // whatever the compositor picks, which is not the source window whenever
+  // another window sits under the card. A paste without the ask lands there.
   function correctedText() {
     return Splice.correctedText(root.selectionText, root.issues, root.decisions)
   }
@@ -1079,6 +1141,8 @@ Item {
     focusSource.running = true
   }
 
+  // Step two: the dispatch exits 0 for a window that is gone, so the only
+  // honest answer comes from asking the compositor who holds the keyboard now.
   function verifySourceFocus(generation) {
     if (!root.isLive(generation)) return
     verifySource.command = Anchor.activeWindowCommand()
@@ -1163,6 +1227,10 @@ Item {
     event.accepted = true
   }
 
+  // Which window the Selection is being taken from, spec section 3. It runs
+  // before the capture, because the popup window is what would take that
+  // answer away. `launchPending` is what a missing `hyprctl` falls through:
+  // the capture has to go on either way.
   Process {
     id: sourceProbe
     property int startedGeneration: 0
@@ -1329,6 +1397,11 @@ Item {
     }
   }
 
+
+  // The Engines list of spec section 5.4. It runs when Settings opens and once
+  // a second while an install is in flight, which is how the progress bar
+  // moves: the CLI prints nothing while curl runs, so the `.part` file on disk
+  // is the only progress there is to read.
   Process {
     id: engineListProcess
     property bool restartQueued: false
@@ -1463,6 +1536,8 @@ Item {
     onLoadFailed: console.warn("grammachy: cli.lock could not be read:", root.cliLockPath)
   }
 
+  // FileView does not watch a missing file. Watch the bin directory instead.
+  // The probe runs again when Install writes bin/grammachy.
   FileView {
     id: companionDir
     path: root.pluginRoot + "/bin"
@@ -1536,13 +1611,19 @@ Item {
       if (!copyProcess.pasteAfter) return
       copyProcess.pasteAfter = false
       if (!root.isLive(copyProcess.generation)) return
+      // The source window still holds the highlight this is about to paste
+      // over, so the primary selection is held back until the keystroke is out.
       root.replacePending = true
+      // wl-copy has claimed the selection by now, so the paste will find it.
       root.close()
       pasteTimer.generation = copyProcess.generation
       pasteTimer.restart()
     }
   }
 
+  // The compositor needs a moment to take the layer-shell surface down before
+  // it will move the keyboard anywhere. The same 150 ms the Ctrl + C capture
+  // waits, for the same reason.
   Timer {
     id: pasteTimer
     property int generation: 0
@@ -1607,6 +1688,9 @@ Item {
   PanelWindow {
     id: panel
 
+    // Nothing shows while the Selection is still being captured: a visible
+    // overlay would take the keyboard focus that the Ctrl + C fallback needs
+    // to land on the source window.
     visible: root.opened && root.phase !== "capturing"
     anchors { top: true; bottom: true; left: true; right: true }
     color: "transparent"
@@ -1636,6 +1720,8 @@ Item {
       anchors.fill: parent
       focus: true
 
+      // A layer-shell surface takes exclusive keyboard focus, so the item that
+      // handles the key map has to hold the focus inside it.
       Connections {
         target: panel
         function onVisibleChanged() {
@@ -1650,6 +1736,14 @@ Item {
 
         visible: root.surface === "quick"
 
+        // The card opens beside the window the Selection came from, so it is
+        // near the text it is about rather than in a corner of the screen.
+        // `ui/anchor.js` owns that arithmetic, including the bar corner it
+        // falls back to when no window on this monitor held the Selection.
+        //
+        // Hyprland reports a window in the global layout and this surface
+        // covers one monitor of it, so the surface's own origin is what turns
+        // the one into the other.
         readonly property var placement: Anchor.placeCard({
           window: root.sourceWindow,
           origin: {

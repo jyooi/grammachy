@@ -1,3 +1,7 @@
+// Loaded twice: by QML as `SetupCard`, and by `setupCard.test.js` under
+// node. Nothing here may touch a QML or a node API, because each side only
+// has one of them.
+
 var ASSET = "grammachy-x86_64-linux"
 
 var UNPINNED = "unpinned"
@@ -14,6 +18,9 @@ function isPlainObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value)
 }
 
+// The required rows of a `ui/deps.js` table that are absent. The rule lives
+// in deps.js too; it is repeated here because QML gives a `.js` no way to
+// import another one that a node `require` also understands.
 function missingRequired(dependencies) {
   var list = Array.isArray(dependencies) ? dependencies : []
   return list.filter(function(dependency) {

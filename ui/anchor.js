@@ -1,3 +1,10 @@
+// Loaded twice: by the QML overlay through `import "anchor.js" as Anchor`,
+// and by `anchor.test.js` under node. Nothing here may touch a QML or a node
+// API, because each side only has one of them.
+//
+// Every length is a logical pixel, which is what Hyprland reports for a window
+// and what a Quickshell surface is measured in.
+
 var ADJACENT = "adjacent"
 var INSIDE = "inside"
 var FALLBACK = "fallback"
@@ -12,6 +19,9 @@ function isFiniteNumber(value) {
   return typeof value === "number" && isFinite(value)
 }
 
+// One `hyprctl activewindow -j` answer as the window that held the Selection,
+// or null when nothing did. Hyprland answers `{}` on the desktop, and a
+// missing `hyprctl` answers nothing at all; both mean the same thing here.
 function readActiveWindow(stdout) {
   var value = null
   try {
@@ -43,6 +53,9 @@ function windowAddress(window) {
   return ADDRESS.test(window.address) ? window.address : ""
 }
 
+// The query both steps of the Apply use. `hyprctl` is what Omarchy ships to
+// talk to the compositor, and this answer is the only thing that says which
+// window has the keyboard.
 function activeWindowCommand() {
   return ["hyprctl", "activewindow", "-j"]
 }
@@ -85,6 +98,9 @@ function barCorner(region, card, position) {
   }
 }
 
+// The window rect in the overlay surface's own coordinates, or null when that
+// window is not on this surface at all. Hyprland reports a window in the
+// global layout, and the overlay covers one monitor of it.
 function localWindow(window, origin, bounds) {
   if (!window) return null
   var local = {

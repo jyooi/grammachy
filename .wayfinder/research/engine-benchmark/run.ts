@@ -1,3 +1,9 @@
+// Grammachy engine benchmark runner (HUF-171).
+// Usage: bun run.ts [engine ...]   engines: languagetool harper qwen3b qwen7b claude openrouter
+// HUF-183: `openrouter` runs every model in OPENROUTER_MODELS (comma separated) or the default list below.
+// Results go to ../api-model-benchmark/results-<model>.json.
+// All binaries live under ~/.cache/grammachy-bench (see REPORT.md for setup).
+
 import { spawn } from "bun";
 
 const HOME = process.env.HOME!;
@@ -41,6 +47,7 @@ const NATIVE_NAME: Record<string, string> = {
   fr: "French",
   es: "Spanish",
 };
+// LanguageTool motherTongue codes. Malay is not a LanguageTool language.
 const LT_MOTHER: Record<string, string | null> = { zh: "zh-CN", ms: null, fr: "fr", es: "es" };
 
 const items: Item[] = JSON.parse(await Bun.file(`${HERE}/testset.json`).text());
@@ -262,6 +269,7 @@ async function runLlama(name: string, gguf: string, label: string): Promise<Engi
           messages: [{ role: "user", content: llmPrompt(item) }],
           temperature: 0,
           max_tokens: 600,
+          // llama.cpp turns the schema into a grammar, so the output is always a well-formed array.
           response_format: { type: "json_schema", json_schema: { name: "issues", schema: ISSUE_SCHEMA } },
         }),
       });
@@ -324,6 +332,7 @@ async function runOpenRouterModel(key: string, model: string): Promise<UsageResu
       messages: [{ role: "user", content: llmPrompt(item) }],
       response_format: { type: "json_object" },
     };
+    // Reasoning tokens are billed as output tokens. The Check is a one shot classification, so turn reasoning off.
     if (disableReasoning) body.reasoning = { enabled: false };
     const r = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
@@ -337,6 +346,7 @@ async function runOpenRouterModel(key: string, model: string): Promise<UsageResu
   const chat = async (item: Item) => {
     let res = await call(item, reasoningOff);
     if (!res.ok && reasoningOff && res.status === 400) {
+      // Some models reject the reasoning field. Fall back once and keep the fallback for the rest of the run.
       reasoningOff = false;
       res = await call(item, false);
     }

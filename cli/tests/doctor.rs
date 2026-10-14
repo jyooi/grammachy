@@ -11,6 +11,9 @@ fn ready() -> Facts {
     Facts {
         binary: Some(PathBuf::from("/home/u/plugin/bin/grammachy")),
         version: "0.1.0".to_string(),
+        // LanguageTool is an opt-in component, so the ready machine is one
+        // where the user added it from Settings (HUF-237). The pacman package
+        // is the alternative and has its own cases below.
         languagetool_tree: Some(PathBuf::from(
             "/home/u/.local/share/grammachy/engines/languagetool",
         )),
@@ -36,6 +39,7 @@ fn missing_lines(text: &str) -> Vec<&str> {
         .collect()
 }
 
+/// The lines that report a piece the machine simply has not added, HUF-237.
 fn optional_lines(text: &str) -> Vec<&str> {
     text.lines()
         .filter(|line| line.trim_start().starts_with("optional"))
@@ -68,6 +72,9 @@ fn a_ready_machine_reports_nothing_missing() {
     }
 }
 
+/// HUF-237: a fresh install never fetched LanguageTool, so the line says the
+/// engine is optional rather than that something is missing, and it names the
+/// verb that adds it without a password.
 #[test]
 fn a_missing_languagetool_is_optional_and_names_the_no_sudo_install() {
     let mut facts = ready();
@@ -354,6 +361,8 @@ fn a_missing_piece_carries_its_remedy_in_the_envelope() {
 fn the_binary_prints_a_report_and_a_json_envelope() {
     let text = run_binary(&["doctor"]);
     assert!(text.starts_with("Grammachy doctor"), "{text}");
+    // Spec section 4: a fresh install checks with Harper, which needs nothing
+    // downloaded and no pacman command (HUF-237).
     assert!(text.contains("Engine harper"), "{text}");
     assert!(!text.contains("Installing"), "{text}");
 

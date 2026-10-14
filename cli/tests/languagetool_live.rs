@@ -17,6 +17,8 @@ fn unit_is_active() -> bool {
 fn check(text: &str) -> Value {
     let mut child = Command::new(env!("CARGO_BIN_EXE_grammachy"))
         .arg("check")
+        // The default engine is `harper` since HUF-237, so this engine is now
+        // named rather than assumed.
         .args(["--engine", "languagetool"])
         .env(
             "GRAMMACHY_SHELL_JSON",

@@ -1,3 +1,16 @@
+// Node tests for the capture of spec section 3 and the Clear of section 6.
+// Run with `node --test ui/capture.test.js`.
+//
+// The bug these hold shut, HUF-235: the compositor keeps the last primary
+// selection, so a summon with nothing highlighted read the text of the summon
+// before it and checked it all over again.
+//
+// `Overlay.qml` owns the processes and cannot be instantiated outside the
+// shell's plugin loader, so the route below drives the same steps in the same
+// order against a stub `grammachy check`. `cli/tests/overlay_capture.rs` is
+// what keeps the overlay on those steps. A stub is the only safe seam: no test
+// here reaches a real engine, reads the machine, or touches a real clipboard.
+
 const test = require("node:test")
 const assert = require("node:assert/strict")
 const fs = require("node:fs")
@@ -72,6 +85,11 @@ function consume(box, text, address) {
   box.last = Capture.kept(text, address)
 }
 
+// `Overlay.releasePrimary`: the one place that runs `wl-copy --primary
+// --clear`. Only a run that took a Selection releases one, and it releases at
+// most once, whichever exit it takes. A Replace still to type holds it back,
+// because the source window keeps the highlight it is about to paste over, so
+// the claim outlives the close that armed the wait.
 function release(box, run) {
   if (!run.captured) return run
   if (box.replacePending) return run
@@ -195,6 +213,8 @@ test("the same selection from the same window is checked once", () => {
   assert.equal(first.capturedText, "Their going to the park.")
   assert.equal(checkCount("same-twice"), 1)
 
+  // The compositor answers the same selection again, because nothing else has
+  // claimed it. Before the fix this ran a second Check on the same words.
   box.primary = "Their going to the park."
   const second = summon(binary, box)
   assert.equal(second.phase, "empty")
@@ -203,6 +223,9 @@ test("the same selection from the same window is checked once", () => {
   assert.equal(box.last.text, "Their going to the park.")
 })
 
+// Spec section 3: the capture takes nothing from the compositor. A terminal
+// drops its own highlight when it loses primary ownership, and the reader is
+// still deciding on the Apply that pastes over it.
 test("a capture leaves the primary selection where it is", () => {
   const binary = stub("keeps")
   const box = machine({ primary: "Their going to the park." })
@@ -226,6 +249,8 @@ test("a popup that closes releases the primary selection", () => {
   assert.equal(checkCount("release"), 1)
 })
 
+// Replace closes the popup and only then types over the highlight the source
+// window still holds, so the release waits for that keystroke.
 test("a Replace types over the selection before the release takes it", () => {
   const binary = stub("replace")
   const box = machine({ primary: "Their going to the park." })
@@ -320,6 +345,9 @@ test("Apply with auto-replace off copies on a run that captured", () => {
   assert.equal(box.clipboard, CORRECTED)
 })
 
+// Spec sections 2 and 3: SUPER + ALT + Q opens Compose and captures nothing.
+// A terminal drops its own highlight when it loses primary ownership, so a
+// surface that took no Selection must take none away either.
 test("a Compose that closes releases nothing and records nothing", () => {
   const box = machine({ primary: "Their going to the park." })
 
@@ -372,6 +400,9 @@ test("the same words from another window are fresh", () => {
   assert.equal(checkCount("fresh-window"), 2)
 })
 
+// Step 2 of spec section 3. An Electron field with nothing selected answers
+// Ctrl + C by leaving the clipboard as it was, so what comes back is an
+// earlier copy rather than a Selection.
 test("a Ctrl + C that copies nothing is not a Selection", () => {
   const binary = stub("copied-nothing")
   const box = machine({ primary: "", clipboard: "something copied yesterday", copies: "" })
@@ -562,6 +593,7 @@ test("a borrowed clipboard at its bound is not borrowed", () => {
   assert.equal(Capture.pasteOverflowed("x".repeat(bound - 4)), false)
   assert.equal(Capture.pasteOverflowed("x".repeat(bound - 3)), true)
   assert.equal(Capture.pasteOverflowed("x".repeat(bound)), true)
+  // A cut multi-byte tail arrives as U+FFFD, three bytes.
   assert.equal(Capture.pasteOverflowed("x".repeat(bound - 3) + "\ufffd"), true)
   assert.equal(Capture.pasteOverflowed(""), false)
   assert.equal(Capture.pasteOverflowed(undefined), false)

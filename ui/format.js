@@ -1,3 +1,10 @@
+// Loaded twice: by the QML cards through `import "format.js" as Format`, and
+// by `format.test.js` under node. Nothing here may touch a QML or a node API,
+// because each side only has one of them.
+//
+// Every count is a UTF-16 code unit, which is what the CLI measures and what
+// a JavaScript string length already is.
+
 function grouped(count) {
   return String(count).replace(/\B(?=(\d{3})+(?!\d))/g, ",")
 }

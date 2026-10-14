@@ -49,6 +49,7 @@ pub fn start_unit(
         .arg("--user")
         .arg(format!("--unit={unit}"))
         .arg(format!("--description={description}"))
+        // Collect a failed unit so the next Check may start it again.
         .arg("--collect");
     for (name, value) in &command.environment {
         systemd_run.arg(format!("--setenv={name}={value}"));
@@ -65,6 +66,7 @@ pub fn start_unit(
     }
 
     let message = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    // A unit left from an earlier Check is the outcome this call wanted.
     if message.contains("already exists") {
         return Ok(Started::AlreadyRunning);
     }
