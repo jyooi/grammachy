@@ -80,8 +80,10 @@ function findById(entries, id) {
   return null
 }
 
-// `updateEntryInline` writes the bar layout entry first and the top level
-// `plugins` entry.
+// This plugin's entry in one shell config, from the bar layout first and the
+// top level `plugins` array next. That order is what the shell itself writes
+// in: `updateEntryInline` and `setBarWidget` both reach for the bar layout
+// before anything else, so a stale `plugins` copy must never win.
 function entryOf(config, pluginId) {
   var id = pluginId === undefined ? PLUGIN_ID : String(pluginId)
   if (!isPlainObject(config)) return ({})
@@ -126,7 +128,9 @@ function normalised(name, value) {
   return isKnown(name, value) ? value : defaultOf(name)
 }
 
-// `shell.updateEntryInline` replaces the entry rather than merging into it.
+// The whole entry to hand to `shell.updateEntryInline`, which replaces the
+// entry rather than merging into it. Carrying every stored key across is what
+// keeps any unknown value the user did not change.
 function mergedEntry(entry, name, value) {
   var next = ({})
   if (isPlainObject(entry)) {

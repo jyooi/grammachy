@@ -83,6 +83,7 @@ pub fn entry_path() -> Option<PathBuf> {
     Some(PathBuf::from(home).join(".config/omarchy/shell.json"))
 }
 
+/// The plugin's entry, from the bar layout first and the `plugins` array next.
 fn find_entry(document: &Value) -> Option<&Value> {
     for section in ["left", "center", "right"] {
         let entries = document
