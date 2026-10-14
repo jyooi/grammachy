@@ -1,9 +1,3 @@
-//! `grammachy doctor`, spec sections 4, 8, 10, and 12.
-//!
-//! Every test here builds the machine it wants as recorded [`Facts`] and reads
-//! the report back, so no test looks at the developer's own machine. The one
-//! end to end test runs the binary and asserts only what holds on any machine.
-
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -13,7 +7,6 @@ use grammachy::args::EngineSlug;
 use grammachy::doctor::facts::UnitState;
 use grammachy::doctor::{self, Facts, Report};
 
-/// A machine where every piece is in place and the unit is stopped.
 fn ready() -> Facts {
     Facts {
         binary: Some(PathBuf::from("/home/u/plugin/bin/grammachy")),
@@ -40,7 +33,6 @@ fn text_of(facts: &Facts, engine: EngineSlug) -> String {
     doctor::run(facts, engine, false).text
 }
 
-/// The lines that report a missing piece.
 fn missing_lines(text: &str) -> Vec<&str> {
     text.lines()
         .filter(|line| line.trim_start().starts_with("missing"))
@@ -104,15 +96,12 @@ fn a_missing_languagetool_is_optional_and_names_the_no_sudo_install() {
         !text.contains("sudo pacman -S languagetool"),
         "the install needs no password any more: {text}"
     );
-    // The engine still cannot run, so a Check on it is still refused.
     assert_eq!(
         doctor::run(&facts, EngineSlug::Languagetool, false).exit_code,
         1
     );
 }
 
-/// The Java runtime serves LanguageTool alone, so on a machine that has no
-/// LanguageTool a missing runtime is optional for the same reason.
 #[test]
 fn a_missing_java_is_optional_only_while_languagetool_is_absent() {
     let mut facts = ready();
@@ -122,12 +111,8 @@ fn a_missing_java_is_optional_only_while_languagetool_is_absent() {
 
     let text = text_of(&facts, EngineSlug::Languagetool);
     assert!(missing_lines(&text).is_empty(), "{text}");
-    // The LanguageTool check, the Java check, and the jre-openjdk row of the
-    // dependency table. libarchive is present on this machine.
     assert_eq!(optional_lines(&text).len(), 3, "{text}");
 
-    // Once LanguageTool is on the machine the server cannot start without a
-    // runtime, so the same fact is a real fault.
     facts.languagetool_launcher = Some(PathBuf::from("/usr/bin/languagetool"));
     let text = text_of(&facts, EngineSlug::Languagetool);
     assert_eq!(missing_lines(&text).len(), 1, "{text}");
@@ -135,8 +120,6 @@ fn a_missing_java_is_optional_only_while_languagetool_is_absent() {
     assert!(text.contains("Omarchy Install"), "{text}");
 }
 
-/// The pacman package is an alternative Grammachy never installs and never
-/// removes, so the report says where that LanguageTool came from.
 #[test]
 fn a_languagetool_from_the_package_says_so() {
     let mut facts = ready();
@@ -161,8 +144,6 @@ fn a_languagetool_from_the_package_says_so() {
     );
 }
 
-/// The installed tree wins over the package, because it is the one the adapter
-/// runs and the one `grammachy engine remove` can take away again.
 #[test]
 fn the_installed_tree_wins_over_the_package() {
     let mut facts = ready();
@@ -205,18 +186,13 @@ fn a_missing_java_runtime_prints_its_pacman_line() {
     assert!(text.contains("Omarchy Install"), "{text}");
 }
 
-/// Harper needs nothing but the binary, so nothing LanguageTool needs ever
-/// fails it.
 #[test]
 fn a_piece_another_engine_needs_never_fails_this_engine() {
     let mut facts = ready();
-    // LanguageTool is on the machine (the ready fixture's tree), so a missing
-    // Java runtime is a real fault for it rather than the optional case above.
     facts.java = None;
 
     let output = doctor::run(&facts, EngineSlug::Harper, false);
     assert_eq!(output.exit_code, 0, "{}", output.text);
-    // The report still lists what is missing, whichever engine asked.
     assert_eq!(missing_lines(&output.text).len(), 1, "{}", output.text);
 
     assert_eq!(
@@ -250,7 +226,6 @@ fn a_running_unit_reads_as_running_and_a_stopped_one_is_no_fault() {
     );
     assert!(missing_lines(&text).is_empty(), "{text}");
 
-    // Stopped is the normal state between logins: the next Check starts it.
     let text = text_of(&ready(), EngineSlug::Languagetool);
     assert!(
         text.contains("grammachy-languagetool is not running. The next Check starts it."),
@@ -328,7 +303,6 @@ fn every_engine_slug_gets_its_own_failing_diagnosis() {
         languagetool.diagnosis
     );
 
-    // With the binary in place, each engine names its own first missing piece.
     facts.binary = Some(PathBuf::from("/home/u/plugin/bin/grammachy"));
 
     assert_eq!(
@@ -336,7 +310,6 @@ fn every_engine_slug_gets_its_own_failing_diagnosis() {
         "LanguageTool is optional and is not installed. Add it in Settings, Engines. \
 Run: grammachy engine install languagetool"
     );
-    // Harper needs nothing but the binary, so it stays ready.
     let harper = Report::new(&facts, EngineSlug::Harper);
     assert!(harper.ready, "{}", harper.diagnosis);
 }
@@ -357,7 +330,6 @@ fn the_envelope_carries_the_contract_version_and_the_checks() {
         .map(|check| check["id"].as_str().expect("every id is a string"))
         .collect();
     assert_eq!(ids, ["binary", "languagetool", "java", "unit:languagetool"]);
-    // A check that needs nothing carries no remedy key at all.
     assert!(checks.iter().all(|check| check.get("remedy").is_none()));
 }
 
@@ -385,8 +357,6 @@ fn a_missing_piece_carries_its_remedy_in_the_envelope() {
     assert_eq!(check["engines"], serde_json::json!(["languagetool"]));
 }
 
-/// The one test that runs the real binary. It asserts only what holds whatever
-/// this machine has installed, so CI and a developer machine agree.
 #[test]
 fn the_binary_prints_a_report_and_a_json_envelope() {
     let text = run_binary(&["doctor"]);
@@ -394,7 +364,6 @@ fn the_binary_prints_a_report_and_a_json_envelope() {
     // Spec section 4: a fresh install checks with Harper, which needs nothing
     // downloaded and no pacman command (HUF-237).
     assert!(text.contains("Engine harper"), "{text}");
-    // Nothing is installed for the user, whatever is missing.
     assert!(!text.contains("Installing"), "{text}");
 
     let json = run_binary(&["doctor", "--json"]);
@@ -402,13 +371,9 @@ fn the_binary_prints_a_report_and_a_json_envelope() {
     assert_eq!(value["contractVersion"], 1);
     assert_eq!(value["engine"], "harper");
     assert_eq!(json.trim().lines().count(), 1, "one line only: {json}");
-    // Harper needs only the binary, which is running, so this machine is
-    // ready with nothing installed at all.
     assert_eq!(value["ready"], true, "{json}");
 }
 
-/// Only the `languagetool` check carries a state word: `detail` is prose and
-/// no contract, so nothing else may read that instead.
 #[test]
 fn no_other_check_carries_a_state_word() {
     let json = doctor::run(&ready(), EngineSlug::Languagetool, true).text;
@@ -422,8 +387,6 @@ fn no_other_check_carries_a_state_word() {
     }
 }
 
-/// The `languagetool` check carries one word per route onto the machine, which
-/// is what the Settings row reads rather than the prose of `detail`.
 #[test]
 fn the_languagetool_check_names_the_route_it_found() {
     let mut facts = ready();
@@ -453,9 +416,7 @@ fn state_of(facts: &Facts) -> String {
 fn run_binary(args: &[&str]) -> String {
     let output = Command::new(env!("CARGO_BIN_EXE_grammachy"))
         .args(args)
-        // No test reads the developer's real settings file (spec section 7).
         .env("GRAMMACHY_SHELL_JSON", "/nonexistent/shell.json")
-        // Nor the engines this machine has installed (spec section 5.4).
         .env("GRAMMACHY_ENGINES_DIR", "/nonexistent/engines")
         .output()
         .expect("the binary runs");
@@ -463,8 +424,6 @@ fn run_binary(args: &[&str]) -> String {
     String::from_utf8(output.stdout).expect("stdout is UTF-8")
 }
 
-/// Spec section 10: `doctor --json` is the one dependency table. Every row
-/// names the Arch package, why it is there, and the Omarchy Install hint.
 #[test]
 fn the_envelope_carries_the_dependency_table() {
     let json = doctor::run(&ready(), EngineSlug::Harper, true).text;
@@ -510,10 +469,6 @@ fn the_envelope_carries_the_dependency_table() {
     assert_eq!(rows[3]["usedBy"], serde_json::json!(["languagetool"]));
 }
 
-/// A required package that is absent reads `missing` in the text and
-/// `present: false` in the envelope, and the engine answer does not move:
-/// `ready` is about the engine, and the setup card is what refuses a
-/// bootstrap without curl.
 #[test]
 fn an_absent_required_package_is_missing_and_the_engine_answer_stands() {
     let mut facts = ready();
@@ -541,9 +496,6 @@ fn an_absent_required_package_is_missing_and_the_engine_answer_stands() {
     assert_eq!(value["dependencies"][1]["present"], false);
 }
 
-/// The Java runtime answers through `JAVA_HOME` or the default JVM, the same
-/// route the LanguageTool launcher takes, and it is optional because Harper
-/// needs none.
 #[test]
 fn the_java_package_follows_the_runtime_fact() {
     let mut facts = ready();

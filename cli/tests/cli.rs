@@ -1,5 +1,3 @@
-//! End to end runs of the binary: stdout carries one envelope, stderr carries logs.
-
 use std::io::{ErrorKind, Write};
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
@@ -12,7 +10,6 @@ struct Run {
     stdout: String,
 }
 
-/// An address on the loopback interface with nothing listening on it.
 fn silent_address() -> String {
     let listener = TcpListener::bind("127.0.0.1:0").expect("a loopback port is free");
     let address = listener
@@ -23,12 +20,6 @@ fn silent_address() -> String {
     address
 }
 
-/// Point every run at a dead address, so the binary tests exercise argument
-/// handling only and never touch systemd. No run reads the developer's real
-/// `~/.config/omarchy/shell.json` either (spec section 7).
-///
-/// The engines directory is a path that does not exist, so no run reads the
-/// components this machine has installed (spec section 5.4).
 fn no_engine(command: &mut Command) -> &mut Command {
     command
         .env("GRAMMACHY_LANGUAGETOOL_ADDRESS", silent_address())
@@ -37,20 +28,16 @@ fn no_engine(command: &mut Command) -> &mut Command {
         .env("GRAMMACHY_SHELL_JSON", silent_settings())
 }
 
-/// The settings file every run that names no other one reads: nothing at all,
-/// so every key is the built-in default of spec section 7.
 fn silent_settings() -> PathBuf {
     settings_file("silent-shell.json", "")
 }
 
-/// A directory of this test binary, removed with the target directory.
 fn scratch_dir() -> PathBuf {
     let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("cli-settings");
     std::fs::create_dir_all(&dir).expect("the scratch directory is created");
     dir
 }
 
-/// Write one temporary `shell.json` holding the plugin entry.
 fn settings_file(name: &str, entry_body: &str) -> PathBuf {
     let path = scratch_dir().join(name);
     let document = format!(
@@ -63,7 +50,6 @@ fn settings_file(name: &str, entry_body: &str) -> PathBuf {
     path
 }
 
-/// Run the binary against one temporary settings file.
 fn run_with_settings(args: &[&str], stdin: &str, settings: &Path) -> Run {
     let mut child = no_engine(&mut Command::new(env!("CARGO_BIN_EXE_grammachy")))
         .env("GRAMMACHY_SHELL_JSON", settings)
@@ -139,9 +125,6 @@ fn text_over_the_limit_prints_text_too_long() {
     assert_eq!(envelope(&result)["error"]["code"], "text_too_long");
 }
 
-/// stdin is read only as far as the overlay may capture, so a producer that
-/// never stops cannot fill memory. One byte past the cap is refused, and the
-/// message names the cap.
 #[test]
 fn stdin_past_the_byte_cap_prints_bad_arguments() {
     let cap = grammachy::chunk::MAX_STDIN_BYTES as usize;
@@ -158,8 +141,6 @@ fn stdin_past_the_byte_cap_prints_bad_arguments() {
         "{value}"
     );
 
-    // The same length in the chunk verb reads as a Draft over its cap, so
-    // the byte cap never cuts a Draft the verb would take.
     let result = run(&["chunk"], &"a".repeat(cap));
     assert_ne!(envelope(&result)["error"]["code"], "bad_arguments");
 }
@@ -202,7 +183,6 @@ fn every_valid_flag_value_is_accepted() {
     }
 
     for engine in ["languagetool", "harper"] {
-        // `harper` runs in process and answers a result, so there is no code.
         let result = run(&["check", "--engine", engine], "Some text.");
         let value = envelope(&result);
         assert_ne!(
@@ -232,8 +212,6 @@ fn invalid_utf8_on_stdin_prints_bad_arguments() {
     assert_eq!(value["error"]["code"], "bad_arguments");
 }
 
-/// The in-process engine of spec section 4 needs no unit and no port, so it
-/// answers real Issues in the run that forbids both.
 #[test]
 fn the_harper_engine_answers_issues_with_no_unit_running() {
     let result = run(&["check", "--engine", "harper"], "He go home.");
@@ -255,7 +233,6 @@ fn the_stored_engine_applies_when_no_flag_gives_one() {
     let settings = settings_file("stored-engine.json", r#""engine": "harper""#);
     let result = run_with_settings(&["check"], "He go home.", &settings);
 
-    // The dead address would have made the default engine answer unavailable.
     assert_eq!(envelope(&result)["engine"], "harper");
 }
 
@@ -268,8 +245,6 @@ fn the_engine_flag_wins_over_the_stored_engine() {
         &settings,
     );
 
-    // The address is dead, so LanguageTool answers unavailable and names
-    // itself. Harper would have named itself instead.
     let value = envelope(&result);
     assert_eq!(value["error"]["code"], "engine_unavailable");
     assert!(
@@ -318,8 +293,6 @@ fn an_unknown_stored_engine_falls_back_to_the_default() {
     );
 }
 
-/// Unknown stored keys are ignored without error, so a settings file left over
-/// from a removed feature (or a newer version of Grammachy) never breaks a run.
 #[test]
 fn unknown_stored_keys_are_ignored_without_error() {
     let settings = settings_file(
@@ -350,8 +323,6 @@ fn a_missing_settings_file_is_fine() {
     assert!(!missing.exists(), "the CLI never creates the settings file");
 }
 
-/// One temporary home for a `setup` run: copies of both configuration files
-/// and no compositor. The real files are never in reach.
 fn setup_home(name: &str) -> PathBuf {
     let directory = scratch_dir().join(format!("home-{name}"));
     let _ = std::fs::remove_dir_all(&directory);
@@ -428,8 +399,6 @@ fn setup_writes_the_block_and_the_entry_and_remove_takes_them_out() {
     );
 }
 
-/// Spec section 7: `grammachy setup` reads the remapped keys from the plugin
-/// entry and writes those strings into `bindings.lua`.
 #[test]
 fn setup_writes_custom_hotkeys_from_the_plugin_entry() {
     let home = setup_home("custom-hotkeys");
@@ -447,7 +416,6 @@ fn setup_writes_custom_hotkeys_from_the_plugin_entry() {
     assert!(!text.contains("SUPER + SHIFT + Q\""), "{text}");
 }
 
-/// A quote in a stored hotkey must not break the Lua string in `bindings.lua`.
 #[test]
 fn setup_escapes_a_quote_in_a_stored_hotkey() {
     let home = setup_home("escaped-hotkeys");

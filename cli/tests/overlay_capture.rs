@@ -15,8 +15,6 @@ fn read(relative: &str) -> String {
     std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("{relative} is readable: {error}"))
 }
 
-/// The balanced `{ ... }` block that follows `needle`, which is how a QML
-/// handler such as `onExited` is read as well as a `function`.
 fn block_after(source: &str, needle: &str, label: &str) -> String {
     let start = source
         .find(needle)
@@ -42,7 +40,6 @@ fn block_after(source: &str, needle: &str, label: &str) -> String {
     panic!("{label} has a closing brace")
 }
 
-/// The body of one `function <name>(...)` in a QML or JavaScript file.
 fn function_body(source: &str, name: &str) -> String {
     block_after(source, &format!("function {name}("), name)
 }
@@ -112,9 +109,6 @@ fn the_capture_is_recorded_where_it_is_taken_and_releases_nothing() {
     );
 }
 
-/// Spec section 3: the primary selection goes when the popup closes, whether
-/// the run ended in Apply, Replace, Clear, or Close. One function decides it
-/// and one process does it.
 #[test]
 fn the_primary_selection_is_released_when_the_popup_closes() {
     let source = read("Overlay.qml");
@@ -144,11 +138,6 @@ fn the_primary_selection_is_released_when_the_popup_closes() {
     );
 }
 
-/// Spec section 3: only a run that took a Selection releases one, and it
-/// releases at most once, whichever exit it takes. A run has four exits - the
-/// close, the Clear, the keystroke that ends a Replace, and a source window
-/// that is gone - so the rule lives in the one function all of them call rather
-/// than at each of them.
 #[test]
 fn one_function_owns_the_release_and_every_exit_calls_it_plainly() {
     let source = read("Overlay.qml");
@@ -175,22 +164,17 @@ fn one_function_owns_the_release_and_every_exit_calls_it_plainly() {
         "and it goes before the clear runs, so no second exit repeats it: {release}"
     );
 
-    // The wait has to answer before the drop. A Replace closes the popup first
-    // and types afterwards, so the claim must outlive that close.
     assert!(
         waiting < dropped,
         "a Replace keeps its claim through the close that armed the wait: {release}"
     );
 
-    // One caller of the command, so no exit can go around the rule above.
     assert_eq!(
         source.matches("clearPrimary.running = true").count(),
         1,
         "`releasePrimary` is the one thing that runs the clear"
     );
 
-    // Every exit calls it plainly. A call site that carried its own copy of the
-    // guard would be a second rule to keep in step.
     assert_eq!(
         source.matches("root.releasePrimary()").count(),
         3,
@@ -204,8 +188,6 @@ fn one_function_owns_the_release_and_every_exit_calls_it_plainly() {
         );
     }
 
-    // The paste keystroke is the exit that outlives the close, and it is the
-    // one most likely to drift, so it is named here.
     let typed = source
         .find("id: pasteKeystroke")
         .expect("the overlay types with wtype");
@@ -219,19 +201,12 @@ fn one_function_owns_the_release_and_every_exit_calls_it_plainly() {
         "and it keeps no copy of the guard either: {exited}"
     );
 
-    // `checkLastAgain` runs the kept text inside the summon that is open, so it
-    // must not claim a capture that summon never took.
     assert!(
         !function_body(&source, "checkLastAgain").contains("root.runCaptured = true"),
         "the kept text is no capture, so it claims no selection"
     );
 }
 
-/// Spec section 6: Replace only works while the Selection is still highlighted
-/// in the source window. `checkLastAgain` reaches a result on a run that took
-/// nothing, and the popup has already released the primary selection, so Apply
-/// there is copy-only. The label the card prints is the one thing that happens,
-/// so the card and the key read the same fact the release rests on.
 #[test]
 fn apply_replaces_only_on_a_run_that_holds_a_selection() {
     let source = read("Overlay.qml");
@@ -250,8 +225,6 @@ fn apply_replaces_only_on_a_run_that_holds_a_selection() {
         "the quick card is told the same fact, so the button agrees with the key"
     );
 
-    // The card decides the label and the tooltip from one property, so the two
-    // can never disagree with each other or with Apply.
     let card = read("ui/QuickCard.qml");
     assert!(
         card.contains("readonly property bool replaces: root.autoReplace && root.runCaptured"),
@@ -268,10 +241,6 @@ fn apply_replaces_only_on_a_run_that_holds_a_selection() {
     );
 }
 
-/// Spec sections 2 and 3: Compose captures nothing, so a Compose that closes
-/// owns no primary selection to release and no capture to record. `resetRun`
-/// drops the source window and leaves the text of the run before it in place,
-/// so the text alone cannot say whether this run captured.
 #[test]
 fn a_run_that_captured_nothing_records_nothing_and_releases_nothing() {
     let source = read("Overlay.qml");
@@ -297,10 +266,6 @@ fn a_run_that_captured_nothing_records_nothing_and_releases_nothing() {
         "and a summon that found nothing new took none either"
     );
 
-    // The record sits behind that one question, so a surface that captured
-    // nothing records nothing. The release asks the same question of its own,
-    // which `one_function_owns_the_release_and_every_exit_calls_it_plainly`
-    // holds, so the close calls it plainly.
     let close = function_body(&source, "close");
     let asked = close
         .find("if (root.runCaptured)")
@@ -331,9 +296,6 @@ fn a_replace_holds_the_release_back_until_it_has_typed() {
         "a Replace still to type holds the release back: {release}"
     );
 
-    // Both steps sit in the one `wl-copy` exit handler, so the two offsets are
-    // measured inside that block alone. A whole-file search would find some
-    // later `root.close()` whatever the order in the handler is.
     let copied = source
         .find("id: copyProcess")
         .expect("the overlay copies the Corrected text with wl-copy");
@@ -349,8 +311,6 @@ fn a_replace_holds_the_release_back_until_it_has_typed() {
         "the wait is armed before the close: {exited}"
     );
 
-    // The keystroke is what ends it, and a Replace that never types must not
-    // leave the release waiting for ever.
     let keystroke = source
         .find("id: pasteKeystroke")
         .expect("the overlay types with wtype");
@@ -398,8 +358,6 @@ fn a_ctrl_c_that_copied_nothing_is_not_a_selection() {
     );
 }
 
-/// Spec section 6: `Check last text again` runs the kept text and captures
-/// nothing, so a selection that changed since cannot reach the engine.
 #[test]
 fn check_last_text_again_runs_the_kept_text_with_no_capture() {
     let source = read("Overlay.qml");
@@ -419,9 +377,6 @@ fn check_last_text_again_runs_the_kept_text_with_no_capture() {
     );
 }
 
-/// Spec section 6: Clear drops the capture and the review, keeps the popup
-/// open on the empty state, and never touches the Draft, which is the one
-/// thing the plugin keeps.
 #[test]
 fn clear_lands_on_the_empty_state_and_leaves_the_draft_alone() {
     let source = read("Overlay.qml");
@@ -458,8 +413,6 @@ fn clear_lands_on_the_empty_state_and_leaves_the_draft_alone() {
     );
 }
 
-/// Spec section 6: Clear has a key and a button, and both reach the same one
-/// function. `ui/keymap.test.js` owns which press it is.
 #[test]
 fn clear_is_reachable_from_the_key_map_and_from_the_hero() {
     let source = read("Overlay.qml");
@@ -478,9 +431,6 @@ fn clear_is_reachable_from_the_key_map_and_from_the_hero() {
         "the hero button lands on the same one"
     );
 
-    // The button shows on every quick card but the empty state and the
-    // too-long card, so the key has to reach the same set. The review mode
-    // covers a result with Issues; this mode covers the rest.
     let mode = function_body(&source, "keyMode");
     assert!(
         mode.contains("Keymap.MODE_QUICK_CLEAR"),
@@ -508,8 +458,6 @@ fn clear_is_reachable_from_the_key_map_and_from_the_hero() {
     );
 }
 
-/// The wording of the empty state is the product's, so it lives in one file
-/// and the spec says the same thing.
 #[test]
 fn the_empty_state_says_the_same_thing_as_the_spec() {
     let notice = "No new selection. Highlight text and press SUPER + SHIFT + Q, or paste here.";
@@ -528,11 +476,6 @@ fn the_empty_state_says_the_same_thing_as_the_spec() {
     );
 }
 
-/// Every `wl-paste` the overlay runs is the bounded command of
-/// `ui/capture.js`, with a byte bound in front of the collector and a clock
-/// on the selection owner, so no producer decides what the shell holds. A
-/// clipboard cut at its bound is not borrowed, because it could not go back
-/// whole.
 #[test]
 fn every_paste_runs_the_bounded_command_and_a_cut_clipboard_is_not_borrowed() {
     let source = read("Overlay.qml");
@@ -546,7 +489,6 @@ fn every_paste_runs_the_bounded_command_and_a_cut_clipboard_is_not_borrowed() {
         ("savedClipboard", "Capture.borrowCommand()"),
         ("fallbackPaste", "Capture.fallbackCommand()"),
     ] {
-        // The lines of this Process, up to the next `id:` of the file.
         let start = source
             .find(&format!("id: {process}"))
             .unwrap_or_else(|| panic!("Overlay.qml declares {process}"));

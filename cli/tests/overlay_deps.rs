@@ -1,11 +1,3 @@
-//! The dependency table of spec section 10 lives twice: in
-//! `cli/src/doctor/deps.rs`, which `doctor --json` prints, and in
-//! `ui/deps.js`, which the setup card reads before `bin/grammachy` exists.
-//! Neither side can load the other, so this test reads the shell's table and
-//! holds the two equal.
-//!
-//! No test here opens a terminal or installs a package.
-
 use grammachy::doctor::deps::{self, SPECS};
 
 fn read(relative: &str) -> String {
@@ -13,7 +5,6 @@ fn read(relative: &str) -> String {
     std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("{relative} is readable: {error}"))
 }
 
-/// The text between `var DEPENDENCIES = [` and its closing `]`.
 fn js_table(source: &str) -> &str {
     let start = source
         .find("var DEPENDENCIES = [")
@@ -22,7 +13,6 @@ fn js_table(source: &str) -> &str {
     &source[start..end]
 }
 
-/// The `{ ... }` literals of the table, in order.
 fn js_rows(table: &str) -> Vec<&str> {
     table
         .split("\n  {")

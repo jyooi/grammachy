@@ -18,14 +18,11 @@ use std::io::ErrorKind;
 use std::os::unix::fs::MetadataExt;
 use std::path::Path;
 
-/// The user this process runs as.
 fn own_uid() -> u32 {
     // Safety: geteuid takes no arguments and cannot fail.
     unsafe { libc::geteuid() }
 }
 
-/// Make sure `directory` is a plain directory this user owns, and make it
-/// when it is absent.
 pub fn private_directory(directory: &Path) -> Result<(), String> {
     let data = match fs::symlink_metadata(directory) {
         Ok(data) => data,
@@ -55,8 +52,6 @@ pub fn private_directory(directory: &Path) -> Result<(), String> {
     owned_here(directory, data.uid())
 }
 
-/// Refuse anything at `path` but a plain file this user owns. An absent path
-/// passes.
 pub fn plain_file_or_absent(path: &Path) -> Result<(), String> {
     let data = match fs::symlink_metadata(path) {
         Ok(data) => data,
@@ -78,8 +73,6 @@ pub fn plain_file_or_absent(path: &Path) -> Result<(), String> {
     owned_here(path, data.uid())
 }
 
-/// Make an empty plain file at `path` when nothing is there. The transfer
-/// then appends to a file this process made, not to whatever it finds.
 pub fn create_if_absent(path: &Path) -> Result<(), String> {
     match OpenOptions::new().write(true).create_new(true).open(path) {
         Ok(_) => Ok(()),
@@ -88,10 +81,6 @@ pub fn create_if_absent(path: &Path) -> Result<(), String> {
     }
 }
 
-/// An empty directory at `path` that this call made.
-///
-/// Whatever stood there goes first, link or tree, and the create is
-/// exclusive, so the directory is one nothing else put in place.
 pub fn fresh_directory(path: &Path) -> Result<(), String> {
     match fs::remove_dir_all(path) {
         Ok(()) => {}

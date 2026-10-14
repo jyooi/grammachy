@@ -63,7 +63,6 @@ use crate::engines::local::{self, ServerCommand};
 /// The transient unit name from spec section 4.
 pub const UNIT_NAME: &str = "grammachy-languagetool";
 
-/// `maxTextLength` handed to the server, the same cap the CLI applies itself.
 const MAX_TEXT_LENGTH: usize = 5_000;
 
 /// The launcher the pacman package installs. `doctor` looks for it too.
@@ -72,20 +71,15 @@ pub const PACKAGE_LAUNCHER: &str = "/usr/bin/languagetool";
 /// The server jar of the unpacked upstream release, under the installed tree.
 pub const SERVER_JAR: &str = "languagetool-server.jar";
 
-/// The class the server runs from, in both the tree and the package launcher.
 const SERVER_CLASS: &str = "org.languagetool.server.HTTPServer";
 
 /// Where `archlinux-java` points at the selected JVM.
 const DEFAULT_JVM: &str = "/usr/lib/jvm/default";
 
-/// The tail every Grammachy properties file has, which is what the proof of
-/// [`launched_here`] reads instead of the path of this session.
 const CONFIG_SUFFIX: &str = "/grammachy/languagetool.properties";
 
-/// The tail of every JVM this build runs the server with.
 const JAVA_TAIL: &str = "/bin/java";
 
-/// The classpath flag `tree_command` writes.
 const CLASSPATH_FLAG: &str = " -cp ";
 
 /// Read the server command from whichever LanguageTool this machine has.
@@ -105,7 +99,6 @@ The pacman package works too, and neither {PACKAGE_LAUNCHER} nor an installed tr
     )))
 }
 
-/// The JVM run against the unpacked upstream release.
 fn tree_command(tree: &Path, port: u16, config: &Path, java_home: String) -> ServerCommand {
     let classpath = format!(
         "{}:{}",
@@ -128,7 +121,6 @@ fn tree_command(tree: &Path, port: u16, config: &Path, java_home: String) -> Ser
     }
 }
 
-/// The launcher the pacman package installs.
 fn package_command(port: u16, config: &Path, java_home: String) -> ServerCommand {
     ServerCommand {
         program: PACKAGE_LAUNCHER.to_string(),
@@ -202,12 +194,6 @@ pub fn launched_here(peer: &Peer) -> Result<(), String> {
     shaped_like_ours(peer, install::installed("languagetool").as_deref())
 }
 
-/// [`launched_here`] against one installed tree, so the tests name their own.
-///
-/// The whole command line is compared, not one flag at a time. Every shape
-/// this build starts is one exact string once the port and the properties
-/// file are known, so a crafted line cannot hide an extra jar, a second flag,
-/// or another main class between the parts a piecewise reader looks at.
 fn shaped_like_ours(peer: &Peer, tree: Option<&Path>) -> Result<(), String> {
     if !peer.transient {
         return Err("the unit is not transient, so systemd-run did not make it".to_string());
@@ -243,11 +229,6 @@ fn shaped_like_ours(peer: &Peer, tree: Option<&Path>) -> Result<(), String> {
     Ok(())
 }
 
-/// Why one command line is not the one this build starts.
-///
-/// A port that does not match the listener is the one case worth its own
-/// sentence, because a unit under this name on another port is what a reader
-/// meets most often.
 fn refused(peer: &Peer) -> String {
     let listening = peer.address.port();
     match listener::port_of(&peer.exec_start.argv) {
@@ -281,8 +262,6 @@ mod tests {
         assert_eq!(text.trim(), "maxTextLength=5000");
     }
 
-    /// The installed tree is jars, so the unit runs the JVM against the server
-    /// jar and the `libs` beside it.
     #[test]
     fn the_tree_command_runs_the_jvm_against_the_unpacked_release() {
         let tree = Path::new("/home/someone/.local/share/grammachy/engines/languagetool");
@@ -303,9 +282,7 @@ mod tests {
                 "/run/user/1000/grammachy/languagetool.properties"
             ]
         );
-        // The JVM is run directly, so nothing has to read JAVA_HOME.
         assert!(command.environment.is_empty());
-        // No external access: the server never gets `--public`.
         assert!(!command.arguments.contains(&"--public".to_string()));
     }
 
@@ -346,15 +323,10 @@ mod tests {
         }
     }
 
-    /// The properties file of a session, which the proof reads by its tail
-    /// rather than by the runtime directory of this process.
     const CONFIG: &str = "/run/user/1000/grammachy/languagetool.properties";
 
-    /// The tree a JVM command line names, which the tests hand in.
     const TREE: &str = "/home/someone/.local/share/grammachy/engines/languagetool";
 
-    /// A unit file under the same name, or a transient unit that runs some
-    /// other program, is not one this plugin started.
     #[test]
     fn a_unit_this_plugin_did_not_start_is_refused() {
         let launcher = format!("{PACKAGE_LAUNCHER} --http --port 8081 --config {CONFIG}");
@@ -388,8 +360,6 @@ mod tests {
         );
     }
 
-    /// The pacman launcher shape passes on any machine, because the proof
-    /// reads the command line rather than the environment.
     #[test]
     fn the_launcher_shape_of_this_plugin_passes() {
         let ours = format!("{PACKAGE_LAUNCHER} --http --port 8081 --config {CONFIG}");
@@ -414,13 +384,9 @@ mod tests {
         );
     }
 
-    /// The JVM shape names the installed tree's server jar on its classpath,
-    /// and the JVM path itself is free, because `JAVA_HOME` may differ
-    /// between the run that started the unit and this one.
     #[test]
     fn the_jvm_shape_needs_the_installed_tree_on_its_classpath() {
         let tree = Path::new(TREE);
-        // Which JVM is free: this one is not the one `java_home` would pick.
         let jvm = "/usr/lib/jvm/java-21-openjdk/bin/java";
         let ours = format!(
             "{jvm} -cp {TREE}/{SERVER_JAR}:{TREE}/libs/* \
@@ -432,8 +398,6 @@ mod tests {
         let refused = shaped_like_ours(&running, None).expect_err("no tree is installed");
         assert!(refused.contains("no LanguageTool tree"), "{refused}");
 
-        // A jar whose name only starts with the installed one is another
-        // file, so the classpath entry has to end at a colon or at the end.
         let near = format!(
             "/usr/lib/jvm/default/bin/java -cp {TREE}/{SERVER_JAR}.evil:/tmp/x.jar \
 {SERVER_CLASS} --port 8081 --config {CONFIG}"
@@ -462,9 +426,6 @@ mod tests {
         );
     }
 
-    /// No JVM argument fits between the program and the classpath. A
-    /// `-javaagent` whose path ends with `/bin/java` must not pass as the
-    /// program word.
     #[test]
     fn a_java_agent_before_the_classpath_is_refused() {
         let tree = Path::new(TREE);
@@ -483,9 +444,6 @@ mod tests {
         );
     }
 
-    /// The exact match leaves no room between the classpath and the main
-    /// class, so an extra jar and another main class cannot pass behind a
-    /// copy of the server class later on the line.
     #[test]
     fn an_extra_jar_and_a_decoy_main_class_are_refused() {
         let tree = Path::new(TREE);
@@ -545,8 +503,6 @@ Evil --port 8081 --config {CONFIG} --x {SERVER_CLASS}"
         assert!(refused.contains("/tmp/evil.properties"), "{refused}");
     }
 
-    /// The suffix has to sit on a directory boundary. A directory whose name
-    /// only ends with `grammachy` is another directory.
     #[test]
     fn a_directory_that_only_ends_with_the_name_is_refused() {
         let argv = format!(
@@ -563,8 +519,6 @@ Evil --port 8081 --config {CONFIG} --x {SERVER_CLASS}"
         );
     }
 
-    /// The `--config` value ends at the next flag, so a later argument that
-    /// carries the suffix cannot stand in for the file the server reads.
     #[test]
     fn a_later_flag_that_carries_the_suffix_is_refused() {
         let argv = format!(
@@ -601,8 +555,6 @@ Evil --port 8081 --config {CONFIG} --x {SERVER_CLASS}"
         .expect("a path with a space is one word of the command line");
     }
 
-    /// The port on the command line must be the port the unit listens on, or
-    /// the proof says nothing about where the Selection goes.
     #[test]
     fn a_port_the_unit_does_not_listen_on_is_refused() {
         let argv = format!("{PACKAGE_LAUNCHER} --http --port 9999 --config {CONFIG}");

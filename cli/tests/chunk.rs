@@ -1,5 +1,3 @@
-//! `grammachy chunk` end to end, plus the tiling property over varied Drafts.
-
 use std::io::{ErrorKind, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -8,8 +6,6 @@ use grammachy::args::EngineSlug;
 use grammachy::chunk::{chunks_of, MAX_DRAFT_UTF16_UNITS};
 use serde_json::Value;
 
-/// The size limit of one Chunk on the default engine, in UTF-16 code units
-/// (spec sections 4 and 5.2).
 const MAX_CHUNK_UTF16_UNITS: usize = EngineSlug::Languagetool.check_limit_utf16();
 
 struct Run {
@@ -17,7 +13,6 @@ struct Run {
     stdout: String,
 }
 
-/// A directory of this test binary, removed with the target directory.
 fn scratch_dir() -> PathBuf {
     let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("chunk-settings");
     std::fs::create_dir_all(&dir).expect("the scratch directory is created");
@@ -25,9 +20,6 @@ fn scratch_dir() -> PathBuf {
 }
 
 fn run(args: &[&str], stdin: &str) -> Run {
-    // `chunk` resolves the engine the way `check` does, so it reads the
-    // Settings entry. The path below does not exist, which keeps every run on
-    // the built-in defaults and off the developer's real file (spec section 7).
     let mut child = Command::new(env!("CARGO_BIN_EXE_grammachy"))
         .env(
             "GRAMMACHY_SHELL_JSON",
@@ -107,8 +99,6 @@ fn a_draft_at_the_limit_succeeds_and_one_unit_over_is_text_too_long() {
     assert_eq!(envelope(&over)["error"]["code"], "text_too_long");
 }
 
-/// Every remaining engine reads the same number of units, so a Draft packs to
-/// the same tiling whichever engine the flag names.
 #[test]
 fn every_remaining_engine_packs_a_draft_to_the_same_tiling() {
     let draft = "a".repeat(20_000);
@@ -127,8 +117,6 @@ fn every_remaining_engine_packs_a_draft_to_the_same_tiling() {
     }
 }
 
-/// The flag is the caller's choice of limit, and the limits it names are the
-/// ones the CLI enforces for a Check.
 #[test]
 fn the_engine_flag_packs_to_that_engine_limit() {
     for slug in [EngineSlug::Languagetool, EngineSlug::Harper] {
@@ -165,9 +153,6 @@ fn an_unknown_flag_prints_bad_arguments() {
     assert_eq!(envelope(&result)["error"]["code"], "bad_arguments");
 }
 
-/// The Chunks of every Draft tile it: contiguous, non-overlapping, covering
-/// every UTF-16 unit, each under the Check limit, and never cut inside a
-/// character.
 #[test]
 fn chunks_tile_every_draft() {
     let mut seed = 0x2545_F491_4F6C_DD1D_u64;
@@ -219,8 +204,6 @@ fn assert_tiles(draft: &str) {
     assert_eq!(expected_start, units.len(), "the Chunks cover the Draft");
 }
 
-/// A Draft of at most `budget` UTF-16 units, built from fragments that stress
-/// the splitter: astral characters, CRLF, blank lines, quotes, and long runs.
 fn random_draft(seed: &mut u64, budget: usize) -> String {
     const FRAGMENTS: [&str; 14] = [
         "a",
@@ -245,7 +228,6 @@ fn random_draft(seed: &mut u64, budget: usize) -> String {
         let fragment = FRAGMENTS[(next(seed) % FRAGMENTS.len() as u64) as usize];
         let length: usize = fragment.chars().map(char::len_utf16).sum();
         if units + length > budget {
-            // The budget is nearly spent, so fill it with single units.
             draft.push('a');
             units += 1;
             continue;
@@ -267,7 +249,6 @@ fn random_draft(seed: &mut u64, budget: usize) -> String {
     draft
 }
 
-/// xorshift64, so the cases are varied but the run is the same every time.
 fn next(seed: &mut u64) -> u64 {
     *seed ^= *seed << 13;
     *seed ^= *seed >> 7;

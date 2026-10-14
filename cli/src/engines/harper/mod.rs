@@ -40,10 +40,6 @@ pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(if cfg!(debug_assertio
     SHIPPED_TIMEOUT_SECS
 });
 
-/// How many times the curated dictionary and rule set were built.
-///
-/// The counter exists for the test that proves the default engine path never
-/// initialises Harper (`cli/tests/harper_lazy.rs`).
 static INITIALISATIONS: AtomicUsize = AtomicUsize::new(0);
 
 /// The reading of the counter behind [`INITIALISATIONS`].
@@ -51,10 +47,6 @@ pub fn initialisations() -> usize {
     INITIALISATIONS.load(Ordering::SeqCst)
 }
 
-/// Lint `text` with the curated rule set.
-///
-/// Building the dictionary and the rule set is the expensive step, so it
-/// happens here, on the Check itself, rather than when the adapter is built.
 fn lint(text: &str, dialect: Dialect) -> Vec<Issue> {
     INITIALISATIONS.fetch_add(1, Ordering::SeqCst);
 
@@ -87,11 +79,6 @@ impl Engine for Harper {
         "harper"
     }
 
-    /// Lint on a worker thread so the timeout of spec section 4 applies to an
-    /// in-process engine too.
-    ///
-    /// A thread that runs past the timeout is left to finish. The CLI prints
-    /// the timeout envelope and exits, which ends it.
     fn check(&self, text: &str, options: &CheckOptions) -> Result<Vec<Issue>, EngineFailure> {
         let (sender, receiver) = mpsc::channel();
         let owned = text.to_string();

@@ -86,8 +86,6 @@ pub fn path() -> Option<PathBuf> {
     Some(PathBuf::from(home).join(".config/hypr/bindings.lua"))
 }
 
-/// Escape a value for a Lua double-quoted string. Hyprland key syntax is not
-/// parsed here: this is only so a quote or newline cannot break `bindings.lua`.
 fn lua_string(value: &str) -> String {
     value
         .replace('\\', "\\\\")
@@ -95,7 +93,6 @@ fn lua_string(value: &str) -> String {
         .replace('\n', "\\n")
 }
 
-/// One hotkey: the default it replaces goes first, the new binding second.
 fn binding(keys: &str, description: &str, payload: &str) -> String {
     let keys = lua_string(keys);
     format!(

@@ -1,6 +1,3 @@
-// Node tests for marked-text tokens. Spec section 6.
-// Run with `node --test ui/`.
-
 const test = require("node:test")
 const assert = require("node:assert/strict")
 

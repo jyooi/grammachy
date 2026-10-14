@@ -1,10 +1,3 @@
-//! `grammachy engine list` and `grammachy engine remove`, spec section 5.4.
-//!
-//! Every run here works on a scratch directory and on values handed in, so no
-//! test reads the real engines directory, stops the real LanguageTool unit, or
-//! reaches the upstream release host. The install verb owns its own test
-//! binary, `engine_install.rs`, because it pins a digest for the process.
-
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -13,11 +6,8 @@ use grammachy::engines::install::{EngineEnvelope, EngineRow, Engines};
 use grammachy::engines::install::{Failure, State, Stopper, Transfer};
 use grammachy::engines::languagetool;
 
-/// The archive name the `languagetool` row pins, so a test can put a part file
-/// of the right name in place.
 const ARCHIVE: &str = "LanguageTool-6.6.zip";
 
-/// The file that proves the unpack finished.
 const ENTRY: &str = "languagetool-server.jar";
 
 fn scratch(name: &str) -> PathBuf {
@@ -28,7 +18,6 @@ fn scratch(name: &str) -> PathBuf {
     directory
 }
 
-/// A run whose three side effects are counters rather than the machine.
 fn engines(directory: PathBuf) -> (Engines, Arc<AtomicUsize>) {
     let stops = Arc::new(AtomicUsize::new(0));
     let counted = Arc::clone(&stops);
@@ -47,7 +36,6 @@ fn engines(directory: PathBuf) -> (Engines, Arc<AtomicUsize>) {
     )
 }
 
-/// A run whose stop always fails, with the reason a case names.
 fn engines_that_cannot_stop(directory: PathBuf, why: String) -> Engines {
     Engines {
         directory,
@@ -57,7 +45,6 @@ fn engines_that_cannot_stop(directory: PathBuf, why: String) -> Engines {
     }
 }
 
-/// Put a finished install in place, the way a real one leaves it.
 fn install_tree(directory: &std::path::Path) -> PathBuf {
     let tree = directory.join("languagetool");
     std::fs::create_dir_all(tree.join("libs")).expect("the tree is created");
@@ -71,8 +58,6 @@ fn row<'a>(rows: &'a [EngineRow], slug: &str) -> &'a EngineRow {
         .unwrap_or_else(|| panic!("{slug} has a row"))
 }
 
-/// The acceptance criterion of the list: the state of the row is read from the
-/// disk it is about, and the entry file is what "installed" means.
 #[test]
 fn the_row_reports_what_the_directory_actually_holds() {
     let directory = scratch("states");
@@ -102,8 +87,6 @@ fn a_directory_without_the_server_jar_is_not_installed() {
     assert_eq!(row(&engines.list(), "languagetool").state, State::Absent);
 }
 
-/// An installed tree is the one this verb put there, so it never says the
-/// pacman package supplies it, whatever the machine running the test carries.
 #[test]
 fn an_installed_tree_never_claims_the_package_supplies_it() {
     let directory = scratch("from-package");
@@ -113,9 +96,6 @@ fn an_installed_tree_never_claims_the_package_supplies_it() {
     assert!(!row(&engines.list(), "languagetool").from_package);
 }
 
-/// The shell polls `engine list` while an install runs and reads
-/// `partialBytes`, so that number is the length of the `.part` file and
-/// nothing else.
 #[test]
 fn partial_bytes_is_the_length_of_the_part_file_and_zero_otherwise() {
     let directory = scratch("partial-bytes");
@@ -135,8 +115,6 @@ fn partial_bytes_is_the_length_of_the_part_file_and_zero_otherwise() {
     );
 }
 
-/// The row carries what the Settings view draws: the pinned size, the upstream
-/// licence, and the Java requirement the install cannot meet itself.
 #[test]
 fn the_row_carries_its_pinned_size_its_licence_and_the_java_requirement() {
     let (engines, _) = engines(scratch("pins"));
@@ -151,7 +129,6 @@ fn the_row_carries_its_pinned_size_its_licence_and_the_java_requirement() {
     assert!(languagetool.needs_java);
 }
 
-/// Remove deletes the tree this verb wrote and nothing else on the machine.
 #[test]
 fn remove_deletes_the_installed_tree_and_stops_the_unit() {
     let directory = scratch("remove");
@@ -174,8 +151,6 @@ fn remove_deletes_the_installed_tree_and_stops_the_unit() {
     );
 }
 
-/// Nothing on disk is nothing to stop: the unit is only in the way when a tree
-/// is actually going.
 #[test]
 fn remove_with_nothing_installed_stops_nothing_and_is_not_a_failure() {
     let (engines, stops) = engines(scratch("remove-absent"));
@@ -211,8 +186,6 @@ fn a_unit_that_was_not_running_does_not_keep_the_tree() {
     assert!(!tree.exists());
 }
 
-/// A stop that did not do its job is another matter: the server still holds
-/// the jars and would serve a tree that is no longer there.
 #[test]
 fn a_stop_that_failed_keeps_the_tree() {
     let directory = scratch("stop-failed");
@@ -233,7 +206,6 @@ fn a_stop_that_failed_keeps_the_tree() {
     assert!(tree.join(ENTRY).is_file(), "the tree is still there");
 }
 
-/// The unit `remove` stops is the LanguageTool one, and never another engine's.
 #[test]
 fn remove_stops_the_languagetool_unit_by_name() {
     let directory = scratch("unit-name");
@@ -261,8 +233,6 @@ fn remove_stops_the_languagetool_unit_by_name() {
     );
 }
 
-/// An engine with nothing to install is not a row, and the refusal names what
-/// this subcommand does know.
 #[test]
 fn an_engine_that_has_nothing_to_install_is_refused_by_name() {
     let (engines, _) = engines(scratch("unknown"));
@@ -280,8 +250,6 @@ fn an_engine_that_has_nothing_to_install_is_refused_by_name() {
     }
 }
 
-/// The list envelope is the shape spec section 5.4 fixes, so the shell reads
-/// one contract however it got the answer.
 #[test]
 fn the_list_envelope_carries_the_directory_and_the_free_space() {
     let directory = scratch("envelope");
@@ -298,7 +266,6 @@ fn the_list_envelope_carries_the_directory_and_the_free_space() {
     assert_eq!(json["engines"][0]["needsJava"], true);
 }
 
-/// A refusal is the shared error envelope of spec section 5.1 and exits 1.
 #[test]
 fn an_unknown_slug_is_bad_arguments() {
     let (engines, _) = engines(scratch("bad-slug"));

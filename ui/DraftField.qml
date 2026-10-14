@@ -12,8 +12,6 @@ import qs.Ui
 BorderSurface {
   id: root
 
-  // The Draft. The caller owns it, so a write from either side settles on the
-  // same string: the guard on each side stops the two from chasing each other.
   property string text: ""
   property string placeholderText: ""
   // The item whose `Keys.onPressed` runs the key map. The field forwards to it
@@ -49,7 +47,6 @@ BorderSurface {
     contentWidth: width
     contentHeight: editor.implicitHeight
 
-    // Keep the caret in the window as it walks out of either end.
     function reveal(rect) {
       if (rect.y < view.contentY) view.contentY = rect.y
       else if (rect.y + rect.height > view.contentY + view.height)

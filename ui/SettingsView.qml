@@ -5,16 +5,9 @@ import qs.Ui
 import "engines.js" as EnginesJs
 import "settings.js" as Settings
 
-// The Settings view of the quick popup, spec section 7. The gear in the hero
-// flips the card to it and back.
-//
-// The view draws the stored Settings and reports one changed key at a time.
-// Storage lives in Overlay.qml, which is the only thing that touches
-// `shell.json`. There is no Save button: every control persists on change.
 ColumnLayout {
   id: root
 
-  // The stored values, already resolved through the spec section 7 defaults.
   property string nativeLanguage: "none"
   property string targetEnglish: "en-US"
   property string engine: "harper"
@@ -22,8 +15,6 @@ ColumnLayout {
   property string quickHotkey: "SUPER + SHIFT + Q"
   property string composeHotkey: "SUPER + ALT + Q"
 
-  // The Engines list of spec section 5.4. Everything it needs arrives from
-  // Overlay.qml, which is the only thing that runs `grammachy engine`.
   property var engines: []
   property string engineBusy: ""
   property double engineBusyBytes: 0
@@ -32,8 +23,6 @@ ColumnLayout {
   property string enginesDirectory: ""
   property double enginesFreeBytes: 0
   property var engineNote: null
-  // The dependency table of spec section 10, so a row that needs a system
-  // package can name it.
   property var dependencies: []
 
   signal settingChanged(string name, var value)
@@ -175,8 +164,6 @@ ColumnLayout {
     }
   }
 
-  // Spec section 6 words the hint, because Replace only reaches a Selection
-  // that is still highlighted in the window it came from.
   Toggle {
     Layout.fillWidth: true
     label: "Auto-replace"
@@ -186,9 +173,6 @@ ColumnLayout {
     onClicked: root.settingChanged("autoReplace", !root.autoReplace)
   }
 
-  // Spec section 5.4: the optional engine components this machine keeps. It is
-  // drawn whatever engine is selected, because the whole point is to add one
-  // the dropdown above cannot offer yet.
   EnginesView {
     Layout.fillWidth: true
 

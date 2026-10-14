@@ -14,8 +14,6 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # `cli/tests/overlay_limit.rs` runs `ui/capture.js` and `ui/limits.js`
-      # under node, because those files own the shell-side copy of a limit.
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
@@ -40,8 +38,6 @@ jobs:
     name: Plugin
     runs-on: ubuntu-latest
     env:
-      # The shell modules the QML imports and the manifest validator both come
-      # from the Omarchy release the plugin is built against.
       OMARCHY_REF: v4.0.0
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

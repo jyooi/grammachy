@@ -1,18 +1,4 @@
 #!/usr/bin/env bash
-# Bumps cli.lock to one tag's release asset, spec section 10.
-#
-# A release is two commits: the tag CI builds, then this bump. Run it after
-# CI has finished building the tag, with the tag itself as the one argument:
-#
-#   bin/release-lock.sh v0.1.0
-#
-# It downloads grammachy-x86_64-linux for that tag, checks the build
-# provenance that the release workflow attested for it, then hashes and
-# measures it and rewrites cli.lock with the version, the sha256, and the
-# sizeBytes, so the bump commit is mechanical. The provenance check is what
-# ties the pinned hash to the tag's source commit and to the release
-# workflow: an asset with no attestation, or one attested from another
-# ref, leaves cli.lock untouched.
 set -euo pipefail
 
 if [[ $# -ne 1 ]]; then

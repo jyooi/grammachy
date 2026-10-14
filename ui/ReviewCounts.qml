@@ -1,9 +1,6 @@
 import QtQuick
 import qs.Commons
 
-// The three counts on the leading edge of the footer, spec section 6. Compose
-// keeps the same footer, spec section 9, so the counts live here rather than
-// in either card.
 Row {
   id: root
 

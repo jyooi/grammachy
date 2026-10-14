@@ -1,9 +1,3 @@
-//! `grammachy setup` and `grammachy setup --remove`, spec section 10.
-//!
-//! Every case works on copies of the two configuration files in a temporary
-//! directory under `CARGO_TARGET_TMPDIR`, never on the real ones. No case
-//! reloads a compositor: the reload is a value the test hands in.
-
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -11,11 +5,9 @@ use std::sync::Arc;
 use grammachy::setup::bindings::Hotkeys;
 use grammachy::setup::{Setup, SetupEnvelope, SetupReport, State, Step};
 
-/// The files a fresh Omarchy install carries, as this repository keeps them.
 const BINDINGS_FIXTURE: &str = include_str!("fixtures/config/bindings.lua");
 const MENU_FIXTURE: &str = include_str!("fixtures/config/omarchy-menu.jsonc");
 
-/// One run's own copy of both files, removed with the target directory.
 struct Home {
     bindings: PathBuf,
     menu: PathBuf,
@@ -40,12 +32,10 @@ impl Home {
         }
     }
 
-    /// A setup whose reload only counts, on the default hotkeys.
     fn setup(&self) -> Setup {
         self.setup_with_hotkeys(Hotkeys::default())
     }
 
-    /// A setup whose reload only counts, on the hotkeys given.
     fn setup_with_hotkeys(&self, hotkeys: Hotkeys) -> Setup {
         let reloads = Arc::clone(&self.reloads);
         Setup {

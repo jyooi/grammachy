@@ -1,5 +1,3 @@
-// The freshness rule of the capture, spec section 3.
-//
 // Loaded twice: by Overlay.qml through `import "capture.js" as Capture`, and
 // by `capture.test.js` under node. Nothing here may touch a QML or a node API,
 // because each side only has one of them.
@@ -9,14 +7,8 @@
 // summon before it. The Ctrl + C fallback of step 2 has the same shape: a
 // keystroke that copies nothing leaves the clipboard as it was, and what the
 // shell reads back is then the clipboard rather than a Selection.
-//
-// This file owns both answers. The overlay owns the processes, the kept
-// record, and the card.
 
-// The one line the empty state prints, spec sections 3 and 6.
 var NOTHING_NEW = "No new selection. Highlight text and press SUPER + SHIFT + Q, or paste here."
-// The secondary button beside it, which runs the Check on the kept text with
-// no second capture.
 var CHECK_LAST_AGAIN = "Check last text again"
 
 // The record the overlay keeps of the last consumed capture: the exact text
@@ -29,9 +21,6 @@ function kept(text, address) {
   }
 }
 
-// A capture is stale when it is the text the last consumed capture held and it
-// came from the same window. The same words highlighted in another window are
-// a fresh Selection, and so is any other text in the same one.
 function isStale(text, address, last) {
   if (!last || typeof last.text !== "string" || last.text.length === 0) return false
   if (typeof text !== "string" || text.length === 0) return false
@@ -65,7 +54,6 @@ function copiedNothing(before, after) {
 // Text past the cap therefore reaches the oversize-Draft refusal of
 // `Overlay.qml` rather than a silent cut.
 var PASTE_LIMIT_BYTES = 1048576
-// How long `wl-paste` may wait on a selection owner that does not answer.
 var PASTE_TIMEOUT_SECONDS = 5
 
 // The command that reads one selection within the bounds above. `timeout`
@@ -97,7 +85,6 @@ function utf8Bytes(text) {
     if (code < 0x80) bytes += 1
     else if (code < 0x800) bytes += 2
     else if (code >= 0xd800 && code <= 0xdbff) {
-      // A surrogate pair is one four-byte character.
       bytes += 4
       index += 1
     } else bytes += 3

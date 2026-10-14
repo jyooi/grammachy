@@ -1,11 +1,3 @@
-//! Match to Issue mapping, spec section 5.1.
-//!
-//! `languagetool-response.json` is a verbatim recording of LanguageTool 6.6
-//! answering `/v2/check` for [`ORDERING_TEXT`]. `languagetool-ordering.json`
-//! holds the same three matches out of order plus a few added ones, marked
-//! `_added`, for the ordering rules that sentence did not trigger. Both run
-//! without a server.
-
 use grammachy::engines::languagetool::response::{issues_from, CheckResponse};
 use grammachy::envelope::{Category, Issue};
 
@@ -22,7 +14,6 @@ fn ordering_issues() -> Vec<Issue> {
     issues_from(ORDERING_TEXT, &response("languagetool-ordering.json"))
 }
 
-/// The three Issues of the recording, in the order the envelope carries them.
 #[test]
 fn the_recorded_answer_maps_to_its_three_issues() {
     let issues = issues_from(ORDERING_TEXT, &response("languagetool-response.json"));
@@ -40,7 +31,6 @@ fn the_recorded_answer_maps_to_its_three_issues() {
         "Possible agreement error. The noun \u{2018}book\u{2019} seems to be countable."
     );
 
-    // Forty suggestions, and only the first one is the fix.
     assert_eq!(issues[1].original, "teh");
     assert_eq!(issues[1].fix, "the");
     assert_eq!(issues[1].category, Category::Spelling);
@@ -71,7 +61,6 @@ fn an_overlapping_match_loses_to_the_earlier_issue() {
 
     assert!(!rule_ids.contains(&"OVERLAPPING_SAME_START"));
     assert!(!rule_ids.contains(&"OVERLAPPING_LATER_START"));
-    // No Issue may reach into the next one.
     for pair in issues.windows(2) {
         assert!(pair[0].end <= pair[1].start, "{pair:?} overlap");
     }
@@ -110,7 +99,6 @@ fn the_first_suggestion_is_the_fix_and_the_slice_is_the_original() {
     assert_eq!(issues[0].category, Category::Grammar);
     assert_eq!(issues[0].rule_id.as_deref(), Some("CD_NN"));
 
-    // The typo offers forty suggestions; the first one wins.
     assert_eq!(issues[1].original, "teh");
     assert_eq!(issues[1].fix, "the");
     assert_eq!(issues[1].category, Category::Spelling);
@@ -129,7 +117,6 @@ fn the_reason_is_prose_without_the_rule_id() {
     }
 }
 
-/// The guarantee the shell relies on: `text.slice(start, end) === original`.
 fn slice_holds(text: &str, issues: &[Issue]) {
     let units: Vec<u16> = text.encode_utf16().collect();
     for issue in issues {
@@ -145,8 +132,6 @@ fn every_span_slices_back_to_its_original() {
 
 #[test]
 fn a_span_after_a_surrogate_pair_counts_two_units_for_it() {
-    // The astral character is two UTF-16 units but four bytes, so "go" sits at
-    // UTF-16 offset 6 and byte offset 8.
     let text = "\u{1F600} He go home.";
     let response: CheckResponse = serde_json::from_str(
         r#"{"matches":[{"message":"Agreement error.","offset":6,"length":2,
@@ -189,7 +174,6 @@ fn a_span_past_the_end_is_dropped() {
 
 #[test]
 fn crlf_line_endings_keep_the_spans_honest() {
-    // Each "\r\n" is two UTF-16 units, so the second line starts at 15.
     let text = "He go home.\r\n\r\nShe have a cat.";
     assert_eq!(text.encode_utf16().count(), 30);
 

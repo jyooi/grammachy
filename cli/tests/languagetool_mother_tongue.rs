@@ -1,9 +1,3 @@
-//! The `motherTongue` the LanguageTool adapter puts on the wire, spec section 4.
-//!
-//! Each case runs one real Check against a stub server that records the
-//! request body, so the assertion is about what LanguageTool receives and not
-//! about an internal helper. No case starts a systemd unit.
-
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::mpsc::{channel, Receiver};
@@ -14,7 +8,6 @@ use grammachy::args::{CheckOptions, NativeLanguage};
 use grammachy::engine::Engine;
 use grammachy::engines::languagetool::{Config, Endpoint, LanguageTool};
 
-/// A stub that answers "no matches" and hands the request body back.
 struct Recorder {
     address: String,
     bodies: Receiver<String>,
@@ -48,7 +41,6 @@ impl Recorder {
         Recorder { address, bodies }
     }
 
-    /// Run one Check and answer the form body the adapter sent.
     fn record(&self, text: &str, native: NativeLanguage) -> String {
         let adapter = LanguageTool::new(Config {
             endpoint: Endpoint::fixed(&self.address).expect("the stub is on loopback"),
@@ -68,7 +60,6 @@ impl Recorder {
     }
 }
 
-/// Read the headers, then exactly the announced body.
 fn read_request(stream: &mut TcpStream) -> String {
     let mut reader = BufReader::new(stream);
     let mut length = 0usize;
@@ -92,7 +83,6 @@ fn read_request(stream: &mut TcpStream) -> String {
     String::from_utf8(body).expect("the body is UTF-8")
 }
 
-/// The `motherTongue` field of one recorded form body, or `None`.
 fn mother_tongue_of(body: &str) -> Option<String> {
     body.split('&')
         .find_map(|field| field.strip_prefix("motherTongue="))

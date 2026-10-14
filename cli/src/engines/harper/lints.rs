@@ -11,11 +11,6 @@ use crate::envelope::{Category, Issue};
 use crate::issues::normalise;
 use crate::text::utf16_offsets;
 
-/// Lint kinds that report style rather than a mistake.
-///
-/// Depth in v1 is grammar and spelling only and the user's voice is kept, so
-/// these are reported to nobody (spec section 1). The list mirrors the style
-/// filter of the LanguageTool adapter.
 const STYLE_KINDS: [LintKind; 5] = [
     LintKind::Enhancement,
     LintKind::Formatting,
@@ -72,11 +67,6 @@ fn utf16_span(offsets: &[usize], span: Span<char>) -> Option<(usize, usize)> {
     Some((*offsets.get(span.start)?, *offsets.get(span.end)?))
 }
 
-/// Turn one lint into an Issue, or drop it.
-///
-/// A lint is dropped when it is style, when its span does not address the
-/// checked text, or when it carries no suggestion. A suggestion that changes
-/// nothing is dropped by [`normalise`].
 fn issue_of(offsets: &[usize], characters: &[char], lint: &Lint) -> Option<Issue> {
     let category = category_of(lint.lint_kind)?;
     let (start, end) = utf16_span(offsets, lint.span)?;

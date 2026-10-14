@@ -71,7 +71,6 @@ pub const SHA256_ENV: &str = "GRAMMACHY_ENGINE_SHA256";
 /// hundreds of megabytes a real row asks for. Not a user-facing setting.
 pub const SIZE_ENV: &str = "GRAMMACHY_ENGINE_SIZE_BYTES";
 
-/// Where the upstream release comes from.
 const DEFAULT_BASE_URL: &str = "https://languagetool.org";
 
 /// One optional component the Settings view offers.
@@ -87,37 +86,20 @@ struct CatalogueRow {
     slug: &'static str,
     name: &'static str,
     version: &'static str,
-    /// The path under the base URL, without a leading slash.
     path: &'static str,
     archive_name: &'static str,
     sha256: &'static str,
     size_bytes: u64,
-    /// What the unpacked tree takes, so the free-space check measures the peak
-    /// of the install rather than the archive alone.
     installed_bytes: u64,
-    /// How many members the central directory of the archive lists.
     members: u64,
-    /// What those members unpack to, added together. The unpack refuses an
-    /// archive that says it holds more.
     unpacked_bytes: u64,
     licence: &'static str,
     directory_name: &'static str,
     entry: &'static str,
-    /// The transient user unit this component's server runs in, so `remove`
-    /// stops the right one without a second table to keep in step.
     unit: &'static str,
     needs_java: bool,
 }
 
-/// The `languagetool` row, pinned from an unauthenticated request to
-/// `languagetool.org` on 2026-08-27.
-///
-/// The digest is the one the Arch `languagetool` 6.6-2 package pins for the
-/// same file, so two independent parties name the same bytes. `installed_bytes`
-/// is that package's installed size, which is the unpacked tree: the archive is
-/// jars, which barely compress, so the tree is not much larger than the zip.
-/// `members` and `unpacked_bytes` are read from the central directory of the
-/// pinned archive on 2026-09-02.
 const CATALOGUE: &[CatalogueRow] = &[CatalogueRow {
     slug: "languagetool",
     name: "LanguageTool",
@@ -168,8 +150,6 @@ pub fn release(slug: &str) -> Option<Release> {
         .ok()
         .and_then(|value| value.trim().parse::<u64>().ok())
         .unwrap_or(row.size_bytes);
-    // One seam moves both numbers, because a test that shrinks the archive to
-    // a handful of bytes wants the whole free-space question shrunk with it.
     let installed_bytes = match std::env::var(SIZE_ENV) {
         Ok(value) if value.trim().parse::<u64>().is_ok() => size_bytes,
         _ => row.installed_bytes,
@@ -238,11 +218,6 @@ pub fn installed(slug: &str) -> Option<PathBuf> {
     path.join(row.entry).is_file().then_some(path)
 }
 
-/// The three paths one row owns in one directory: the installed tree, the
-/// archive being fetched, and the directory the archive unpacks into.
-///
-/// All three verbs agree on them, so what Install writes, what the state is
-/// read from, and what Remove deletes can never drift apart.
 fn paths(directory: &Path, slug: &str, release: &Release) -> Paths {
     Paths {
         tree: directory.join(slug),
@@ -287,8 +262,6 @@ impl Engines {
             .collect()
     }
 
-    /// The row one slug has right now, or `None` for a slug that is not a
-    /// component at all.
     fn row(&self, slug: &str) -> Option<EngineRow> {
         let row = row_of(slug)?;
         let release = release(slug)?;
@@ -308,10 +281,6 @@ impl Engines {
             State::Absent
         };
 
-        // The installed tree first, because it is the one this verb put there
-        // and the one `remove` acts on. A row the pacman package supplies and
-        // this verb did not names that launcher instead, so the Settings view
-        // can say the component is reachable without offering to remove it.
         let path = if here {
             paths.tree.display().to_string()
         } else {
@@ -325,8 +294,6 @@ impl Engines {
             name: row.name.to_string(),
             version: row.version.to_string(),
             state,
-            // Spec section 5.3: the length of the `.part` file, and `0` for
-            // any other state.
             partial_bytes: match state {
                 State::Partial => partial_bytes.unwrap_or(0),
                 _ => 0,
@@ -352,7 +319,6 @@ impl Engines {
             return self.finished_row(slug);
         }
 
-        // Nothing is written to a path that was not looked at first.
         guard::private_directory(&self.directory).map_err(Failure::DownloadFailed)?;
         guard::plain_file_or_absent(&paths.partial).map_err(Failure::DownloadFailed)?;
         guard::plain_file_or_absent(&paths.archive).map_err(Failure::DownloadFailed)?;
@@ -382,7 +348,6 @@ impl Engines {
             )));
         }
 
-        // The transfer appends to a file this process made.
         guard::create_if_absent(&paths.partial).map_err(Failure::DownloadFailed)?;
 
         match (self.download)(&release.url, &paths.partial, release.size_bytes)
@@ -518,8 +483,6 @@ impl Engines {
         self.report("list", self.list())
     }
 
-    /// Every verb answers the same shape, so one answer refreshes the list
-    /// however the shell got it.
     fn report(&self, verb: &'static str, engines: Vec<EngineRow>) -> EngineEnvelope {
         EngineEnvelope::report(EngineReport {
             contract_version: crate::envelope::CONTRACT_VERSION,
@@ -557,7 +520,6 @@ pub fn run(verb: &EngineVerb) -> EngineEnvelope {
     match verb {
         EngineVerb::List => engines.list_envelope(),
         EngineVerb::Install(EngineNameArgs { slug }) => {
-            // Only a transfer can be cancelled, so only a transfer listens.
             cancel::listen();
             match engines.install(slug) {
                 Ok(row) => engines.report("install", vec![row]),
@@ -605,8 +567,6 @@ mod tests {
         }
     }
 
-    /// The dropdown of spec section 7 asks this before it asks the disk, so an
-    /// engine with nothing to install must never look like one that is absent.
     #[test]
     fn only_languagetool_is_a_component() {
         assert!(is_component("languagetool"));

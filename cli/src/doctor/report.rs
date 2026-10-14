@@ -146,7 +146,6 @@ impl Report {
     }
 }
 
-/// Every piece spec section 10 names, in the order the report prints them.
 fn build_checks(facts: &Facts) -> Vec<Check> {
     vec![
         binary_check(facts),
@@ -210,9 +209,6 @@ fn languagetool_check(facts: &Facts) -> Check {
             state: Some(LANGUAGETOOL_INSTALLED),
             engines: vec!["languagetool"],
         },
-        // The package is a LanguageTool this project did not put there, so the
-        // line says where it came from: Remove in Settings would not take it
-        // off the machine.
         (None, Some(path)) => Check {
             id: "languagetool",
             name: "LanguageTool",
@@ -227,13 +223,9 @@ fn languagetool_check(facts: &Facts) -> Check {
             id: "languagetool",
             name: "LanguageTool",
             ok: false,
-            // Nobody asked for this engine, so nothing about this machine is
-            // wrong. Only a Check on `languagetool` turns the line into a
-            // refusal, which `ok` still does.
             optional: true,
             detail: "LanguageTool is optional and is not installed. Add it in Settings, Engines."
                 .to_string(),
-            // No sudo: the install writes one directory under HOME.
             remedy: Some(LANGUAGETOOL_INSTALL_COMMAND.to_string()),
             state: Some(LANGUAGETOOL_ABSENT),
             engines: vec!["languagetool"],
@@ -254,12 +246,6 @@ pub const LANGUAGETOOL_ABSENT: &str = "absent";
 /// The one command that adds LanguageTool, named by every line that offers it.
 pub const LANGUAGETOOL_INSTALL_COMMAND: &str = "grammachy engine install languagetool";
 
-/// The Java runtime, which only LanguageTool needs.
-///
-/// A machine that has no LanguageTool has no use for Java either, so a missing
-/// runtime there is optional for the same reason the component is. Once
-/// LanguageTool is on the machine a missing runtime is a real fault, because
-/// the server cannot start without one.
 fn java_check(facts: &Facts) -> Check {
     match &facts.java {
         Some(path) => Check {
@@ -288,7 +274,6 @@ fn java_check(facts: &Facts) -> Check {
     }
 }
 
-/// A stopped unit is not a fault: the next Check starts it (spec section 4).
 fn unit_check(
     id: &'static str,
     name: &'static str,
@@ -330,7 +315,6 @@ fn unit_check(
     }
 }
 
-/// The one line the `engine_unavailable` card shows under its body.
 fn diagnose(checks: &[Check], facts: &Facts, engine: EngineSlug) -> String {
     if let Some(failed) = checks
         .iter()
@@ -342,7 +326,6 @@ fn diagnose(checks: &[Check], facts: &Facts, engine: EngineSlug) -> String {
     ready_line(facts, engine)
 }
 
-/// What to say when nothing is missing.
 fn ready_line(facts: &Facts, engine: EngineSlug) -> String {
     match engine {
         EngineSlug::Harper => {

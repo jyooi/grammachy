@@ -1,11 +1,3 @@
-// Node tests for the popup placement and the Replace target. Spec sections
-// 3, 6, and 13.
-// Run with `node --test ui/anchor.test.js`.
-//
-// The last block runs a stub `hyprctl` through the two steps `Overlay.qml`
-// runs before it types anything. A stub is the only safe seam here: a test
-// must never move the focus of the desktop it runs on.
-
 const test = require("node:test")
 const assert = require("node:assert/strict")
 const fs = require("node:fs")
@@ -27,16 +19,12 @@ const {
   placeCard
 } = require("./anchor.js")
 
-// One monitor of the machine this ticket was found on: 2400 by 1350 logical
-// pixels with a 24 pixel bar, and a second monitor beside it at x 2400.
 const BOUNDS = { width: 2400, height: 1350 }
 const ORIGIN = { x: 0, y: 0 }
 const CARD = { width: 680, height: 340 }
 const BAR = { position: "top", size: 24 }
 const GAP = 20
 
-// The two windows of the reproduction: the source on the left half, and
-// another one filling the trailing half up to the top-right corner.
 const LEFT = { address: "0x1a", x: 12, y: 36, width: 1181, height: 1302 }
 const RIGHT = { address: "0x2b", x: 1207, y: 36, width: 1181, height: 1302 }
 
@@ -51,8 +39,6 @@ function place(overrides) {
   }, overrides || {}))
 }
 
-// The region a card may occupy, worked out here rather than read from the
-// module, so the tests fail when the module changes its mind about it.
 function region(bar) {
   const position = bar.position
   return {
@@ -74,17 +60,10 @@ function assertOnScreen(placement, bar, card) {
     "the card ends above the region floor: " + (placement.y + size.height))
 }
 
-// --------------------------------------------------------------- adjacency
-
-// The card takes the window's top edge, held out of the bar's own strip. A
-// tiled window sits closer to the bar than a card is allowed to, so the two
-// agree only once the window starts below the region.
 function topFor(window) {
   return Math.max(region(BAR).top, window.y)
 }
 
-// The bug this ticket is about: the card opened in the bar corner however far
-// that was from the window the Selection came from.
 test("the card opens on the trailing side of the source window, at its top", () => {
   const placement = place({ window: LEFT })
   assert.equal(placement.mode, ADJACENT)
@@ -114,16 +93,12 @@ test("a window with no room on either side holds the card inside itself", () => 
   assertOnScreen(placement)
 })
 
-// A window narrower than the card leaves the leading side short too, so the
-// card overlays it rather than running off the screen.
 test("a narrow window against the leading edge still keeps the card on screen", () => {
   const narrow = { address: "0x4d", x: 0, y: 200, width: 1900, height: 900 }
   const placement = place({ window: narrow })
   assert.equal(placement.mode, INSIDE)
   assertOnScreen(placement)
 })
-
-// ------------------------------------------------------------------ clamp
 
 test("a window under the bar never pushes the card over it", () => {
   const placement = place({ window: { address: "0x5e", x: 12, y: 0, width: 900, height: 600 } })
@@ -137,8 +112,6 @@ test("a window near the floor never pushes the card off the bottom", () => {
   assertOnScreen(placement)
 })
 
-// Every bar position takes its own strip out of the region, and no window may
-// put the card into it.
 test("the card stays inside the region for every bar position", () => {
   for (const position of ["top", "bottom", "left", "right"]) {
     const bar = { position: position, size: 24 }
@@ -157,8 +130,6 @@ test("the card stays inside the region for every bar position", () => {
   }
 })
 
-// A card taller or wider than the region has nowhere to fit. It is held to the
-// near edge, because a card that starts off screen shows nothing at all.
 test("a card larger than the region starts at the near edge", () => {
   const huge = { width: 3000, height: 2000 }
   const placement = placeCard({
@@ -168,10 +139,6 @@ test("a card larger than the region starts at the near edge", () => {
   assert.equal(placement.y, region(BAR).top)
 })
 
-// --------------------------------------------------------------- fallback
-
-// The desktop: nothing was focused, so there is nothing to open beside and the
-// bar corner is what is left. This is the placement the popup always had.
 test("no source window keeps the bar corner, for every bar position", () => {
   const wanted = {
     top: { x: BOUNDS.width - CARD.width - GAP, y: GAP + 24 },
@@ -190,15 +157,12 @@ test("no source window keeps the bar corner, for every bar position", () => {
   }
 })
 
-// The overlay covers one monitor. A window on the other one is as good as no
-// window: there is nothing on this surface to open beside.
 test("a window on another monitor falls back to the bar corner", () => {
   const other = { address: "0x8a", x: 2412, y: 36, width: 1181, height: 1302 }
   const placement = place({ window: other })
   assert.equal(placement.mode, FALLBACK)
 })
 
-// The same window, seen from the overlay that covers that other monitor.
 test("the surface origin is what puts a window on this monitor", () => {
   const other = { address: "0x8a", x: 2412, y: 36, width: 1181, height: 1302 }
   const placement = place({ window: other, origin: { x: 2400, y: 0 } })
@@ -207,8 +171,6 @@ test("the surface origin is what puts a window on this monitor", () => {
   assert.equal(placement.y, region(BAR).top)
   assertOnScreen(placement)
 })
-
-// ------------------------------------------------- reading the compositor
 
 test("an activewindow answer reads as the window that held the Selection", () => {
   const window = readActiveWindow(JSON.stringify({
@@ -252,7 +214,6 @@ test("the focus dispatch names the window by address, in the Lua the shell takes
   ])
 })
 
-// Nothing but a compositor-shaped address reaches that Lua.
 test("anything that is not an address dispatches nothing", () => {
   for (const address of ["", "0x", "window", '0x1a" }) os.execute("boom', "0x1a 0x2b", null, undefined]) {
     assert.deepEqual(focusCommand(address), [], JSON.stringify(address))
@@ -268,18 +229,8 @@ test("the focus is verified against the address that was asked for", () => {
   assert.equal(isFocused(answer, ""), false)
 })
 
-// ------------------------------------------- the Replace, spec section 6
-//
-// The stub below is a `hyprctl` that keeps its own idea of which window has
-// the keyboard, so the two steps below are the route from one Apply to either
-// a paste or the notice. It records every call, which is what says the ask
-// came before the check and the check before the type.
-
 const stubDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "grammachy-anchor-"))
 
-// A `hyprctl` that answers `activewindow -j` from a state file and moves that
-// state on a `dispatch` naming a window it knows about. `alive` is the list of
-// addresses the compositor still has.
 function hyprctlStub(name, focused, alive) {
   const state = path.join(stubDirectory, name + ".state")
   const log = path.join(stubDirectory, name + ".log")
@@ -320,10 +271,6 @@ function calls(stub) {
   return fs.readFileSync(stub.log, "utf8").split("\n").filter(line => line.length > 0)
 }
 
-// The Replace of spec section 6, driven in the order `Overlay.qml` drives it:
-// the popup is already closed and the Corrected text is already on the
-// clipboard, so what is left is the ask, the check, and the type.
-// `cli/tests/overlay_anchor.rs` is what keeps `Overlay.qml` on these steps.
 function replaceInto(stub, sourceWindow) {
   const run = { pasted: false, notice: null }
   const address = windowAddress(sourceWindow)
@@ -345,8 +292,6 @@ function replaceInto(stub, sourceWindow) {
   return run
 }
 
-// The acceptance criterion: another window has the keyboard when the card
-// closes, and the paste still lands in the window the Selection came from.
 test("Replace asks for the source window and only types once it has it", () => {
   const stub = hyprctlStub("source-alive", RIGHT.address, [LEFT.address, RIGHT.address])
   const run = replaceInto(stub, LEFT)
@@ -359,8 +304,6 @@ test("Replace asks for the source window and only types once it has it", () => {
   ])
 })
 
-// Spec section 6: nothing is typed into a window that never held the
-// Selection, and the Corrected text is on the clipboard either way.
 test("a source window that is gone gets the notice and no paste at all", () => {
   const stub = hyprctlStub("source-gone", RIGHT.address, [RIGHT.address])
   const run = replaceInto(stub, LEFT)
@@ -368,15 +311,12 @@ test("a source window that is gone gets the notice and no paste at all", () => {
   assert.equal(run.pasted, false)
   assert.equal(run.notice.title, "The source window closed")
   assert.ok(run.notice.body.indexOf("clipboard") !== -1, run.notice.body)
-  // The ask went out and was answered before anything decided not to type.
   assert.deepEqual(calls(stub), [
     'dispatch hl.dsp.focus({ window = "address:0x1a" })',
     "activewindow -j"
   ])
 })
 
-// Nothing was focused at capture time, so there is no window to ask for and
-// no promise to keep. The paste goes out as it always did.
 test("no source window at capture leaves the paste as it was", () => {
   const stub = hyprctlStub("no-source", "", [])
   const run = replaceInto(stub, null)

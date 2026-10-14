@@ -35,7 +35,6 @@ pub enum Transfer {
 /// covered without reaching the network.
 pub type Downloader = Box<dyn Fn(&str, &Path, u64) -> Result<Transfer, String> + Send + Sync>;
 
-/// How long curl may spend on connecting.
 pub const CONNECT_TIMEOUT_SECONDS: u64 = 30;
 
 /// The wall clock of one curl attempt. An attempt that runs out of it keeps
@@ -56,16 +55,12 @@ pub const STALL_SECONDS: u64 = 30;
 /// uses.
 pub type Stopper = Box<dyn Fn(&str) -> Result<(), String> + Send + Sync>;
 
-/// Keeps a stop from reaching the real unit. Tests and CI set it to `never`.
-/// Not a user-facing setting.
 pub const STOP_ENV: &str = "GRAMMACHY_ENGINE_STOP";
 
-/// The downloader this run uses.
 pub fn downloader() -> Downloader {
     Box::new(curl)
 }
 
-/// How often a running transfer is asked whether a cancel has arrived.
 const POLL_MS: u64 = 100;
 
 /// Fetch one URL into one path, resuming a `.part` file that is already there.
@@ -77,7 +72,6 @@ pub fn curl(url: &str, path: &Path, max_bytes: u64) -> Result<Transfer, String> 
     let mut child = Command::new("curl")
         .arg("--fail")
         .arg("--location")
-        // https on the first request and on every redirect, nothing else.
         .arg("--proto")
         .arg("=https")
         .arg("--proto-redir")
@@ -91,8 +85,6 @@ pub fn curl(url: &str, path: &Path, max_bytes: u64) -> Result<Transfer, String> 
         .arg(STALL_BYTES_PER_SECOND.to_string())
         .arg("--speed-time")
         .arg(STALL_SECONDS.to_string())
-        // The pinned size bounds the response. A resume asks for the rest of
-        // the file, which is smaller still.
         .arg("--max-filesize")
         .arg(max_bytes.to_string())
         .arg("--retry")
@@ -140,7 +132,6 @@ pub fn curl(url: &str, path: &Path, max_bytes: u64) -> Result<Transfer, String> 
     }
 }
 
-/// The unit stopper this run uses.
 pub fn stopper() -> Stopper {
     if std::env::var_os(STOP_ENV).is_some_and(|value| value == "never") {
         return Box::new(|_unit| Ok(()));
@@ -182,11 +173,6 @@ pub fn stop_unit(unit: &str) -> Result<(), String> {
     ))
 }
 
-/// Whether one stop failure says the unit was not running.
-///
-/// A caller that only needs the unit gone has what it wanted here, so this is
-/// the one stop failure it may pass. Anything else is a stop that did not do
-/// its job.
 pub fn stop_found_nothing_to_stop(why: &str) -> bool {
     why.contains(NOT_LOADED)
 }
@@ -243,7 +229,6 @@ pub(crate) fn promote(
     })
 }
 
-/// Delete a whole and wrong `.part` file, and say what the next download does.
 pub(crate) fn remove_wrong_partial(partial: &Path) -> String {
     match std::fs::remove_file(partial) {
         Ok(()) => format!(
@@ -281,9 +266,6 @@ mod tests {
         assert!(!partial.exists());
     }
 
-    /// A whole file that is not the pinned one cannot be resumed into the right
-    /// one, so it goes and the next download starts over. A cancel is the other
-    /// case and keeps its `.part` file.
     #[test]
     fn a_mismatched_digest_removes_the_part_file() {
         let directory = scratch("digest-mismatch");
@@ -303,8 +285,6 @@ mod tests {
         assert!(!partial.exists(), "the wrong bytes were deleted");
     }
 
-    /// A wrong length is refused before the digest runs, and the file goes
-    /// the same way a wrong digest does.
     #[test]
     fn a_wrong_size_is_refused_before_the_digest() {
         let directory = scratch("size-mismatch");

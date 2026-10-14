@@ -1,20 +1,8 @@
-//! Where the quick popup opens and where Replace types, spec sections 3 and 6.
-//!
-//! `ui/anchor.test.js` runs the arithmetic and drives the Replace against a
-//! stub `hyprctl`, but it drives the steps itself: they are only the right
-//! steps if `Overlay.qml` takes them in the same order. The overlay cannot be
-//! instantiated outside the shell's plugin loader, so this test reads the file
-//! the shell ships and holds those calls in place, the way `overlay_chunks.rs`
-//! holds the chunked Check in place.
-//!
-//! No test here reads the machine, moves the focus, or types anything.
-
 fn read(relative: &str) -> String {
     let path = format!("{}/../{relative}", env!("CARGO_MANIFEST_DIR"));
     std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("{relative} is readable: {error}"))
 }
 
-/// The body of one `function <name>(...)` in a QML or JavaScript file.
 fn function_body(source: &str, name: &str) -> String {
     let needle = format!("function {name}(");
     let start = source
@@ -74,9 +62,6 @@ fn the_capture_reads_the_source_window_before_it_takes_the_selection() {
     );
 }
 
-/// The bug: the card hung off the bar corner from `barPosition` and `barSize`
-/// alone, however far that was from the text. It is placed beside the source
-/// window now, and one pure function decides that.
 #[test]
 fn the_quick_card_is_placed_from_the_source_window() {
     let source = read("Overlay.qml");
@@ -93,8 +78,6 @@ fn the_quick_card_is_placed_from_the_source_window() {
         source.contains("x: card.placement.x") && source.contains("y: card.placement.y"),
         "the card reads both coordinates from that one answer"
     );
-    // The old corner arithmetic must not survive beside the new placement, or
-    // one of the two silently wins.
     for corner in [
         "parent.width - card.width - root.gap",
         "parent.height - card.height - root.gap",
@@ -114,7 +97,6 @@ fn the_quick_card_is_placed_from_the_source_window() {
     );
 }
 
-/// Spec section 9: Compose is centred and knows nothing about a source window.
 #[test]
 fn the_compose_card_stays_centred() {
     let source = read("Overlay.qml");
@@ -140,7 +122,6 @@ fn the_compose_card_stays_centred() {
 fn replace_asks_for_the_source_window_before_it_types() {
     let source = read("Overlay.qml");
 
-    // The timer that waits out the layer surface no longer types by itself.
     let timer = source
         .find("id: pasteTimer")
         .expect("the overlay waits before it pastes");
@@ -185,8 +166,6 @@ fn replace_asks_for_the_source_window_before_it_types() {
     );
 }
 
-/// Spec section 6: the Corrected text is on the clipboard either way, so a
-/// source window that closed is a notice and never a keystroke somewhere else.
 #[test]
 fn a_source_window_that_is_gone_is_a_notice_and_not_a_paste() {
     let source = read("Overlay.qml");
@@ -206,8 +185,6 @@ fn a_source_window_that_is_gone_is_a_notice_and_not_a_paste() {
     );
 }
 
-/// A missing `hyprctl` must not leave the Apply half done: the capture goes on
-/// without a source window, and the Replace refuses rather than hanging.
 #[test]
 fn a_compositor_that_never_answers_still_ends_the_apply() {
     let source = read("Overlay.qml");
@@ -230,8 +207,6 @@ fn a_compositor_that_never_answers_still_ends_the_apply() {
     );
 }
 
-/// The overlay's copy of the wording is the module's, so the card and the node
-/// test can never drift apart.
 #[test]
 fn the_notice_wording_lives_in_one_place() {
     let anchor = read("ui/anchor.js");
@@ -250,9 +225,6 @@ fn the_notice_wording_lives_in_one_place() {
     );
 }
 
-/// A summon that cancels Replace must not type into the next Check, and must
-/// not open the gone-window notice on it. The capture path already keeps its
-/// callbacks behind `runGeneration`; Replace has to do the same.
 #[test]
 fn replace_ignores_callbacks_from_a_cancelled_run() {
     let source = read("Overlay.qml");

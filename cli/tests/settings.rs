@@ -1,14 +1,6 @@
-//! Settings precedence, spec section 7: flags, then the plugin's entry in
-//! `shell.json`, then the built-in defaults.
-//!
-//! No test reads or writes the real `~/.config/omarchy/shell.json`. The
-//! documents live in strings, and the one test that goes through the file
-//! layer writes a temporary file and points the binary at it.
-
 use grammachy::args::{CheckArgs, CheckOptions, EngineSlug, NativeLanguage, TargetEnglish};
 use grammachy::settings::StoredSettings;
 
-/// A `shell.json` whose bar layout carries the plugin entry.
 fn document(entry_body: &str) -> String {
     format!(
         r#"{{
@@ -28,8 +20,6 @@ fn stored(entry_body: &str) -> StoredSettings {
     StoredSettings::from_json(&document(entry_body))
 }
 
-/// Flags with every key set, so a resolved value that is not this one came
-/// from a lower layer.
 fn all_flags() -> CheckArgs {
     CheckArgs {
         native: Some(NativeLanguage::Fr),
@@ -162,8 +152,6 @@ fn a_stored_engine_of_a_removed_slug_falls_back_to_the_default() {
     }
 }
 
-/// A key the spec never defined, or one this build no longer reads, must not
-/// stop the rest of the entry from resolving.
 #[test]
 fn unknown_stored_keys_are_ignored_without_error() {
     let entry = stored(
@@ -183,8 +171,6 @@ fn unknown_stored_keys_are_ignored_without_error() {
     assert_eq!(options.engine, EngineSlug::Harper);
 }
 
-/// Spec section 7: the two hotkeys are trimmed, and an empty or missing value
-/// reads as unknown, the same rule every other key follows.
 #[test]
 fn a_stored_hotkey_is_trimmed() {
     let entry = stored(r#""quickHotkey": "  SUPER + H  ", "composeHotkey": "SUPER + SHIFT + H""#);

@@ -41,10 +41,8 @@ pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
 /// timeout, which applies to one request.
 pub const DEFAULT_STARTUP_BUDGET: Duration = Duration::from_secs(30);
 
-/// Time between two probes while the unit starts.
 const PROBE_INTERVAL: Duration = Duration::from_millis(250);
 
-/// How long one loopback connect may take.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// The most bytes of one `/v2/check` answer the adapter reads.
@@ -83,12 +81,9 @@ impl Endpoint {
     }
 }
 
-/// Where one request goes, once the endpoint is resolved.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Target {
-    /// The stub server of the test seam, with no process to prove.
     Fixed(SocketAddr),
-    /// The unit's listener, whose main process must accept the connection.
     Unit(Peer),
 }
 
@@ -101,11 +96,6 @@ impl Target {
     }
 }
 
-/// The connector of the product path: it connects to the listener the unit
-/// owns and refuses the connection unless the unit's main process accepted
-/// it. The proof is on the socket the request then uses, so nothing that
-/// takes the port between the listener read and the request can receive
-/// the text.
 #[derive(Debug)]
 struct BoundConnector {
     peer: Peer,
@@ -175,8 +165,6 @@ impl Transport for BoundTransport {
     }
 }
 
-/// The one refusal of a unit under this name that this plugin did not start.
-/// It always names the verb that stops it, per spec section 4.
 fn not_ours(unit: &str, why: &str) -> EngineFailure {
     EngineFailure::Unavailable(format!(
         "The unit {unit} is not one Grammachy started: {why}. Stop it with: systemctl --user stop {unit}"
@@ -199,7 +187,6 @@ fn other_ports(held: &[u16]) -> String {
     )
 }
 
-/// A read or write that ran out of its socket timeout.
 fn is_timeout(error: &io::Error) -> bool {
     matches!(error.kind(), ErrorKind::TimedOut | ErrorKind::WouldBlock)
 }
@@ -267,10 +254,6 @@ impl LanguageTool {
         LanguageTool { config }
     }
 
-    /// One POST to `/v2/check` on one target.
-    ///
-    /// The answer is read up to [`MAX_RESPONSE_BYTES`] and refused past that,
-    /// before any of it is parsed.
     fn request(&self, target: &Target, body: &str) -> Result<CheckResponse, EngineFailure> {
         let config = Agent::config_builder()
             .timeout_global(Some(self.config.timeout))
@@ -319,7 +302,6 @@ impl LanguageTool {
             ureq::Error::Io(inner) if is_unreachable(inner.kind()) => {
                 EngineFailure::Unavailable(format!("LanguageTool did not answer on {address}"))
             }
-            // The connector refused the peer, and its message says why.
             ureq::Error::Io(inner) if inner.kind() == ErrorKind::Other => {
                 EngineFailure::Unavailable(format!("LanguageTool was not reached: {inner}"))
             }
@@ -333,12 +315,6 @@ impl LanguageTool {
         }
     }
 
-    /// Where this Check goes, or why there is nowhere.
-    ///
-    /// For the unit endpoint this is the listener the unit's main process
-    /// holds right now, and the unit must be one this plugin started. An
-    /// inactive unit is started first when the configuration allows it, and
-    /// an active unit without a listener yet is waited for.
     fn resolve(&self) -> Result<Target, EngineFailure> {
         let unit = match &self.config.endpoint {
             Endpoint::Fixed(address) => return Ok(Target::Fixed(*address)),
@@ -368,7 +344,6 @@ impl LanguageTool {
         Ok(Target::Unit(peer))
     }
 
-    /// Poll the unit until it owns a listener, within the startup budget.
     fn wait_for_listener(&self, unit: &str) -> Result<Peer, EngineFailure> {
         let deadline = Instant::now() + self.config.startup_budget;
         let mut held;
@@ -435,9 +410,6 @@ pub fn mother_tongue(native: NativeLanguage) -> Option<&'static str> {
     }
 }
 
-/// Percent-encode one form field. Everything outside the unreserved set is
-/// escaped, which is valid `application/x-www-form-urlencoded` and keeps the
-/// text on the wire byte for byte.
 fn form_encode(value: &str) -> String {
     let mut encoded = String::with_capacity(value.len());
     for byte in value.bytes() {
@@ -488,7 +460,6 @@ mod tests {
         assert!(request_body("x", &options(NativeLanguage::Zh)).ends_with("&motherTongue=zh-CN"));
         assert!(request_body("x", &options(NativeLanguage::Ja)).ends_with("&motherTongue=ja-JP"));
         assert!(request_body("x", &options(NativeLanguage::Pt)).ends_with("&motherTongue=pt"));
-        // `none` and `ms` send nothing.
         assert!(!request_body("x", &options(NativeLanguage::Ms)).contains("motherTongue"));
         assert!(!request_body("x", &options(NativeLanguage::None)).contains("motherTongue"));
     }
@@ -522,12 +493,6 @@ mod tests {
         );
     }
 
-    /// One stub `/v2/check` server on a free loopback port, in this process.
-    ///
-    /// The proof of [`BoundConnector`] reads which process accepted the
-    /// connection, so a listener this process owns is what makes the product
-    /// path testable without a systemd unit. `answer` writes the response on
-    /// the accepted socket, after the request and its body are read.
     fn stub_server<F>(answer: F) -> (SocketAddr, mpsc::Sender<()>, std::thread::JoinHandle<()>)
     where
         F: FnOnce(&mut TcpStream) + Send + 'static,
@@ -539,13 +504,11 @@ mod tests {
             let (mut accepted, _) = server.accept().expect("the client connects");
             read_request(&accepted);
             answer(&mut accepted);
-            // Hold the accepted end open until the proof and the read are done.
             let _ = released.recv_timeout(Duration::from_secs(10));
         });
         (address, release, serving)
     }
 
-    /// The request head and its whole body, so the client never sees a reset.
     fn read_request(stream: &TcpStream) {
         let mut reader = io::BufReader::new(stream);
         let mut length = 0usize;
@@ -584,9 +547,6 @@ mod tests {
         }
     }
 
-    /// The product path end to end: the connector proves the accepting
-    /// process, the transport writes the request and reads the answer, and
-    /// the body parses into the matches the Check reads.
     #[test]
     fn the_proven_connection_carries_one_check_answer() {
         let json = r#"{"matches":[{"offset":3,"length":2,"message":"He goes home.","replacements":[{"value":"goes"}],"rule":{"id":"HE_GO","issueType":"grammar"}}]}"#;
@@ -609,8 +569,6 @@ mod tests {
         serving.join().unwrap();
     }
 
-    /// A listener some other process accepted on is refused before the
-    /// request is written, which is the whole point of the connector.
     #[test]
     fn a_connection_another_process_accepted_is_refused() {
         let (address, release, serving) = stub_server(move |stream| write_json(stream, "{}"));
@@ -631,8 +589,6 @@ mod tests {
         serving.join().unwrap();
     }
 
-    /// An answer past the cap is refused before it is parsed, so no producer
-    /// on the loopback port can fill memory.
     #[test]
     fn an_answer_past_the_byte_cap_is_refused() {
         let (address, release, serving) = stub_server(move |stream| {

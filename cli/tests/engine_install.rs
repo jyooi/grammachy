@@ -1,10 +1,3 @@
-//! `grammachy engine install`, spec section 5.4.
-//!
-//! Nothing here reaches the network and nothing here runs `bsdtar`: the
-//! transfer and the unpack are both values, so this test owns what arrives,
-//! what it unpacks into, how long it takes, and when it notices a cancel. The
-//! test owns this whole binary, because it pins a digest for the process.
-
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -13,10 +6,8 @@ use grammachy::engines::install::{
     self, cancel, Downloader, Engines, Extractor, Failure, State, Transfer,
 };
 
-/// What the fake transfer writes in place of a 250 MB archive.
 const FAKE_ARCHIVE: &[u8] = b"PK fake LanguageTool release for the test suite";
 
-/// The names the `languagetool` row pins.
 const SLUG: &str = "languagetool";
 const ARCHIVE: &str = "LanguageTool-6.6.zip";
 const UNPACKS_INTO: &str = "LanguageTool-6.6";
@@ -50,8 +41,6 @@ fn pin_the_fake_release() {
     pin_the_fake_size(FAKE_ARCHIVE.len() as u64);
 }
 
-/// The cancel flag is one flag for the whole process, so every test that sets
-/// it takes this first. Nothing else here needs ordering.
 static ONE_AT_A_TIME: Mutex<()> = Mutex::new(());
 
 fn serially() -> MutexGuard<'static, ()> {
@@ -76,7 +65,6 @@ fn engines(directory: PathBuf, download: Downloader, extract: Extractor) -> Engi
     }
 }
 
-/// A transfer that writes the whole archive at once.
 fn whole() -> Downloader {
     Box::new(|_url, path, _max_bytes| {
         std::fs::write(path, FAKE_ARCHIVE)
@@ -85,7 +73,6 @@ fn whole() -> Downloader {
     })
 }
 
-/// An unpack that leaves the tree the real archive would.
 fn unpacks_the_release() -> Extractor {
     Box::new(|_archive, into, _admission| {
         let tree = into.join(UNPACKS_INTO);
@@ -95,8 +82,6 @@ fn unpacks_the_release() -> Extractor {
     })
 }
 
-/// The acceptance criterion: one install, no sudo, and a tree the adapter can
-/// run from.
 #[test]
 fn an_install_verifies_the_archive_and_leaves_the_unpacked_tree() {
     let _guard = serially();
@@ -113,15 +98,11 @@ fn an_install_verifies_the_archive_and_leaves_the_unpacked_tree() {
     assert!(tree.join("libs/lucene.jar").is_file(), "so are its libs");
     assert_eq!(row.path, tree.display().to_string());
     assert!(!row.from_package, "this verb put it there, not pacman");
-    // The archive is hundreds of megabytes and a re-install re-checks the
-    // digest anyway, so keeping it would double what the component costs.
     assert!(!directory.join(ARCHIVE).exists());
     assert!(!directory.join(format!("{ARCHIVE}.part")).exists());
     assert!(!directory.join(format!("{SLUG}.unpack")).exists());
 }
 
-/// The pin is what makes the install safe: bytes that are not the release this
-/// row names never reach the disk as an engine.
 #[test]
 fn an_archive_that_does_not_match_the_pin_is_refused() {
     let _guard = serially();
@@ -132,7 +113,6 @@ fn an_archive_that_does_not_match_the_pin_is_refused() {
     let counted = Arc::clone(&unpacked);
     let engines = engines(
         directory.clone(),
-        // The same length as the pin, so the digest is what refuses it.
         Box::new(|_url, path, _max_bytes| {
             std::fs::write(path, FAKE_ARCHIVE.to_ascii_uppercase())
                 .map(|()| Transfer::Finished)
@@ -165,8 +145,6 @@ fn an_archive_that_does_not_match_the_pin_is_refused() {
     );
 }
 
-/// The size is checked before the digest, so a short or long file is refused
-/// without a hash, and the transfer is told the pinned size as its limit.
 #[test]
 fn an_archive_of_the_wrong_size_is_refused_before_the_digest() {
     let _guard = serially();
@@ -201,8 +179,6 @@ fn an_archive_of_the_wrong_size_is_refused_before_the_digest() {
     assert!(!directory.join(format!("{ARCHIVE}.part")).exists());
 }
 
-/// A `.part` file longer than the pin can never resume into the right file,
-/// so it goes before the transfer starts.
 #[test]
 fn an_oversize_part_file_is_removed_before_the_transfer() {
     let _guard = serially();
@@ -264,7 +240,6 @@ fn an_unpack_that_left_no_server_jar_installs_nothing() {
     assert!(!directory.join(format!("{SLUG}.unpack")).exists());
 }
 
-/// A cancel keeps the `.part` file, so Install resumes rather than restarts.
 #[test]
 fn a_cancel_keeps_the_part_file() {
     let _guard = serially();
@@ -297,8 +272,6 @@ fn a_cancel_keeps_the_part_file() {
     );
 }
 
-/// A component that is already there costs nothing: nothing is fetched and
-/// nothing is unpacked, so the Settings row is safe to press twice.
 #[test]
 fn installing_a_component_that_is_already_there_fetches_nothing() {
     let _guard = serially();
@@ -325,15 +298,11 @@ fn installing_a_component_that_is_already_there_fetches_nothing() {
     assert_eq!(fetched.load(Ordering::SeqCst), 0);
 }
 
-/// The free-space check runs before the transfer, so a disk with no room for
-/// the archive and the tree together refuses rather than filling up and
-/// failing on the last byte.
 #[test]
 fn a_disk_with_no_room_refuses_before_it_fetches_anything() {
     let _guard = serially();
     cancel::reset();
     pin_the_fake_digest();
-    // Larger than any file system this test could run on.
     pin_the_fake_size(u64::MAX / 4);
     let fetched = Arc::new(AtomicUsize::new(0));
     let counted = Arc::clone(&fetched);
@@ -394,7 +363,6 @@ fn a_linked_part_file_refuses_the_install_before_the_transfer() {
     );
 }
 
-/// The engines directory itself must be a plain directory this user owns.
 #[test]
 fn a_linked_engines_directory_refuses_the_install() {
     let _guard = serially();
@@ -419,8 +387,6 @@ fn a_linked_engines_directory_refuses_the_install() {
     );
 }
 
-/// The install fetches the row's own URL and unpacks the archive it verified,
-/// so a stub server and a stub unpacker see exactly what the real ones would.
 #[test]
 fn the_install_fetches_the_pinned_url_and_unpacks_the_verified_archive() {
     let _guard = serially();

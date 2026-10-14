@@ -1,13 +1,4 @@
 #!/usr/bin/env bash
-# Fetches the pinned companion binary, spec section 10.
-#
-# The setup card runs this through a Quickshell Process and streams stdout
-# and stderr, so every line here is a status the reader can see. The script
-# reads version, sha256, and sizeBytes from cli.lock. It downloads the
-# release asset over https only, with a wall-clock limit and the pinned size
-# as the byte limit, then checks the size and the hash. It moves the binary
-# into bin/grammachy only once both match. A mismatch, a missing pin, or a
-# failed download all exit non-zero and leave bin/grammachy as it was.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

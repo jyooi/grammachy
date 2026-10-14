@@ -1,12 +1,3 @@
-// Node tests for the error cards. Spec sections 5.1, 8, and 13.
-// Run with `node --test ui/errors.test.js`.
-//
-// The last blocks run stub binaries that print exactly what a real
-// `grammachy check` prints for each code, one that prints no JSON at all, and
-// one that answers a whole chunked Check of spec section 9.
-// A stub is the only safe seam here: a test must never reach a real engine,
-// and it must never stop or start the LanguageTool unit the live shell uses.
-
 const test = require("node:test")
 const assert = require("node:assert/strict")
 const fs = require("node:fs")
@@ -51,8 +42,6 @@ function languageToolCard(code, message) {
   })
 }
 
-// ------------------------------------------------------------- reading stdout
-
 test("a result envelope is not an error", () => {
   const stdout = JSON.stringify({ contractVersion: 1, engine: "harper", elapsedMs: 3, issues: [] })
   const answer = readCheck(stdout)
@@ -71,8 +60,6 @@ test("an error envelope carries its code and message through", () => {
   })
 })
 
-// Spec section 5.1: no JSON on stdout is the `bad_arguments` card, and a
-// missing or mismatched contractVersion is an error state.
 test("no JSON on stdout reads as bad_arguments", () => {
   for (const stdout of ["", "\n", "grammachy: command not found", "not json at all"]) {
     assert.deepEqual(readCheck(stdout).error, { code: BAD_ARGUMENTS, message: "" })
@@ -94,8 +81,6 @@ test("a JSON value that is not an object reads as bad_arguments", () => {
   }
 })
 
-// ---------------------------------------------------------------- the codes
-
 test("an unknown code is treated as engine_error", () => {
   assert.equal(known("engine_on_fire"), ENGINE_ERROR)
   assert.equal(known(""), ENGINE_ERROR)
@@ -105,8 +90,6 @@ test("an unknown code is treated as engine_error", () => {
 test("every code of the contract is known", () => {
   for (const code of CODES) assert.equal(known(code), code)
 })
-
-// ---------------------------------------------------------------- the cards
 
 test("empty_selection asks for a selection and offers Close and Open Compose", () => {
   const model = languageToolCard(EMPTY_SELECTION)
@@ -147,8 +130,6 @@ test("bad_arguments blames the companion tool and offers Setup", () => {
   assert.equal(model.primary, SETUP)
 })
 
-// Every `bad_arguments` reads the same card, whatever message the CLI sent:
-// the companion tool is missing or out of date, and Setup is the only fix.
 test("every bad_arguments keeps the companion tool card", () => {
   const messages = ["", "something went wrong", "--native is not a language."]
 
@@ -160,8 +141,6 @@ test("every bad_arguments keeps the companion tool card", () => {
   }
 })
 
-// The too-long card of spec section 6 has a size bar and a `Check the first N
-// only` button, so it is the quick popup's own card and not one of these.
 test("text_too_long has no card here", () => {
   assert.equal(languageToolCard(TEXT_TOO_LONG), null)
 })
@@ -173,8 +152,6 @@ test("an unknown code shows the engine_error card", () => {
   assert.equal(model.message, "something new")
 })
 
-// Spec section 8: `<Engine>` is the display name of the current engine
-// setting, which is the name the Settings dropdown shows.
 test("every engine setting reaches its card by its display name", () => {
   const expected = { languagetool: "LanguageTool", harper: "Harper" }
   for (const slug of Object.keys(expected)) {
@@ -186,7 +163,6 @@ test("every engine setting reaches its card by its display name", () => {
   }
 })
 
-// Every remaining engine gets the `doctor` line.
 test("every engine asks for the doctor line", () => {
   for (const slug of Object.keys(TIMEOUT_SECONDS)) {
     const model = card(ENGINE_UNAVAILABLE, { engineLabel: "Engine", engineSlug: slug })
@@ -218,12 +194,6 @@ test("an engine with no timeout entry still gets a number", () => {
   }
 })
 
-// --------------------------------------------------------- against a stub CLI
-//
-// The overlay never sees an envelope as a string literal: it sees whatever the
-// binary at `bin/grammachy` wrote. These stubs write exactly that, so the route
-// from a real process to a real card runs end to end.
-
 let stubDirectory = ""
 
 test.before(() => {
@@ -234,8 +204,6 @@ test.after(() => {
   if (stubDirectory) fs.rmSync(stubDirectory, { recursive: true, force: true })
 })
 
-// A stub that reads stdin the way `grammachy check` does, prints `output`, and
-// leaves with `exitCode`.
 function stub(name, output, exitCode) {
   const file = path.join(stubDirectory, name)
   fs.writeFileSync(file, [
@@ -249,8 +217,6 @@ function stub(name, output, exitCode) {
   return file
 }
 
-// One Check: run the stub with the text on stdin and read the card back the
-// way Overlay.qml does.
 function checkThrough(binary, text) {
   const run = spawnSync(binary, ["check", "--engine", "languagetool"], { input: text, encoding: "utf8" })
   assert.equal(run.error, undefined)
@@ -305,7 +271,6 @@ test("a stub that emits each envelope shows each card", () => {
     assert.equal(shown.code, want.code, want.code + " shows its own card")
     assert.equal(shown.title, want.title)
     assert.deepEqual(shown.buttons, want.buttons)
-    // Spec section 8: the CLI message shows under the body.
     assert.equal(shown.message, want.message)
   }
 })
@@ -332,11 +297,6 @@ test("a stub that emits a result envelope shows no card", () => {
   assert.equal(shown.result.engine, "languagetool")
 })
 
-// Spec section 8: Retry re-runs the Check with the same Selection and no
-// re-capture. `retryCheck()` in Overlay.qml calls `runCheck(root.selectionText)`
-// and nothing else, so the text the failed Check ran on is the text that runs
-// again, whatever the source window is highlighting by then.
-// `cli/tests/overlay_errors.rs` is what holds that call in place.
 test("retry sends the text of the failed check, not a fresh selection", () => {
   const binary = stub("emit-unavailable-twice",
     errorEnvelope(ENGINE_UNAVAILABLE, "LanguageTool did not answer on 127.0.0.1:8081"), 1)
@@ -345,15 +305,11 @@ test("retry sends the text of the failed check, not a fresh selection", () => {
   const failed = checkThrough(binary, selection)
   assert.equal(failed.card.code, ENGINE_UNAVAILABLE)
 
-  // The source window now holds something else entirely. The overlay keeps
-  // `selectionText`, so Retry hands the stub the same stdin as the first run.
   const retried = checkThrough(binary, failed.stdin)
   assert.equal(retried.stdin, selection)
   assert.notEqual(retried.stdin, "something the user highlighted since")
   assert.deepEqual(retried.card, failed.card)
 })
-
-// ------------------------------------------------- reading the Chunk list
 
 test("a Chunk list envelope carries its chunks through", () => {
   const stdout = JSON.stringify({ contractVersion: 1, chunks: [{ start: 0, end: 12 }, { start: 12, end: 20 }] })
@@ -373,16 +329,12 @@ test("an error envelope from chunk carries its code and message through", () => 
   })
 })
 
-// Spec section 5.2: the shell cannot walk a tiling it did not get, and both of
-// these say the same thing about the companion tool.
 test("no JSON and no chunks array both read as bad_arguments", () => {
   for (const stdout of ["", "not json", JSON.stringify({ contractVersion: 2, chunks: [] }),
     JSON.stringify({ contractVersion: 1, chunks: "all of it" })]) {
     assert.deepEqual(readChunks(stdout).error, { code: BAD_ARGUMENTS, message: "" })
   }
 })
-
-// ------------------------------------------- the inline failure of a Chunk
 
 function languageToolChunkCard(code, message, hasPartial) {
   return chunkCard(code, {
@@ -393,8 +345,6 @@ function languageToolChunkCard(code, message, hasPartial) {
   })
 }
 
-// Spec section 9: the failure says what went wrong in the same words section 8
-// uses, because the same thing went wrong.
 test("a failed Chunk keeps the title, body, and message of its code", () => {
   const inline = languageToolChunkCard(ENGINE_UNAVAILABLE, "LanguageTool did not answer on 127.0.0.1:8081", true)
   const plain = languageToolCard(ENGINE_UNAVAILABLE, "LanguageTool did not answer on 127.0.0.1:8081")
@@ -412,15 +362,12 @@ test("a failed Chunk with finished Chunks behind it offers both recoveries", () 
   assert.equal(buttonLabel(REVIEW_PARTIAL), "Review what we have")
 })
 
-// With nothing behind it there is nothing to review, so the card falls back to
-// what section 8 offers around the same resume.
 test("a failure with no Chunk behind it offers no review", () => {
   const inline = languageToolChunkCard(ENGINE_UNAVAILABLE, "not running", false)
   assert.deepEqual(inline.buttons, [CLOSE, RETRY_REMAINING, SETTINGS])
   assert.equal(inline.primary, RETRY_REMAINING)
 })
 
-// A Chunk is cut to fit, so `text_too_long` from one is the engine failing.
 test("text_too_long from a Chunk reads as an engine error, not as a card of its own", () => {
   const inline = languageToolChunkCard(TEXT_TOO_LONG, "too long", true)
   assert.equal(inline.code, ENGINE_ERROR)
@@ -436,34 +383,14 @@ test("every code a Chunk can fail with has an inline card", () => {
   }
 })
 
-// ------------------------------------------ a whole chunked run, spec 9
-//
-// These stubs answer both subcommands of a chunked Check, so the run below is
-// the route from two real processes to one merged list of Issues. A stub is the
-// only safe seam: a test must never reach a real engine, and it must never stop
-// or start the LanguageTool unit the live shell uses.
-
-// A Draft of 20 identical sentences, so a Chunk boundary never splits the word
-// the stub finds and every Issue start is known in advance.
 const SENTENCE = "I has a cat. "
 const DRAFT = SENTENCE.repeat(20)
 const CHUNK_UNITS = SENTENCE.length * 5
 const CHUNK_COUNT = 4
-// The engine a Check runs on when nothing else is said, spec section 7.
 const DEFAULT_ENGINE = "languagetool"
-// What the stub packs to, one size per Engine. The limit belongs to the Engine
-// (spec section 4), and every remaining Engine reads the same one, so a Chunk
-// list packed for either Engine fits the other too.
 const CHUNK_UNITS_BY_ENGINE = { languagetool: CHUNK_UNITS, harper: CHUNK_UNITS }
-// One Issue per sentence, at the same offset in each.
 const WANTED_STARTS = Array.from({ length: 20 }, (_, i) => 2 + SENTENCE.length * i)
 
-// A stub that answers `chunk` with a tiling of the named Engine's size and
-// `check` with one Issue per "has" in the text it was handed, in that text's
-// own coordinates. It refuses a text over that Engine's size with
-// `text_too_long`, the way the CLI does before any engine runs. `delayMs` makes
-// a run take long enough for a Cancel to be a real decision, and `failOnCall`
-// fails the nth `check` once and succeeds on every call after it.
 function chunkedStub(name, delayMs, failOnCall) {
   const counter = path.join(stubDirectory, name + ".count")
   const packs = path.join(stubDirectory, name + ".packs")
@@ -515,8 +442,6 @@ function chunkedStub(name, delayMs, failOnCall) {
   return file
 }
 
-// How many Chunk lists that stub has packed, which is what says whether a
-// retry resumed the list in hand or asked for a new one.
 function packCount(name) {
   try {
     return Number(fs.readFileSync(path.join(stubDirectory, name + ".packs"), "utf8")) || 0
@@ -534,11 +459,6 @@ function chunkCardOf(engineSlug, code, message, hasPartial) {
   })
 }
 
-// The chunked Check of spec section 9, driven in the order Overlay.qml drives
-// it: one `grammachy chunk` for the selected Engine, then one `grammachy check`
-// per Chunk in sequence, every Chunk's spans moved by its own start before they
-// merge and are verified against the whole Draft. `cli/tests/overlay_chunks.rs`
-// is what keeps Overlay.qml on these same steps.
 function runChunked(binary, draft, options) {
   const run = {
     issues: [], index: 0, chunks: [], chunkEngine: "",
@@ -547,8 +467,6 @@ function runChunked(binary, draft, options) {
   return packChunks(binary, draft, run, options || {})
 }
 
-// `Overlay.runChunkList`: the Chunks are packed to the selected Engine's limit,
-// and the run remembers which Engine that was.
 function packChunks(binary, draft, run, options) {
   const settings = options || {}
   const engine = settings.engine || DEFAULT_ENGINE
@@ -566,11 +484,6 @@ function packChunks(binary, draft, run, options) {
   return resumeChunked(binary, draft, run, settings)
 }
 
-// The walk itself, resumed at the Chunk that stopped it. Every Check names the
-// Engine the list was packed for, the way `Overlay.runChunk` names
-// `runEngine()`: the Chunk was cut to a size, and only that Engine reads it.
-// `settings.engine` is the live setting, which the reader can move while the
-// walk runs.
 function resumeChunked(binary, draft, run, options) {
   const settings = options || {}
   run.card = null
@@ -591,12 +504,9 @@ function resumeChunked(binary, draft, run, options) {
     run.elapsedMs += Number(answer.result.elapsedMs || 0)
     run.index += 1
 
-    // The reader picks another Engine in the Settings view, which stays
-    // reachable while the Check runs.
     if (settings.switchAfter && run.index === settings.switchAfter.chunks)
       settings.engine = settings.switchAfter.to
 
-    // Cancel stops the run after the Chunk in flight, spec section 9.
     if (settings.cancelAfter && run.index >= settings.cancelAfter) {
       run.cancelled = true
       return run
@@ -605,10 +515,6 @@ function resumeChunked(binary, draft, run, options) {
   return run
 }
 
-// `Retry remaining` as `Overlay.retryRemaining` drives it. The retry is where a
-// new Engine takes effect: a list packed to another size cannot be resumed and
-// is packed again, and one of the same size resumes on the new Engine with the
-// Issues the finished Chunks found still in hand.
 function retryRemaining(binary, draft, run, options) {
   const settings = options || {}
   const engine = settings.engine || DEFAULT_ENGINE
@@ -633,15 +539,11 @@ test("a whole Draft merges into one list whose spans point at the right text", (
   assert.equal(run.chunks.length, CHUNK_COUNT)
   assert.equal(run.index, CHUNK_COUNT)
   assert.deepEqual(run.issues.map(issue => issue.start), WANTED_STARTS)
-  // The acceptance criterion: every span, the ones from the second Chunk on
-  // included, slices the original out of the merged view.
   for (const issue of run.issues) assert.equal(DRAFT.slice(issue.start, issue.end), issue.original)
   assert.ok(run.issues.some(issue => issue.start >= run.chunks[1].start),
     "issues come from later Chunks too")
 })
 
-// Spec section 9: Cancel stops after the Chunk in flight and keeps what
-// finished. The stub delays so the run is long enough for that to be a choice.
 test("Cancel after a Chunk keeps every Issue the finished Chunks found", () => {
   const binary = chunkedStub("chunked-slow", 60, 0)
   const started = Date.now()
@@ -650,16 +552,12 @@ test("Cancel after a Chunk keeps every Issue the finished Chunks found", () => {
   assert.equal(run.cancelled, true)
   assert.equal(run.index, 2)
   assert.ok(run.index < run.chunks.length, "the run stopped before the last Chunk")
-  // The Issues of Chunks 1 and 2, and none of Chunk 3.
   assert.deepEqual(run.issues.map(issue => issue.start), WANTED_STARTS.slice(0, 10))
   for (const issue of run.issues) assert.equal(DRAFT.slice(issue.start, issue.end), issue.original)
   assert.ok(run.issues.every(issue => issue.start < run.chunks[2].start))
-  // The Chunks really ran one after another rather than being skipped.
   assert.ok(Date.now() - started >= 120, "each checked Chunk waited on the stub")
 })
 
-// Spec section 9: a failed Chunk keeps the Issues from the finished ones, shows
-// the engine message, and `Retry remaining` resumes at the Chunk that failed.
 test("a Chunk that fails once shows both recoveries and Retry remaining finishes the run", () => {
   const binary = chunkedStub("chunked-fails-once", 0, 3)
   const run = runChunked(binary, DRAFT)
@@ -668,12 +566,9 @@ test("a Chunk that fails once shows both recoveries and Retry remaining finishes
   assert.equal(run.card.message, "LanguageTool did not answer on 127.0.0.1:8081")
   assert.deepEqual(run.card.buttons, [RETRY_REMAINING, REVIEW_PARTIAL])
   assert.equal(run.card.primary, RETRY_REMAINING)
-  // The two Chunks before it kept everything they found.
   assert.equal(run.index, 2)
   assert.deepEqual(run.issues.map(issue => issue.start), WANTED_STARTS.slice(0, 10))
 
-  // `Retry remaining` resumes at the Chunk that failed, so nothing before it
-  // runs again and nothing after it is skipped.
   const resumed = retryRemaining(binary, DRAFT, run, {})
   assert.equal(resumed.card, null)
   assert.equal(resumed.index, CHUNK_COUNT)
@@ -690,13 +585,11 @@ test("a first Chunk that fails has nothing to review", () => {
   assert.equal(run.issues.length, 0)
   assert.equal(run.index, 0)
 
-  // Retry remaining starts at the same Chunk, which is the first one.
   const resumed = retryRemaining(binary, DRAFT, run, {})
   assert.equal(resumed.card, null)
   assert.deepEqual(resumed.issues.map(issue => issue.start), WANTED_STARTS)
 })
 
-// The engine that did not change is the normal case, and it must still resume.
 test("Retry remaining on the same Engine resumes the Chunk list in hand", () => {
   const binary = chunkedStub("chunked-same-engine", 0, 3)
   const run = runChunked(binary, DRAFT, { engine: "languagetool" })
@@ -711,31 +604,20 @@ test("Retry remaining on the same Engine resumes the Chunk list in hand", () => 
   assert.deepEqual(resumed.issues.map(issue => issue.start), WANTED_STARTS)
 })
 
-// A Chunk is cut to the size one Engine reads (spec section 4), so the Check
-// that reads it has to be that Engine. The Settings view stays reachable while
-// the run walks, so a reader can pick another Engine mid-run; the Chunks in
-// hand were packed for the Engine the run started on, and that is the Engine
-// every Check of this run names, whatever the setting moves to meanwhile.
 test("a run finishes on the Engine its Chunks were packed for when the setting moves mid-run", () => {
   const binary = chunkedStub("chunked-switch-mid-run", 0, 0)
   const live = { engine: "languagetool", switchAfter: { chunks: 1, to: "harper" } }
   const run = runChunked(binary, DRAFT, live)
 
-  // The reader really did change the setting while the walk ran.
   assert.equal(live.engine, "harper")
 
   assert.equal(run.card, null, "no Chunk was refused for its size")
   assert.equal(run.chunkEngine, "languagetool")
-  // The stub names the engine each Check ran on, so this is the whole claim.
   assert.equal(run.engine, "languagetool")
   assert.equal(run.index, CHUNK_COUNT)
   assert.deepEqual(run.issues.map(issue => issue.start), WANTED_STARTS)
 })
 
-// Two Engines that read the same number of units share a Chunk list, so the
-// size is what decides whether the retry can resume, not the slug. The retry is
-// also where the reader's new Engine takes effect, which is what makes the
-// Settings view a recovery from `engine_unavailable`.
 test("Retry remaining on an Engine of the same size resumes on it and keeps the partial Issues", () => {
   const binary = chunkedStub("chunked-same-size-engine", 0, 3)
   const run = runChunked(binary, DRAFT, { engine: "languagetool" })
@@ -744,15 +626,12 @@ test("Retry remaining on an Engine of the same size resumes on it and keeps the 
   assert.equal(run.index, 2)
   assert.deepEqual(run.issues.map(issue => issue.start), WANTED_STARTS.slice(0, 10))
 
-  // The reader picks Harper, which reads the same number of units.
   assert.equal(Limits.checkLimit("harper"), Limits.checkLimit("languagetool"))
   const resumed = retryRemaining(binary, DRAFT, run, { engine: "harper" })
 
   assert.equal(resumed.card, null)
   assert.equal(packCount("chunked-same-size-engine"), 1, "no second Chunk list was asked for")
   assert.equal(resumed.index, CHUNK_COUNT)
-  // The two Chunks that finished are still in hand, and the rest ran on the
-  // Engine the reader picked.
   assert.deepEqual(resumed.issues.map(issue => issue.start), WANTED_STARTS)
   assert.equal(resumed.chunkEngine, "harper")
   assert.equal(resumed.engine, "harper")

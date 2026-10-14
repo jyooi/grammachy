@@ -1,6 +1,3 @@
-// Node tests for the Check size limit the too-long card of spec section 6
-// fires at. Run with `node --test ui/limits.test.js`.
-
 const test = require("node:test")
 const assert = require("node:assert/strict")
 
@@ -26,8 +23,6 @@ test("every engine the Settings dropdown offers names the limit", () => {
   }
 })
 
-// The too-long card of spec section 6 shows the limit twice, in the size bar
-// and on `Check the first N only`. Both read the one number this file owns.
 test("the too-long card words the check limit", () => {
   assert.equal(Format.units(Limits.checkLimit("languagetool")) + " per check", "5,000 units per check")
   assert.equal(

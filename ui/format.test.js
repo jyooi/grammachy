@@ -1,7 +1,3 @@
-// Node tests for the counted sizes the cards print, for the Compose refusal,
-// and for the progress line of a chunked Check. Spec sections 6, 8, 9, and 13.
-// Run with `node --test ui/`.
-
 const test = require("node:test")
 const assert = require("node:assert/strict")
 
@@ -9,9 +5,6 @@ const Format = require("./format.js")
 const Splice = require("./splice.js")
 const Limits = require("./limits.js")
 
-// The two limits of the CLI. `cli/tests/overlay_limit.rs` keeps the QML copies
-// of these equal to `EngineSlug::check_limit_utf16` and
-// `chunk::MAX_DRAFT_UTF16_UNITS`.
 const CHECK_LIMIT = Limits.checkLimit("languagetool")
 const CAP = 50000
 
@@ -45,28 +38,17 @@ test("a Draft over the cap is refused with its count and the cap", () => {
   assert.match(refusal, /cap of 50,000/)
 })
 
-// Spec section 9: a Draft over what one Check takes is checked in Chunks, so
-// the size of one Check is no longer a refusal. Only the cap is.
 test("a Draft over one Chunk is checked in chunks rather than refused", () => {
   assert.equal(Format.draftRefusal(CHECK_LIMIT + 1, CAP), "")
   assert.equal(Format.draftRefusal(20000, CAP), "")
   assert.equal(Format.draftRefusal(CAP, CAP), "")
 })
 
-// ---------------------------------------------------- the first-N note
-//
-// The note names the text the Check ran on, never the limit it was cut to. The
-// limit belongs to the Engine (spec section 4) and the gear is on the hero
-// while the answer is on screen, so a limit read after the Check can name a
-// number no Check ever used.
-
 test("the first-N note names the text that was checked and the whole selection", () => {
   assert.equal(Format.truncatedNote(5000, 6000), "First 5,000 of 6,000 units checked")
 })
 
 test("the first-N note follows the cut rather than the limit it was cut to", () => {
-  // A capture whose unit at the limit is the high half of a surrogate pair, so
-  // `firstUnits` backs off one unit to keep the character whole.
   const capture = "a".repeat(CHECK_LIMIT - 1) + "\u{1F600}" + "b".repeat(10)
   const checked = Splice.firstUnits(capture, CHECK_LIMIT)
 
@@ -78,18 +60,13 @@ test("the first-N note follows the cut rather than the limit it was cut to", () 
 
 test("the note of a Check stays what it was when the Engine setting moves", () => {
   const capture = "a".repeat(6000)
-  // The Check ran on the default engine's limit.
   const checked = Splice.firstUnits(capture, Limits.checkLimit("languagetool"))
   const note = Format.truncatedNote(checked.length, capture.length)
 
   assert.equal(note, "First 5,000 of 6,000 units checked")
-  // The reader then picks the other engine, whose limit reads the same, so
-  // the note built from the earlier answer stays exactly as it was.
   assert.equal(Limits.checkLimit("harper"), Limits.checkLimit("languagetool"))
   assert.equal(Format.truncatedNote(checked.length, capture.length), note)
 })
-
-// ------------------------------------------------------- the progress line
 
 test("a run under a second is counted in milliseconds", () => {
   assert.equal(Format.elapsed(0), "0 ms")
@@ -110,7 +87,6 @@ test("a negative or unreadable elapsed reads as none at all", () => {
   assert.equal(Format.elapsed("x"), "0 ms")
 })
 
-// Spec section 9 fixes this wording: `Checking k of n, <engine>, <elapsed>`.
 test("the progress line names the chunk, the total, the engine, and the wait", () => {
   assert.equal(Format.chunkProgress(1, 4, "languagetool", 320),
     "Checking 1 of 4, languagetool, 320 ms")

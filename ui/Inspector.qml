@@ -3,19 +3,12 @@ import QtQuick.Layouts
 import qs.Commons
 import qs.Ui
 
-// The inspector strip of spec section 6, which spec section 9 gives to Compose
-// unchanged: the focused Issue in full, with Accept and Skip.
-//
-// The strip draws one Issue and reports intent. Which Issue is focused, and
-// what a decision does to the Corrected text, belong to Overlay.qml.
 BorderSurface {
   id: root
 
-  // The focused Issue of spec section 5.1, or null.
   property var issue: null
   property int focusIndex: 0
   property int issueCount: 0
-  // MarkedText owns the accepted green, so the fix reads the same in both.
   property color acceptedColor: "#9ece6a"
 
   signal accepted(int index)

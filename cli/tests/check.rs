@@ -1,10 +1,7 @@
-//! Validation that `grammachy check` does before any engine runs.
-
 use grammachy::args::{CheckOptions, EngineSlug, NativeLanguage, TargetEnglish};
 use grammachy::check;
 use grammachy::envelope::Envelope;
 
-/// The Check size limit of the default engine (spec section 4).
 const MAX_UTF16_UNITS: usize = EngineSlug::Languagetool.check_limit_utf16();
 
 fn code_of(envelope: &Envelope) -> String {
@@ -17,7 +14,6 @@ fn message_of(envelope: &Envelope) -> String {
     value["error"]["message"].as_str().unwrap().to_string()
 }
 
-/// Text of exactly `units` UTF-16 units, ending with one astral character.
 fn text_of_units(units: usize) -> String {
     let mut text = "a".repeat(units - 2);
     text.push('\u{1F600}');
@@ -54,7 +50,6 @@ fn an_astral_character_counts_as_two_units() {
 fn text_at_the_limit_passes_validation() {
     let text = text_of_units(MAX_UTF16_UNITS);
 
-    // Validation, not the engine, so no test reaches for a server.
     assert!(check::validate(&text, MAX_UTF16_UNITS).is_none());
 }
 
@@ -69,7 +64,6 @@ fn text_one_unit_over_the_limit_is_too_long() {
 
 #[test]
 fn the_last_astral_character_can_cross_the_limit() {
-    // 4,999 units of filler plus one astral character makes 5,001 units.
     let mut text = "a".repeat(MAX_UTF16_UNITS - 1);
     text.push('\u{1F600}');
 
@@ -80,16 +74,12 @@ fn the_last_astral_character_can_cross_the_limit() {
     );
 }
 
-/// The limit belongs to the Engine (spec section 4), and the two remaining
-/// engines share one: 5,000 units.
 #[test]
 fn each_engine_names_its_own_check_size_limit() {
     assert_eq!(EngineSlug::Languagetool.check_limit_utf16(), 5_000);
     assert_eq!(EngineSlug::Harper.check_limit_utf16(), 5_000);
 }
 
-/// The message has to name the limit that refused the text, or the card shows
-/// a size bar the reader cannot place.
 #[test]
 fn the_too_long_message_names_the_selected_engine_limit() {
     for engine in [EngineSlug::Languagetool, EngineSlug::Harper] {

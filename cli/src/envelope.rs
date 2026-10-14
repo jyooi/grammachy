@@ -33,7 +33,6 @@ pub enum Category {
 /// Issue wins. Every engine adapter owes the shell this, so it lives beside the
 /// contract rather than inside one adapter.
 pub fn sorted_disjoint(mut issues: Vec<Issue>) -> Vec<Issue> {
-    // A shorter span first keeps the tighter of two Issues that start together.
     issues.sort_by_key(|issue| (issue.start, issue.end));
 
     let mut kept: Vec<Issue> = Vec::with_capacity(issues.len());

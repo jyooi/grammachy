@@ -10,10 +10,8 @@
 
 use super::report::Report;
 
-/// Width of the status column.
 const STATUS_WIDTH: usize = 9;
 
-/// Width of the piece name column.
 const NAME_WIDTH: usize = 20;
 
 pub fn to_text(report: &Report) -> String {

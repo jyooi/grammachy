@@ -1,6 +1,3 @@
-// Node tests for the dependency table of spec section 10. Run with
-// `node --test ui/deps.test.js`.
-
 const test = require("node:test")
 const assert = require("node:assert/strict")
 

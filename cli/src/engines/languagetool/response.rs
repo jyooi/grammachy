@@ -69,8 +69,6 @@ pub struct RuleCategory {
     pub id: String,
 }
 
-/// What one match is about. Depth in v1 is grammar and spelling only, so a
-/// style match is reported to nobody (spec section 1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Depth {
     Grammar,
@@ -78,7 +76,6 @@ enum Depth {
     Style,
 }
 
-/// LanguageTool `issueType` values that are style rather than a mistake.
 const STYLE_ISSUE_TYPES: [&str; 5] = [
     "style",
     "locale-violation",
@@ -87,7 +84,6 @@ const STYLE_ISSUE_TYPES: [&str; 5] = [
     "non-conformance",
 ];
 
-/// LanguageTool category ids that hold style rules.
 const STYLE_CATEGORY_IDS: [&str; 7] = [
     "STYLE",
     "REDUNDANCY",
@@ -138,11 +134,6 @@ fn reason_of(message: &str, rule_id: &str) -> String {
         .join(" ")
 }
 
-/// Turn one match into an Issue, or drop it.
-///
-/// A match is dropped when it is style, when its span does not address the sent
-/// text, when it carries no suggestion, when its first suggestion is the text
-/// that is already there, or when that suggestion is longer than a Check.
 fn issue_of(text: &str, item: &Match) -> Option<Issue> {
     let category = match depth_of(item.rule.as_ref()) {
         Depth::Style => return None,
@@ -193,12 +184,6 @@ pub fn issues_from(text: &str, response: &CheckResponse) -> Vec<Issue> {
 mod tests {
     use super::*;
 
-    /// The id is removed before the cut, so an id that straddles the cut
-    /// cannot leave half of itself in the reason.
-    ///
-    /// The filler puts the cut inside the id. A cut before the strip leaves
-    /// `MORFOLOGIK_RUL` in the answer, because `replace` then finds no whole
-    /// id to remove.
     #[test]
     fn a_rule_id_across_the_cut_is_still_removed() {
         let rule_id = "MORFOLOGIK_RULE_EN_US";
@@ -209,7 +194,6 @@ mod tests {
 
         assert!(!reason.contains("MORFOLOGIK"), "{reason}");
         assert!(!reason.contains("MORF"), "{reason}");
-        // Strip first, then cut: the filler and " tail" are all that is left.
         assert_eq!(reason, format!("{filler} tail"));
     }
 
@@ -237,8 +221,6 @@ mod tests {
         }
     }
 
-    /// An answer is read only as far as the caps: Issues past the count cap
-    /// are not kept, a reason is cut, and an oversize fix drops its match.
     #[test]
     fn an_answer_is_read_within_the_caps() {
         let text = "a".repeat(MAX_ISSUES + 200);
@@ -250,7 +232,6 @@ mod tests {
         let issues = issues_from(&text, &response);
 
         assert_eq!(issues.len(), MAX_ISSUES);
-        // Every Issue came from the first MAX_ISSUES matches.
         assert!(issues.iter().all(|issue| issue.start < MAX_ISSUES));
 
         let long_reason = "x".repeat(MAX_REASON_CHARS + 50);
@@ -279,11 +260,6 @@ mod tests {
         assert_eq!(kept.len(), 1);
     }
 
-    /// The cap counts Issues, so a run of style matches at the head of the
-    /// answer must not hide the mistakes behind it.
-    ///
-    /// A cap on the matches read answers an empty list here, and the reader
-    /// sees a clean Check on text that holds mistakes.
     #[test]
     fn style_matches_at_the_head_do_not_spend_the_cap() {
         let style = Rule {

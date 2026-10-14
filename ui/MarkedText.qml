@@ -12,10 +12,8 @@ import "tokens.js" as Tokens
 Flickable {
   id: root
 
-  // The exact Selection the Check ran on. Every span indexes into it.
   property string sourceText: ""
   property var issues: []
-  // One entry per Issue: true accepted, false skipped, null still open.
   property var decisions: []
   property int focusIndex: -1
 
@@ -32,7 +30,6 @@ Flickable {
 
   signal markActivated(int index)
 
-  // The drawn text is the Corrected text: an accepted mark shows its Fix.
   readonly property string displayText: Splice.correctedText(sourceText, issues, decisions)
   readonly property var lines: Tokens.buildLines(displayText, Splice.displaySpans(issues, decisions))
   readonly property int lineHeight: Math.round(fontSize * 1.8)
@@ -48,10 +45,6 @@ Flickable {
     return issue ? String(issue.category) : "grammar"
   }
 
-  // Scroll the focused mark into view. A paragraph wraps into many rows inside
-  // one Flow, so the row the mark sits on is what has to be found, not the
-  // paragraph: on a first-N Check of 5,000 units a whole paragraph is taller
-  // than the card, and revealing all of it lands at the wrong end of the text.
   function showFocus() {
     if (root.focusIndex < 0) return
     for (var i = 0; i < lineRepeater.count; i++) {
@@ -91,9 +84,6 @@ Flickable {
         id: line
         required property var modelData
 
-        // The y of the first token of the focused Issue on this line, or -1.
-        // The Flow lays its children out in token order, so the first hit is
-        // the topmost one.
         function focusOffset() {
           for (var i = 0; i < line.children.length; i++) {
             if (line.children[i].focused === true) return line.children[i].y
@@ -103,8 +93,6 @@ Flickable {
 
         width: root.width
         spacing: 0
-        // A blank line is half a line tall: enough to read as a paragraph
-        // break without wasting the card's height.
         height: line.modelData.blank ? Math.round(root.lineHeight / 2) : implicitHeight
 
         Repeater {
@@ -124,8 +112,6 @@ Flickable {
               : token.decision === false ? root.skippedColor
               : root.textColor
             readonly property color markColor: token.decision === true ? root.acceptedColor : root.openColor
-            // A skipped mark keeps its dim text and loses its underline, so
-            // the eye passes over it.
             readonly property bool underlined: token.marked && token.decision !== false && word.implicitWidth > 0
 
             implicitWidth: word.implicitWidth + blanks.implicitWidth

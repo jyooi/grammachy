@@ -1,7 +1,3 @@
-// Node tests for the Corrected text splice and the Chunk span math.
-// Spec sections 5.2, 5.4, 9, and 13.
-// Run with `node --test ui/`.
-
 const test = require("node:test")
 const assert = require("node:assert/strict")
 
@@ -15,8 +11,6 @@ const {
   mergeIssues
 } = require("./splice.js")
 
-// One Selection reused across the tests. The spans are UTF-16 code units into
-// exactly this string.
 const TEXT = "I has two book. She go home."
 const ISSUES = [
   { start: 2, end: 5, original: "has", fix: "have", reason: "Subject and verb do not agree.", category: "grammar" },
@@ -51,8 +45,6 @@ test("an open Issue counts as skipped until the user decides", () => {
 })
 
 test("an astral character before an Issue shifts its span by two code units", () => {
-  // The emoji is one code point but two UTF-16 code units, so "teh" starts at
-  // index 3, not 2. The CLI counts the same way, so plain slicing is correct.
   const text = "\u{1F600} teh cat"
   assert.equal(text.slice(2, 3), " ")
   const issues = [{ start: 3, end: 6, original: "teh", fix: "the", category: "spelling", reason: "Spelling." }]
@@ -78,7 +70,6 @@ test("display spans follow the accept and skip decisions", () => {
     { start: 20, end: 22 }
   ])
 
-  // "have" is one unit longer than "has", so every later mark moves by one.
   assert.deepEqual(displaySpans(ISSUES, decisions([true, false, true])), [
     { start: 2, end: 6 },
     { start: 11, end: 15 },
@@ -111,7 +102,6 @@ test("firstUnits cuts at the limit in UTF-16 code units", () => {
 })
 
 test("firstUnits never splits a surrogate pair", () => {
-  // Two code units per emoji, so a limit of 3 lands inside the second pair.
   const pairs = "\u{1F600}\u{1F600}"
   assert.equal(firstUnits(pairs, 3), "\u{1F600}")
   assert.equal(firstUnits(pairs, 2), "\u{1F600}")
@@ -123,14 +113,6 @@ test("firstUnits treats a missing text as empty", () => {
   assert.equal(firstUnits(null, 10), "")
 })
 
-// ------------------------------------------------ the chunked Check, spec 9
-//
-// A Chunk is checked on its own text, so every span the CLI answers is an
-// offset into that Chunk. The merged review indexes into the whole Draft, so
-// the Chunk's own start is what makes the two agree.
-
-// A Draft with an Issue right after a Chunk boundary, which is the one place
-// a missing shift still looks plausible.
 const DRAFT = "She go home.\n\nThey was late. I has two book.\n\nHe walk fast."
 const CHUNKS = [
   { start: 0, end: 14 },
@@ -152,7 +134,6 @@ test("a Chunk's Issues move by the Chunk start and nothing else changes", () => 
   assert.deepEqual(moved, [
     { start: 19, end: 22, original: "was", fix: "were", reason: "Plural subject.", category: "grammar", ruleId: "X" }
   ])
-  // The envelope the caller parsed stays what the CLI said.
   assert.equal(found[0].start, 5)
 })
 
@@ -168,8 +149,6 @@ test("a shifted span points at the same text in the whole Draft", () => {
   }
 })
 
-// The acceptance criterion of this ticket: an Issue at the very first unit of
-// the second Chunk, which a missing shift would put at the top of the Draft.
 test("an Issue on a Chunk boundary lands on the boundary, not on the Draft start", () => {
   const chunk = CHUNKS[1]
   assert.equal(chunkText(DRAFT, chunk).slice(0, 4), "They")

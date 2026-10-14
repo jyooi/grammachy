@@ -25,10 +25,8 @@ pub const PATH_ENV: &str = "GRAMMACHY_MENU_JSONC";
 /// The row id spec section 10 fixes.
 pub const ENTRY_ID: &str = "apps.grammachy";
 
-/// Nerd Font `md-spellcheck`, shown in the Apps submenu icon column.
 const ENTRY_ICON: char = '\u{f04c6}';
 
-/// What an extension file holds when `setup` has to create one.
 const EMPTY_DOCUMENT: &str = "{\n}\n";
 
 /// Where Omarchy keeps the user's menu extension on this machine.
@@ -86,7 +84,6 @@ fn write(path: &Path, change: impl FnOnce(&str) -> Result<String, String>) -> Re
     Ok(true)
 }
 
-/// The file as it stands, or the empty object a fresh install would carry.
 fn read(path: &Path) -> Result<String, String> {
     match std::fs::read_to_string(path) {
         Ok(content) => Ok(content),
