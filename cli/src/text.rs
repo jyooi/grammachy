@@ -18,7 +18,6 @@ pub fn byte_index_of_utf16(text: &str, offset: usize) -> Option<usize> {
             return Some(byte_index);
         }
         units += character.len_utf16();
-        // The offset split a surrogate pair, so no byte index answers it.
         if units > offset {
             return None;
         }

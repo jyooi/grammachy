@@ -1,11 +1,3 @@
-//! `bin/bootstrap.sh` against a stub curl, spec section 10.
-//!
-//! No test reaches the network: `GRAMMACHY_BOOTSTRAP_CURL` points at a stub
-//! standing in for curl. The stub always answers 200 with a fixture file and
-//! records the arguments it was called with, so the size check, the sha256
-//! check, and the limits the script hands curl are what every scenario here
-//! turns on.
-
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -27,7 +19,6 @@ fn scratch_dir(name: &str) -> PathBuf {
     dir
 }
 
-/// A cli.lock naming one version, one pinned sha256, and one pinned size.
 fn write_lock(dir: &Path, version: &str, sha256: &str, size_bytes: u64) -> PathBuf {
     let path = dir.join("cli.lock");
     fs::write(
@@ -40,7 +31,6 @@ fn write_lock(dir: &Path, version: &str, sha256: &str, size_bytes: u64) -> PathB
     path
 }
 
-/// A cli.lock from before the size pin existed: version and sha256 only.
 fn write_lock_without_size(dir: &Path, version: &str, sha256: &str) -> PathBuf {
     let path = dir.join("cli.lock");
     fs::write(
@@ -51,10 +41,6 @@ fn write_lock_without_size(dir: &Path, version: &str, sha256: &str) -> PathBuf {
     path
 }
 
-/// A stub `curl` that ignores the URL and always serves `asset_content` at
-/// the `-o` path with HTTP 200: something arrives every time, so the size
-/// and hash checks are what decide what happens next. It writes its
-/// arguments, one per line, to `curl-args` beside itself.
 fn write_curl_stub(dir: &Path, asset_content: &[u8]) -> PathBuf {
     let asset_path = dir.join("fixture-asset");
     fs::write(&asset_path, asset_content).expect("the fixture asset is written");
@@ -109,8 +95,6 @@ fn bootstrap(dir: &Path, lock: &Path, curl_stub: &Path) -> Output {
         .expect("bootstrap.sh runs")
 }
 
-/// The same sha256sum bootstrap.sh itself shells out to, so the fixture's
-/// pinned hash is honest about what the real tool would compute.
 fn sha256_hex(bytes: &[u8]) -> String {
     let mut child = Command::new("sha256sum")
         .stdin(Stdio::piped())

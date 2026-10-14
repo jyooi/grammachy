@@ -11,11 +11,6 @@ use crate::envelope::{Category, Issue};
 use crate::issues::normalise;
 use crate::text::utf16_offsets;
 
-/// Lint kinds that report style rather than a mistake.
-///
-/// Depth in v1 is grammar and spelling only and the user's voice is kept, so
-/// these are reported to nobody (spec section 1). The list mirrors the style
-/// filter of the LanguageTool adapter.
 const STYLE_KINDS: [LintKind; 5] = [
     LintKind::Enhancement,
     LintKind::Formatting,
@@ -24,11 +19,6 @@ const STYLE_KINDS: [LintKind; 5] = [
     LintKind::Style,
 ];
 
-/// The `category` of spec section 5.1.
-///
-/// Harper splits a misspelling from a typo by what the writer knew, which the
-/// contract does not, so both are spelling. Everything the adapter still
-/// reports after the style filter is grammar.
 fn category_of(kind: LintKind) -> Option<Category> {
     if STYLE_KINDS.contains(&kind) {
         return None;
@@ -39,11 +29,6 @@ fn category_of(kind: LintKind) -> Option<Category> {
     }
 }
 
-/// The replacement text of the first suggestion, given the text it replaces.
-///
-/// Harper says what to do rather than what the span becomes, so a removal is
-/// the empty replacement and an insertion keeps the original in front of the
-/// added characters.
 fn fix_of(suggestion: &Suggestion, original: &str) -> String {
     match suggestion {
         Suggestion::ReplaceWith(characters) => characters.iter().collect(),
@@ -56,15 +41,10 @@ fn fix_of(suggestion: &Suggestion, original: &str) -> String {
     }
 }
 
-/// One English sentence with no rule id (spec section 5.1).
-///
-/// Harper messages are already written as prose. The whitespace is collapsed to
-/// one space so a wrapped message stays one line in the inspector.
 fn reason_of(message: &str) -> String {
     message.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// The half-open UTF-16 span of a lint, whose own span counts `char`s.
 fn utf16_span(offsets: &[usize], span: Span<char>) -> Option<(usize, usize)> {
     if span.start > span.end {
         return None;
@@ -72,11 +52,6 @@ fn utf16_span(offsets: &[usize], span: Span<char>) -> Option<(usize, usize)> {
     Some((*offsets.get(span.start)?, *offsets.get(span.end)?))
 }
 
-/// Turn one lint into an Issue, or drop it.
-///
-/// A lint is dropped when it is style, when its span does not address the
-/// checked text, or when it carries no suggestion. A suggestion that changes
-/// nothing is dropped by [`normalise`].
 fn issue_of(offsets: &[usize], characters: &[char], lint: &Lint) -> Option<Issue> {
     let category = category_of(lint.lint_kind)?;
     let (start, end) = utf16_span(offsets, lint.span)?;
@@ -94,8 +69,6 @@ fn issue_of(offsets: &[usize], characters: &[char], lint: &Lint) -> Option<Issue
         fix,
         reason: reason_of(&lint.message),
         category,
-        // Harper names no rule on a lint, so the kind is the closest thing a
-        // bug report can carry.
         rule_id: Some(lint.lint_kind.to_string_key()),
     })
 }

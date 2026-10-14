@@ -14,7 +14,6 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
-/// Whether a cancel has arrived. Set from the handler, read from the transfer.
 static CANCELLED: AtomicBool = AtomicBool::new(false);
 
 /// Take SIGTERM and SIGINT over for the rest of this run.

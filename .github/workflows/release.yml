@@ -5,11 +5,6 @@ on:
     tags:
       - "v*"
 
-# Every input to the build is pinned, so a rebuilt tag makes the same bytes:
-# each action by commit, the compiler by cli/rust-toolchain.toml, the crates
-# by Cargo.lock, and the musl linker by package version on a named runner.
-# The attestation step records which commit and which run produced the
-# asset, and bin/release-lock.sh checks it before it pins the hash.
 jobs:
   build:
     name: Build and attach the release binary

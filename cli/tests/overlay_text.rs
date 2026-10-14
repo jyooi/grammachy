@@ -1,17 +1,5 @@
-//! Every `Text` item that draws dynamic content must draw it as plain text.
-//!
-//! The Selection, the Issues an Engine answers, and the messages an error
-//! envelope carries are all strings the plugin did not write. A `Text` item
-//! left on its default `AutoText` mode reads markup in such a string as rich
-//! text, which can restyle the card or ask Qt to fetch an image. So every
-//! `Text` whose `text` is not a string literal declares `Text.PlainText`.
-//!
-//! `Overlay.qml` and the cards cannot be instantiated outside the shell's
-//! plugin loader, so this is a source-scanning guard, like `overlay_limit.rs`.
-
 use std::path::{Path, PathBuf};
 
-/// One `Text {` item of one QML file, as the lines of its block.
 struct TextItem {
     file: String,
     line: usize,
@@ -22,7 +10,6 @@ fn repo_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("..")
 }
 
-/// Every QML file the plugin draws: the two roots and the cards under `ui/`.
 fn qml_files() -> Vec<PathBuf> {
     let root = repo_root();
     let mut files = vec![root.join("Overlay.qml"), root.join("BarWidget.qml")];
@@ -37,8 +24,6 @@ fn qml_files() -> Vec<PathBuf> {
     files
 }
 
-/// A line with its string literals blanked, so a brace inside one is not
-/// counted as a block edge.
 fn without_strings(line: &str) -> String {
     let mut out = String::with_capacity(line.len());
     let mut inside = false;
@@ -52,11 +37,6 @@ fn without_strings(line: &str) -> String {
     out
 }
 
-/// The `Text {` items of one file.
-///
-/// A block runs from the line that opens it to the line that closes it, by
-/// counting braces. `MarkedText {` and other types whose name ends in `Text`
-/// are not `Text` and are skipped.
 fn text_items(path: &Path) -> Vec<TextItem> {
     let source = std::fs::read_to_string(path)
         .unwrap_or_else(|error| panic!("{} is readable: {error}", path.display()));
@@ -93,8 +73,6 @@ fn text_items(path: &Path) -> Vec<TextItem> {
     items
 }
 
-/// The value of the first `text:` binding in a block, or `None` when the item
-/// is only a container for a binding set elsewhere.
 fn text_binding(block: &[String]) -> Option<String> {
     block.iter().find_map(|line| {
         line.trim()
@@ -103,7 +81,6 @@ fn text_binding(block: &[String]) -> Option<String> {
     })
 }
 
-/// Whether one `text:` value is a string literal and nothing else.
 fn is_literal(value: &str) -> bool {
     value.len() >= 2
         && value.starts_with('"')
@@ -123,7 +100,6 @@ fn the_scan_finds_the_text_items_of_the_cards() {
     assert!(total > 30, "the scan reads the Text items, found {total}");
 }
 
-/// The guard itself: dynamic content is drawn as plain text everywhere.
 #[test]
 fn every_dynamic_text_item_draws_plain_text() {
     let mut offenders = Vec::new();

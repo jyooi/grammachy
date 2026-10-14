@@ -1,44 +1,18 @@
-// The Engines list of the Settings view, spec sections 5.4 and 7.
-//
-// Loaded twice: by QML as `Engines`, and by `engines.test.js` under node.
-// Nothing here may touch a QML or a node API, because each side only has one
-// of them.
-//
-// This file owns the whole route from one run of `grammachy engine` to the row
-// `ui/EnginesView.qml` draws: `read` reads the envelope of spec section 5.4,
-// `rows` turns it into what a row needs, `hint` writes the line under the name,
-// `actions` says which button it carries, and `note` turns a failure into the
-// one line the view shows. Keeping every half here is what lets a node test run
-// a stub binary and read the row back, which no test of the QML could do.
-//
-// It is the shape of `ui/models.js` with the row swapped, and it says the same
-// three state words, because a component on disk and a weights file on disk
-// answer the same question. The two files stay apart because QML gives a `.js`
-// no way to import another one that a node `require` also understands, and one
-// byte formatter is a cheaper thing to keep in step than a loader that only
-// half the callers have.
-
 var CONTRACT_VERSION = 1
 
-// The states one component can be in, spec section 5.4.
 var ABSENT = "absent"
 var PARTIAL = "partial"
 var READY = "ready"
 var STATES = [ABSENT, PARTIAL, READY]
 
-// The codes `grammachy engine` can answer. The first two are its own; the third
-// is the shared code of spec section 5.1.
 var CANCELLED = "cancelled"
 var DOWNLOAD_FAILED = "download_failed"
 var BAD_ARGUMENTS = "bad_arguments"
 
-// What a row offers, spec section 7. The verb is the tooltip and the name is in
-// the hint line, so the button itself carries an icon and no text label.
 var INSTALL = "install"
 var CANCEL = "cancel"
 var REMOVE = "remove"
 
-// The icon of each action, from the set `ui/CardHero.qml` already draws.
 var ACTION_ICONS = {
   install: "󰇚",
   cancel: "󰅖",
@@ -55,23 +29,12 @@ function isPlainObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value)
 }
 
-// The state one row reports, or `absent` for anything the contract does not
-// list. An unknown state is the same statement as nothing on disk: nothing here
-// can be installed twice, and offering Install is the one useful answer.
 function stateOf(row) {
   if (!isPlainObject(row)) return ABSENT
   var state = String(row.state)
   return STATES.indexOf(state) === -1 ? ABSENT : state
 }
 
-// What one run of `grammachy engine` left on stdout, spec section 5.4.
-//
-// The answer carries either `report`, whose rows the view draws, or `error`,
-// the code and message the note is made from. Exactly one of the two is set.
-//
-// A missing or mismatched `contractVersion` and no JSON at all both read as
-// `bad_arguments`, because both say the same thing about the companion tool:
-// it is missing or out of date. Neither leaves a message the shell could trust.
 function read(stdout) {
   var envelope = null
   try {
@@ -107,8 +70,6 @@ function read(stdout) {
   }
 }
 
-// One drawable row per envelope row, with everything the view needs already
-// decided. A row without a slug is dropped: nothing can be done with it.
 function rows(engines) {
   var out = []
   for (var i = 0; i < engines.length; i++) {
@@ -130,11 +91,6 @@ function rows(engines) {
   return out
 }
 
-// The rows of an `install` or a `remove` answer merged into the list on screen.
-//
-// Those two verbs answer with the one row they acted on, so the list keeps
-// every other row rather than shrinking to one. A slug the list does not carry
-// is appended, which only a catalogue change between two runs could cause.
 function merged(current, answered) {
   var next = Array.isArray(current) ? current.slice() : []
   var incoming = Array.isArray(answered) ? answered : []
@@ -147,19 +103,6 @@ function merged(current, answered) {
   return next
 }
 
-// Everything one answer changes on screen, or `null` for an answer that is
-// already out of date.
-//
-// `list` answers every row, so its rows are the whole list. `install` and
-// `remove` answer the one row they acted on, so a merge is what keeps the rest.
-//
-// A `list` run reads the directory the moment it starts, while `install`
-// answers only after it has hashed the archive and unpacked it, which takes
-// tens of seconds on a 250 MB file. So a poll that fired during the hash is
-// still in flight when the verb answers, and it truthfully reports the row as
-// `partial` while the tree on disk is already there. `stamp` says which run
-// answered and `floor` is the first run no verb has overtaken, so the older of
-// the two loses and a finished row never goes back to `partial`.
 function absorbed(current, report, stamp, floor) {
   if (!isPlainObject(report)) return null
   var verb = String(report.verb || "")
@@ -172,9 +115,6 @@ function absorbed(current, report, stamp, floor) {
   }
 }
 
-// A byte count as the list says it, the rule `ui/models.js` uses for the same
-// question: the unit is chosen per number, one decimal is kept, and the step is
-// 1024, because that is what a file manager shows for the same file.
 var UNITS = ["B", "KB", "MB", "GB", "TB"]
 
 function bytes(count) {
@@ -188,16 +128,12 @@ function bytes(count) {
   return (Math.round(value * 10) / 10).toFixed(1) + " " + UNITS[index]
 }
 
-// The `.part` length to draw for one row. A `live` below zero, or no `live` at
-// all, means the list is the only answer there is.
 function partialBytesOf(row, live) {
   var value = Number(live)
   if (isFinite(value) && value >= 0) return value
   return isPlainObject(row) ? Number(row.partialBytes) || 0 : 0
 }
 
-// How far an install has got, from 0 to 1. A row with no pinned size cannot be
-// measured, so it reads as nothing done rather than as done.
 function share(row, live) {
   var size = isPlainObject(row) ? Number(row.sizeBytes) || 0 : 0
   if (size <= 0) return 0
@@ -206,8 +142,6 @@ function share(row, live) {
   return Math.max(0, Math.min(1, done / size))
 }
 
-// The `.part` length one named row reports, or 0 for a slug the list does not
-// carry. This is what the overlay keeps the moving byte count in.
 function partialOf(engines, slug) {
   var list = Array.isArray(engines) ? engines : []
   var wanted = String(slug || "")
@@ -219,23 +153,11 @@ function partialOf(engines, slug) {
   return 0
 }
 
-// Every field a row carries, which is the whole of what the list draws.
 var ROW_FIELDS = [
   "slug", "name", "version", "state", "partialBytes", "sizeBytes",
   "licence", "needsJava", "path", "fromPackage"
 ]
 
-// Whether two lists of rows say the same thing.
-//
-// A QML Repeater rebuilds every delegate the moment its array is replaced, and
-// the poll answers once a second, so without this the row is destroyed and
-// recreated once a second: the progress bar restarts its animation rather than
-// advancing, an open tooltip goes, and a press whose release lands after a
-// rebuild never becomes a click.
-//
-// `movingSlug` is the row an install is running on. Its `.part` length is the
-// one number the poll is there to move, and the bar reads it from its own
-// property, so a change to it alone is not a reason to rebuild the list.
 function sameRows(left, right, movingSlug) {
   var a = Array.isArray(left) ? left : []
   var b = Array.isArray(right) ? right : []
@@ -253,12 +175,6 @@ function sameRows(left, right, movingSlug) {
   return true
 }
 
-// The one line under a row's name, spec section 7.
-//
-// It names the download size and the Java requirement while the component is
-// not here, because those are the whole cost of the button beside it. Once it
-// is installed the size is spent and the line says where it came from instead:
-// only a tree this plugin unpacked is one Remove can take away again.
 function hint(row, busy, live) {
   var state = stateOf(row)
   var size = bytes(isPlainObject(row) ? row.sizeBytes : 0)
@@ -277,12 +193,6 @@ function hint(row, busy, live) {
   return "About " + size + java + ", " + licence
 }
 
-// Whether a Check can run on this engine right now, spec section 7.
-//
-// The pacman package counts: the adapter runs it when no installed tree is
-// there, so an engine it supplies is one the dropdown may offer. Only a slug
-// the list carries is asked at all; every other engine has nothing to install
-// and is always available.
 function isAvailable(engines, slug) {
   var wanted = String(slug || "")
   var list = Array.isArray(engines) ? engines : []
@@ -294,8 +204,6 @@ function isAvailable(engines, slug) {
   return true
 }
 
-// Every engine slug the list says is not available, so the Settings dropdown
-// can leave those rows out (spec section 7).
 function unavailable(engines) {
   var list = Array.isArray(engines) ? engines : []
   var out = []
@@ -307,13 +215,6 @@ function unavailable(engines) {
   return out
 }
 
-// Which buttons one row carries, spec section 7.
-//
-// The row an install is running on offers Cancel alone: Remove is about a tree
-// that is not there yet. An installed tree offers Remove. A component the
-// pacman package supplies offers nothing, because Remove here would delete a
-// directory this plugin never wrote and would leave the package untouched: that
-// is a button that looks like it does something and does not.
 function actions(row, options) {
   var context = isPlainObject(options) ? options : ({})
   var state = stateOf(row)
@@ -329,15 +230,6 @@ function actions(row, options) {
   return out
 }
 
-// Whether a row's buttons are drawn but cannot be pressed.
-//
-// One verb of `grammachy engine` runs at a time, so the answer is one fact:
-// `working` is true whenever a verb is in flight, which is a running install, a
-// running remove, and an open Remove confirm alike. The row an install belongs
-// to keeps its Cancel, because stopping the transfer is the point.
-//
-// A blocked button stays on the row and goes dim rather than vanishing, which
-// says why nothing happens and keeps the list from shifting under a click.
 function isBlocked(row, options) {
   var context = isPlainObject(options) ? options : ({})
   if (context.working !== true) return false
@@ -346,20 +238,11 @@ function isBlocked(row, options) {
   return !(slug.length > 0 && busySlug === slug)
 }
 
-// Whether a row needs a system package this machine lacks, spec section 7.
-//
-// `missing` is the list `Deps.absentFor(dependencies, slug)` answers: the
-// packages LanguageTool runs on and is unpacked with. A row with one reads
-// "Needs ..." beside its name and names those packages for Omarchy Install.
-// Its own Install stays disabled until they are there. An install with no
-// bsdtar cannot unpack. A server with no runtime fails the first Check.
 function runtimeMissing(row, missing) {
   if (!isPlainObject(row)) return false
   return Array.isArray(missing) && missing.length > 0
 }
 
-// Whether one button of a row is drawn but cannot be pressed: everything
-// `isBlocked` says, plus Install while a package it needs is missing.
 function actionBlocked(action, row, options) {
   if (isBlocked(row, options)) return true
   var context = isPlainObject(options) ? options : ({})
@@ -377,13 +260,9 @@ function actionTooltip(action, name) {
   return name ? verb + " " + name : verb
 }
 
-// What a note is: something that went wrong, or something that simply
-// happened. A cancel is the reader's own decision, so drawing it in the colour
-// of a failure would tell them they broke something.
 var NOTICE = "notice"
 var FAILURE = "failure"
 
-// The one line the list shows after a verb, spec section 5.4.
 function note(code, message, name) {
   var settled = String(code)
   var component = name ? String(name) : "the engine"

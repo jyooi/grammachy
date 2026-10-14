@@ -14,7 +14,6 @@ pub fn normalise(issues: Vec<Issue>) -> Vec<Issue> {
         .filter(|issue| issue.fix != issue.original)
         .collect();
 
-    // A shorter span first keeps the tighter of two Issues that start together.
     issues.sort_by_key(|issue| (issue.start, issue.end));
 
     let mut kept: Vec<Issue> = Vec::with_capacity(issues.len());

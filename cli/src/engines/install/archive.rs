@@ -44,8 +44,6 @@ pub fn extractor() -> Extractor {
 pub fn bsdtar(archive: &Path, directory: &Path) -> Result<(), String> {
     let output = Command::new("bsdtar")
         .arg("--extract")
-        // The archive is admitted already, and these keep an unpack inside
-        // the staging directory whatever a member says about itself.
         .arg("--no-same-owner")
         .arg("--no-same-permissions")
         .arg("--file")

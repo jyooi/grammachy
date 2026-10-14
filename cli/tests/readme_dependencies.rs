@@ -1,10 +1,3 @@
-//! The README `### Dependencies` section and the `doctor` dependency table
-//! must name the same packages, so a reviewer who reads either sees the whole
-//! set and neither can drift (spec section 10).
-//!
-//! The section carries one Markdown table with the package in its first
-//! column, and this test reads that column back.
-
 use grammachy::doctor::deps::SPECS;
 
 fn readme() -> String {
@@ -12,7 +5,6 @@ fn readme() -> String {
     std::fs::read_to_string(&path).expect("README.md is readable")
 }
 
-/// The lines of one `###` section, up to the next heading of any level.
 fn section<'a>(text: &'a str, heading: &str) -> Vec<&'a str> {
     text.lines()
         .skip_while(|line| line.trim() != heading)
@@ -21,7 +13,6 @@ fn section<'a>(text: &'a str, heading: &str) -> Vec<&'a str> {
         .collect()
 }
 
-/// The `(package, required)` rows of the section's Markdown table.
 fn table_rows(lines: &[&str]) -> Vec<(String, bool)> {
     lines
         .iter()

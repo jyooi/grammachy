@@ -10,12 +10,6 @@ use grammachy::settings::StoredSettings;
 use grammachy::setup::{Setup, SetupEnvelope};
 use grammachy::{check, chunk, doctor};
 
-/// What a run prints on stdout, already rendered.
-///
-/// `check` and `chunk` render one JSON envelope (spec section 5.1).
-/// `doctor` renders its report (spec section 10).
-/// `setup` renders its JSON envelope (spec section 10), and so does `engine`
-/// (spec section 5.3).
 struct Output {
     text: String,
     exit_code: i32,
@@ -69,7 +63,6 @@ impl From<SetupEnvelope> for Output {
 fn main() -> ExitCode {
     let output = match run() {
         Some(output) => output,
-        // clap printed help or the version already.
         None => return ExitCode::SUCCESS,
     };
 
@@ -83,7 +76,6 @@ fn main() -> ExitCode {
     }
 }
 
-/// `None` means clap handled the run itself, such as `--help`.
 fn run() -> Option<Output> {
     let cli = match Cli::try_parse() {
         Ok(cli) => cli,
@@ -106,8 +98,6 @@ fn run() -> Option<Output> {
             };
             Some(check::run(&text, &options).into())
         }
-        // Chunks are packed to the selected engine's Check size limit, so
-        // `chunk` resolves the engine the same way `check` does.
         Command::Chunk(args) => {
             let text = match read_stdin() {
                 Ok(text) => text,
@@ -116,7 +106,6 @@ fn run() -> Option<Output> {
             Some(chunk::run(&text, engine_of(args.engine).check_limit_utf16()).into())
         }
         Command::Doctor(args) => {
-            // `doctor` reads no stdin: it reports the machine, not a Selection.
             let options = CheckOptions::resolve(
                 &CheckArgs {
                     native: None,
@@ -140,15 +129,10 @@ fn run() -> Option<Output> {
             };
             Some(envelope.into())
         }
-        // `engine` reads no stdin and no Settings entry: the verb names the
-        // component, and which engine a Check runs on says nothing about what
-        // is on disk (spec section 5.3).
         Command::Engine(args) => Some(engine_install::run(&args.verb).into()),
     }
 }
 
-/// The engine a subcommand that takes no other Check flag runs with: the flag,
-/// then the stored entry, then the default (spec section 7).
 fn engine_of(flag: Option<EngineSlug>) -> EngineSlug {
     CheckOptions::resolve(
         &CheckArgs {
@@ -166,7 +150,6 @@ fn bad_stdin(message: String) -> Output {
     Envelope::error(ErrorCode::BadArguments, message).into()
 }
 
-/// The one-line summary of a clap error, without its "error: " prefix.
 fn first_line(error: &clap::Error) -> String {
     let rendered = error.render().to_string();
     let line = rendered.lines().next().unwrap_or_default().trim();

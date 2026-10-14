@@ -4,19 +4,10 @@ import qs.Commons
 import qs.Ui
 import "errors.js" as Errors
 
-// The error cards of spec section 8, drawn from one card model.
-//
-// The model comes from `ui/errors.js`, which owns the title, the body, and the
-// buttons of every code. This file draws that model and reports which button
-// was pressed; the routing itself lives in Overlay.qml.
 ColumnLayout {
   id: root
 
-  // A card model from `Errors.card(code, options)`, or null while there is
-  // no error to show.
   property var card: null
-  // The one-line `grammachy doctor` answer, spec section 8. It shows on the
-  // `engine_unavailable` card only, and only once doctor has answered.
   property string diagnosis: ""
 
   signal actionRequested(string action)
@@ -52,8 +43,6 @@ ColumnLayout {
     font.pixelSize: Style.font.body
   }
 
-  // The doctor line names the missing piece and the exact command that
-  // installs it, so it reads as the next step rather than as more prose.
   Text {
     Layout.fillWidth: true
     visible: root.showsDiagnosis
@@ -65,7 +54,6 @@ ColumnLayout {
     font.pixelSize: Style.font.bodySmall
   }
 
-  // Spec section 8: what the CLI said shows under the body, in monospace.
   Text {
     Layout.fillWidth: true
     visible: root.message.length > 0

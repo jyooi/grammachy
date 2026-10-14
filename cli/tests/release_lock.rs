@@ -1,11 +1,3 @@
-//! `bin/release-lock.sh` against a stub curl and a stub gh, spec section 10.
-//!
-//! No test reaches the network or GitHub: `GRAMMACHY_BOOTSTRAP_CURL` serves
-//! a fixture asset and `GRAMMACHY_BOOTSTRAP_GH` stands in for
-//! `gh attestation verify`. The provenance check is the gate between the
-//! download and the pin, so the stub's exit status is what each scenario
-//! turns on.
-
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -47,7 +39,6 @@ fn make_executable(path: &Path) {
     fs::set_permissions(path, perms).expect("the stub is made executable");
 }
 
-/// A stub `curl` that serves `asset_content` at the `-o` path with HTTP 200.
 fn write_curl_stub(dir: &Path, asset_content: &[u8]) -> PathBuf {
     let asset_path = dir.join("fixture-asset");
     fs::write(&asset_path, asset_content).expect("the fixture asset is written");
@@ -71,9 +62,6 @@ fn write_curl_stub(dir: &Path, asset_content: &[u8]) -> PathBuf {
     script_path
 }
 
-/// A stub `gh` that records its arguments to `gh-args` beside itself and
-/// exits with `status`, the way `gh attestation verify` answers a verified
-/// or an unverified asset.
 fn write_gh_stub(dir: &Path, status: i32) -> PathBuf {
     let args_path = dir.join("gh-args");
     let script_path = dir.join("gh-stub.sh");
@@ -97,7 +85,6 @@ fn gh_args(dir: &Path) -> Vec<String> {
         .collect()
 }
 
-/// The same sha256sum release-lock.sh itself shells out to.
 fn sha256_hex(bytes: &[u8]) -> String {
     let mut child = Command::new("sha256sum")
         .stdin(Stdio::piped())

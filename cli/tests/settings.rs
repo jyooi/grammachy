@@ -1,14 +1,6 @@
-//! Settings precedence, spec section 7: flags, then the plugin's entry in
-//! `shell.json`, then the built-in defaults.
-//!
-//! No test reads or writes the real `~/.config/omarchy/shell.json`. The
-//! documents live in strings, and the one test that goes through the file
-//! layer writes a temporary file and points the binary at it.
-
 use grammachy::args::{CheckArgs, CheckOptions, EngineSlug, NativeLanguage, TargetEnglish};
 use grammachy::settings::StoredSettings;
 
-/// A `shell.json` whose bar layout carries the plugin entry.
 fn document(entry_body: &str) -> String {
     format!(
         r#"{{
@@ -28,8 +20,6 @@ fn stored(entry_body: &str) -> StoredSettings {
     StoredSettings::from_json(&document(entry_body))
 }
 
-/// Flags with every key set, so a resolved value that is not this one came
-/// from a lower layer.
 fn all_flags() -> CheckArgs {
     CheckArgs {
         native: Some(NativeLanguage::Fr),
@@ -52,8 +42,6 @@ fn defaults_apply_with_no_flags_and_no_file() {
 
     assert_eq!(options.native, NativeLanguage::None);
     assert_eq!(options.target, TargetEnglish::EnUs);
-    // Spec section 4, HUF-237: `harper` is the one engine compiled into the
-    // binary, so a fresh install checks with it and downloads nothing.
     assert_eq!(options.engine, EngineSlug::Harper);
     assert_eq!(options, CheckOptions::default());
 }
@@ -144,10 +132,6 @@ fn a_stored_value_of_the_wrong_json_type_reads_as_the_default() {
     );
 }
 
-/// HUF-240: the `openai` and `openrouter` engines are gone. A `shell.json`
-/// written by an older build may still name either one, and that stored
-/// value must fall back to the default engine rather than erroring, the way
-/// any other unrecognized `engine` value already does.
 #[test]
 fn a_stored_engine_of_a_removed_slug_falls_back_to_the_default() {
     for removed in ["openai", "openrouter"] {
@@ -162,8 +146,6 @@ fn a_stored_engine_of_a_removed_slug_falls_back_to_the_default() {
     }
 }
 
-/// A key the spec never defined, or one this build no longer reads, must not
-/// stop the rest of the entry from resolving.
 #[test]
 fn unknown_stored_keys_are_ignored_without_error() {
     let entry = stored(
@@ -183,8 +165,6 @@ fn unknown_stored_keys_are_ignored_without_error() {
     assert_eq!(options.engine, EngineSlug::Harper);
 }
 
-/// Spec section 7: the two hotkeys are trimmed, and an empty or missing value
-/// reads as unknown, the same rule every other key follows.
 #[test]
 fn a_stored_hotkey_is_trimmed() {
     let entry = stored(r#""quickHotkey": "  SUPER + H  ", "composeHotkey": "SUPER + SHIFT + H""#);

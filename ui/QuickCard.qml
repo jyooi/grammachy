@@ -5,71 +5,33 @@ import qs.Ui
 import "format.js" as Format
 import "capture.js" as Capture
 
-// The quick popup card, spec section 6, laid out after variant B of the
-// HUF-174 prototype: hero, marked text, inspector strip, footer.
-//
-// The gear in the hero flips the body to the Settings view of spec section 7
-// and back, so the check view itself stays clean. The check state lives on
-// behind it: flipping back shows the same Issues with the same decisions.
-//
-// A failed Check swaps the body for one of the error cards of spec section 8,
-// which `ui/ErrorCard.qml` draws from a model that `ui/errors.js` owns. The
-// too-long card of section 6 is this file's own, because its size bar and its
-// handover to Compose belong to the popup rather than to that model.
-//
-// The card renders state and reports intent. Capture, the Check, the key map,
-// the clipboard, and the settings storage all live in Overlay.qml.
 BorderSurface {
   id: root
 
-  // "empty", "checking", "result", "error", "notice", "setup", or "toolong".
   property string phase: "checking"
-  // The exact text the Check ran on. Every Issue span indexes into it.
   property string sourceText: ""
-  // The whole capture, which is longer than sourceText after a first-N Check.
   property string fullText: ""
   property bool truncated: false
-  // Spec section 3: a capture that is the last consumed one again is stale, so
-  // the empty state offers that kept text rather than a second capture. Empty
-  // means there is none to offer and the button stays away.
   property string lastCapturedText: ""
-  // One Check takes this many UTF-16 code units, spec section 6. The limit
-  // belongs to the Engine, so the overlay passes the selected engine's; this
-  // default is the default engine's, which `ui/limits.js` also answers.
   property int limitUnits: 5000
   property var issues: []
-  // One entry per Issue: true accepted, false skipped, null still open.
   property var decisions: []
   property int focusIndex: 0
   property string engine: ""
   property int elapsedMs: 0
-  // Apply has run on the Corrected text as it stands.
   property bool applied: false
   property bool autoReplace: false
-  // This run took a Selection from a source window, spec section 3. A run that
-  // took none has none to replace, so Apply on it is copy-only.
   property bool runCaptured: false
   property string noticeTitle: ""
   property string noticeBody: ""
-  // The hero line a notice shows, because "check did not finish" is not true
-  // of a surface that is simply not built yet.
   property string noticeMeta: ""
-  // What the CLI said, shown in monospace under the too-long body, spec 8.
   property string engineMessage: ""
 
-  // The error cards of spec section 8. `errorCard` is a model from
-  // `ui/errors.js` and `diagnosis` is the one-line `grammachy doctor` answer
-  // that the `engine_unavailable` card shows under its body.
   property var errorCard: null
   property string diagnosis: ""
 
-  // The setup card of spec section 10, shown from the `setup` phase.
   property var setupCard: null
 
-  // The Settings view, spec section 7. The values arrive already resolved
-  // through the defaults, so an unknown stored value shows the default here.
-  // `engineSetting` is the stored choice; `engine` above is what ran the
-  // Check that is on screen, which the meta line names.
   property bool settingsOpen: false
   property string nativeLanguage: "none"
   property string targetEnglish: "en-US"
@@ -77,8 +39,6 @@ BorderSurface {
   property string quickHotkey: "SUPER + SHIFT + Q"
   property string composeHotkey: "SUPER + ALT + Q"
 
-  // The Engines list of spec section 5.4, passed straight to the Settings view.
-  // The card knows nothing about it either: Overlay.qml owns every process.
   property var engines: []
   property string engineBusy: ""
   property double engineBusyBytes: 0
@@ -87,14 +47,9 @@ BorderSurface {
   property string enginesDirectory: ""
   property double enginesFreeBytes: 0
   property var engineNote: null
-  // The dependency table of spec section 10, read by Overlay.qml through
-  // `grammachy doctor`.
   property var dependencies: []
 
   property int cardWidth: Style.space(680)
-  // The whole card fits in this, spec section 6.
-  // The marked text is what gives.
-  // A long Selection scrolls rather than pushing the card off screen.
   property int maxCardHeight: Style.space(600)
 
   signal accepted(int index)
@@ -115,15 +70,9 @@ BorderSurface {
   signal engineRemoveRequested(string slug)
   signal engineRemoveConfirmed(string slug)
   signal engineKeepRequested()
-  // One button of an error card, spec section 8. The action is a button id
-  // from `ui/errors.js`; Overlay.qml owns where each one goes.
   signal errorActionRequested(string action)
-  // One button of the setup card, spec section 10. The action is a button id
-  // from `ui/setupCard.js`; Overlay.qml owns where each one goes.
   signal setupActionRequested(string action)
 
-  // MarkedText owns the accepted green, so the inspector and the empty state
-  // read it from there rather than repeating the literal.
   readonly property color acceptedColor: marked.acceptedColor
 
   readonly property int issueCount: issues ? issues.length : 0
@@ -132,21 +81,14 @@ BorderSurface {
   readonly property int openCount: root.issueCount - root.acceptedCount - root.skippedCount
   readonly property bool hasIssues: root.phase === "result" && root.issueCount > 0
   readonly property bool hasError: root.phase === "error" && Boolean(root.errorCard)
-  // The Settings view takes the body over; every check row hangs off this.
   readonly property bool showsCheck: !root.settingsOpen
   readonly property bool isEmptyResult: root.phase === "result" && root.issueCount === 0
-  // Nothing new to check, spec sections 3 and 6.
   readonly property bool isNothingNew: root.phase === "empty"
   readonly property bool hasLastCapture: root.lastCapturedText.length > 0
-  // Spec section 6: Replace only works while the Selection is still
-  // highlighted in the source window. After `Check last text again` there is
-  // no live Selection, so the label, the tooltip, and Apply all say copy.
   readonly property bool replaces: root.autoReplace && root.runCaptured
   readonly property var focusedIssue: root.hasIssues && root.focusIndex >= 0 && root.focusIndex < root.issueCount
     ? root.issues[root.focusIndex] : null
 
-  // The height every part but the marked text takes. Measured rather than
-  // guessed, so the text region absorbs whatever the rest of the card needs.
   readonly property int chromeHeight: hero.implicitHeight + tail.implicitHeight
     + layout.spacing * 2 + root.contentTopInset + root.contentBottomInset
   readonly property int textHeight: Math.max(Style.space(96),
@@ -158,8 +100,6 @@ BorderSurface {
     return total
   }
 
-  // The counted sizes of the too-long card are worded in format.js, which
-  // Compose prints from too and which a node test owns.
   function grouped(count) {
     return Format.grouped(count)
   }
@@ -194,8 +134,6 @@ BorderSurface {
   implicitWidth: root.cardWidth
   implicitHeight: layout.implicitHeight + root.contentTopInset + root.contentBottomInset
 
-  // The card owns its own click so a press inside it never reaches the
-  // backdrop that closes the overlay.
   MouseArea {
     anchors.fill: parent
     onClicked: {}
@@ -217,19 +155,12 @@ BorderSurface {
       Layout.fillWidth: true
 
       metaText: root.metaLine()
-      // A first-N Check saw part of the Selection, which the reader has to
-      // know before they trust the counts above.
       noteText: root.truncated
         ? Format.truncatedNote(root.sourceText.length, root.fullText.length)
         : ""
       showsAutoReplace: true
       autoReplace: root.autoReplace
       settingsOpen: root.settingsOpen
-      // Spec sections 2 and 6: the header carries the Selection into Compose,
-      // even one under the limit, and Clear drops it. Both act on the text on
-      // screen, so both stand here. The too-long card offers the same handover
-      // as its primary button, so the hero stands aside there, and the empty
-      // state has nothing left to clear.
       actions: root.showsCheck && root.phase !== "toolong"
         ? (root.isNothingNew
           ? [{ id: "compose", text: "Compose", tooltip: "Open the selection in Compose", primary: false }]
@@ -273,8 +204,6 @@ BorderSurface {
       onSettingChanged: function(name, value) { root.settingChanged(name, value) }
     }
 
-    // ---------------------------------------------------------- marked text
-
     MarkedText {
       id: marked
 
@@ -288,8 +217,6 @@ BorderSurface {
       focusIndex: root.focusIndex
       onMarkActivated: function(index) { root.focusRequested(index) }
     }
-
-    // ---------------------------------------- every other card, and the feet
 
     ColumnLayout {
       id: tail
@@ -337,9 +264,6 @@ BorderSurface {
         }
       }
 
-      // The error cards of spec section 8. They carry their own buttons, so
-      // the footer below stays out of their way. No bottom margin: the empty
-      // footer already leaves the column's own spacing under them.
       ErrorCard {
         Layout.fillWidth: true
         Layout.topMargin: Style.spacing.md
@@ -350,8 +274,6 @@ BorderSurface {
         onActionRequested: function(action) { root.errorActionRequested(action) }
       }
 
-      // The setup card of spec section 10. It carries its own buttons too, the
-      // same way the error cards above do.
       SetupCard {
         Layout.fillWidth: true
         Layout.topMargin: Style.spacing.md
@@ -361,11 +283,6 @@ BorderSurface {
         onActionRequested: function(action) { root.setupActionRequested(action) }
       }
 
-      // --------------------------------------------- nothing new to check
-
-      // Spec sections 3 and 6: the summon found the selection the last Check
-      // already ran on, or found nothing at all. Neither is worth a Check, so
-      // the popup says so and offers the kept text.
       ColumnLayout {
         Layout.fillWidth: true
         Layout.maximumWidth: layout.width
@@ -394,8 +311,6 @@ BorderSurface {
           font.pixelSize: Style.font.body
         }
       }
-
-      // ------------------------------------------------------- empty state
 
       ColumnLayout {
         Layout.fillWidth: true
@@ -436,8 +351,6 @@ BorderSurface {
         }
       }
 
-      // ---------------------------------------------------- too-long card
-
       ColumnLayout {
         Layout.fillWidth: true
         Layout.topMargin: Style.spacing.md
@@ -455,8 +368,6 @@ BorderSurface {
           font.bold: true
         }
 
-        // The size bar: the whole track is what the user selected, the filled
-        // part is what one Check takes. The gap is the point of the card.
         Item {
           id: sizeBar
 
@@ -526,8 +437,6 @@ BorderSurface {
         }
       }
 
-      // ----------------------------------------------------- inspector strip
-
       Inspector {
         Layout.fillWidth: true
         visible: root.showsCheck && root.hasIssues
@@ -539,8 +448,6 @@ BorderSurface {
         onAccepted: function(index) { root.accepted(index) }
         onSkipped: function(index) { root.skipped(index) }
       }
-
-      // ---------------------------------------------------------- the footer
 
       RowLayout {
         Layout.fillWidth: true
@@ -556,7 +463,6 @@ BorderSurface {
         Item { Layout.fillWidth: true }
 
         Button {
-          // An error card and the setup card draw their own Close.
           visible: root.showsCheck && !root.hasIssues && !root.hasError && root.phase !== "setup"
           text: "Close"
           tooltipText: "Esc"
@@ -608,8 +514,6 @@ BorderSurface {
 
         Button {
           visible: root.showsCheck && root.hasIssues
-          // Spec 6: Apply stays off until the user accepts one Fix, because
-          // handing the Selection back unchanged is never what they asked for.
           enabled: root.acceptedCount > 0 && !root.applied
           opacity: enabled ? 1.0 : 0.4
           text: root.applyLabel()
@@ -620,8 +524,6 @@ BorderSurface {
           onClicked: root.applyRequested()
         }
 
-        // Settings persists on change, so the only thing left to do is leave.
-        // Spec section 7: there is no Save button.
         Button {
           visible: root.settingsOpen
           text: "Back"

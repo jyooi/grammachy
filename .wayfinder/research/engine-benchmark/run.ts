@@ -1,9 +1,3 @@
-// Grammachy engine benchmark runner (HUF-171).
-// Usage: bun run.ts [engine ...]   engines: languagetool harper qwen3b qwen7b claude openrouter
-// HUF-183: `openrouter` runs every model in OPENROUTER_MODELS (comma separated) or the default list below.
-// Results go to ../api-model-benchmark/results-<model>.json.
-// All binaries live under ~/.cache/grammachy-bench (see REPORT.md for setup).
-
 import { spawn } from "bun";
 
 const HOME = process.env.HOME!;
@@ -47,7 +41,6 @@ const NATIVE_NAME: Record<string, string> = {
   fr: "French",
   es: "Spanish",
 };
-// LanguageTool motherTongue codes. Malay is not a LanguageTool language.
 const LT_MOTHER: Record<string, string | null> = { zh: "zh-CN", ms: null, fr: "fr", es: "es" };
 
 const items: Item[] = JSON.parse(await Bun.file(`${HERE}/testset.json`).text());
@@ -62,10 +55,8 @@ function overlaps(a: Span, b: { start: number; end: number }) {
 function score(item: Item, issues: Issue[]): Pick<ItemResult, "found" | "found_precise" | "fix_match" | "false_positive"> {
   if (!item.expected_span) return { found: null, found_precise: null, fix_match: null, false_positive: issues.length > 0 };
   const hits = issues.filter((i) => overlaps(item.expected_span, i));
-  // A span that covers more than half the sentence does not localize the mistake for the user.
   const precise = hits.some((i) => i.end - i.start <= item.text.length / 2);
   const fixMatch = hits.some((i) => {
-    // Compare the sentence after applying the engine fix with the sentence after the expected fix.
     const apply = (s: number, e: number, f: string) => norm(item.text.slice(0, s) + f + item.text.slice(e));
     return apply(i.start, i.end, i.fix) === apply(item.expected_span!.start, item.expected_span!.end, item.expected_fix!);
   });
@@ -85,7 +76,6 @@ async function waitHttp(url: string, timeoutMs: number): Promise<number> {
 }
 
 async function rssOfTree(pid: number): Promise<number> {
-  // Sum RSS of the process and its children (java and llama-server are single processes; bash wrappers are not used).
   const p = spawn(["ps", "-o", "rss=", "--ppid", String(pid), "-p", String(pid)]);
   const out = await new Response(p.stdout).text();
   return out.trim().split("\n").map((l) => parseInt(l.trim(), 10) || 0).reduce((a, b) => a + b, 0);
@@ -132,14 +122,12 @@ function summarize(res: ItemResult[]) {
   };
 }
 
-// ---------- LanguageTool ----------
 async function runLanguageTool(): Promise<EngineResult> {
   const dir = `${BENCH}/LanguageTool-6.6`;
   const port = 8081;
   const proc = spawn(["java", "-cp", "languagetool-server.jar", "org.languagetool.server.HTTPServer", "--port", String(port)], { cwd: dir, stdout: "ignore", stderr: "ignore" });
   try {
     const cold = await waitHttp(`http://localhost:${port}/v2/languages`, 120_000);
-    // Warm the JIT once so the measured latencies reflect steady state.
     await fetch(`http://localhost:${port}/v2/check`, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: "language=en-US&text=Warm+up." });
     const res = await runItems(async (item) => {
       const params = new URLSearchParams({ language: "en-US", text: item.text });
@@ -163,7 +151,6 @@ async function runLanguageTool(): Promise<EngineResult> {
   }
 }
 
-// ---------- Harper ----------
 async function harperLint(text: string): Promise<{ issues: Issue[]; rssKb: number }> {
   const file = `/tmp/grammachy-harper-${process.pid}.txt`;
   await Bun.write(file, text);
@@ -211,7 +198,6 @@ async function runHarper(): Promise<EngineResult> {
   return { engine: "harper", version: "harper-cli 2.8.0 (core 0.1.0 reported)", offline: true, license: "Apache-2.0", cold_start_ms: cold, rss_kb: rss, items: res, summary: summarize(res) };
 }
 
-// ---------- LLM prompt (shared by llama.cpp and Claude) ----------
 function llmPrompt(item: Item) {
   return [
     `You are a grammar and spelling checker for en-US English.`,
@@ -243,14 +229,12 @@ function parseLlmIssues(text: string, raw: string): Issue[] {
   const issues: Issue[] = [];
   for (const x of arr) {
     if (!x || typeof x.original !== "string") continue;
-    // A fix equal to the original is noise, not an Issue. Small models emit many of these.
     if (norm(String(x.fix ?? "")) === norm(x.original)) {
       noiseIssues++;
       continue;
     }
     const start = text.indexOf(x.original);
     if (start < 0) {
-      // The model quoted something that is not in the text. Count it as an issue over the whole sentence.
       issues.push({ start: 0, end: text.length, original: x.original, fix: String(x.fix ?? ""), reason: `[unanchored] ${x.reason ?? ""}` });
       continue;
     }
@@ -259,7 +243,6 @@ function parseLlmIssues(text: string, raw: string): Issue[] {
   return issues;
 }
 
-// ---------- llama.cpp ----------
 async function runLlama(name: string, gguf: string, label: string): Promise<EngineResult> {
   const port = 8082;
   const bin = `${BENCH}/llama-b10615/llama-server`;
@@ -279,7 +262,6 @@ async function runLlama(name: string, gguf: string, label: string): Promise<Engi
           messages: [{ role: "user", content: llmPrompt(item) }],
           temperature: 0,
           max_tokens: 600,
-          // llama.cpp turns the schema into a grammar, so the output is always a well-formed array.
           response_format: { type: "json_schema", json_schema: { name: "issues", schema: ISSUE_SCHEMA } },
         }),
       });
@@ -296,7 +278,6 @@ async function runLlama(name: string, gguf: string, label: string): Promise<Engi
   }
 }
 
-// ---------- Claude API ----------
 async function runClaude(): Promise<EngineResult | null> {
   const key = process.env.ANTHROPIC_API_KEY;
   if (!key) {
@@ -321,7 +302,6 @@ async function runClaude(): Promise<EngineResult | null> {
   return { engine: "claude", version: model, offline: false, license: "Commercial API, pay per token", cold_start_ms: cold, rss_kb: 0, items: res, summary: summarize(res) };
 }
 
-// ---------- OpenRouter (OpenAI chat completions API) ----------
 type UsageResult = EngineResult & { usage: { prompt_tokens: number; completion_tokens: number; reasoning_tokens: number; cost_usd: number } };
 
 const OPENROUTER_DEFAULT_MODELS = [
@@ -344,7 +324,6 @@ async function runOpenRouterModel(key: string, model: string): Promise<UsageResu
       messages: [{ role: "user", content: llmPrompt(item) }],
       response_format: { type: "json_object" },
     };
-    // Reasoning tokens are billed as output tokens. The Check is a one shot classification, so turn reasoning off.
     if (disableReasoning) body.reasoning = { enabled: false };
     const r = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
@@ -358,7 +337,6 @@ async function runOpenRouterModel(key: string, model: string): Promise<UsageResu
   const chat = async (item: Item) => {
     let res = await call(item, reasoningOff);
     if (!res.ok && reasoningOff && res.status === 400) {
-      // Some models reject the reasoning field. Fall back once and keep the fallback for the rest of the run.
       reasoningOff = false;
       res = await call(item, false);
     }
@@ -376,7 +354,6 @@ async function runOpenRouterModel(key: string, model: string): Promise<UsageResu
   const cold = Math.round(performance.now() - t0);
   const warm = { ...usage };
   const res = await runItems(chat);
-  // Report usage for the scored items only, not the warm up call.
   usage.prompt_tokens -= warm.prompt_tokens;
   usage.completion_tokens -= warm.completion_tokens;
   usage.reasoning_tokens -= warm.reasoning_tokens;
@@ -405,7 +382,6 @@ async function runOpenRouter(): Promise<EngineResult | null> {
   return null;
 }
 
-// ---------- main ----------
 const wanted = process.argv.slice(2);
 const all: Record<string, () => Promise<EngineResult | null>> = {
   languagetool: runLanguageTool,

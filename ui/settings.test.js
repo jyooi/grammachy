@@ -1,6 +1,3 @@
-// Node tests for the Settings layer. Spec sections 7 and 13.
-// Run with `node --test ui/settings.test.js`.
-
 const test = require("node:test")
 const assert = require("node:assert/strict")
 
@@ -37,8 +34,6 @@ test("the entry comes from the plugins array when the bar layout has none", () =
   assert.deepEqual(entryOf(config(entry, "plugins")), entry)
 })
 
-// `updateEntryInline` and `setBarWidget` both write into the bar layout, so a
-// leftover `plugins` copy must never be the one the view reads.
 test("the bar layout wins over a stale plugins copy", () => {
   const document = config({ id: PLUGIN_ID, engine: "harper" }, "right")
   document.plugins.push({ id: PLUGIN_ID, engine: "languagetool" })
@@ -102,8 +97,6 @@ test("a write keeps a known value and replaces an unknown one with the default",
   assert.equal(normalised("autoReplace", true), true)
 })
 
-// `updateEntryInline` replaces the entry, so anything the merge drops is gone
-// from the file.
 test("a write carries the other keys across", () => {
   const entry = {
     id: PLUGIN_ID,
@@ -143,8 +136,6 @@ test("every default is itself a value the dropdowns can select", () => {
   assert.ok(ENGINE_OPTIONS.some((o) => o.value === defaultOf("engine")))
 })
 
-// Spec section 8 names the engine on its error cards, and it has to be the
-// name the Settings dropdown shows, so both read the same list.
 test("a label comes from the option list the dropdown draws", () => {
   assert.equal(labelOf(ENGINE_OPTIONS, "languagetool"), "LanguageTool")
   assert.equal(labelOf(ENGINE_OPTIONS, "harper"), "Harper")
@@ -162,9 +153,6 @@ test("an enum key rejects a value outside its list, blanks included", () => {
   }
 })
 
-// Spec section 2 and 7: the two trigger hotkeys are remappable text fields,
-// so an unknown or blank stored value reads as the spec default, the same
-// rule every other key follows.
 test("the two hotkeys default to the spec section 2 bindings", () => {
   assert.equal(valueOf({ id: PLUGIN_ID }, "quickHotkey"), "SUPER + SHIFT + Q")
   assert.equal(valueOf({ id: PLUGIN_ID }, "composeHotkey"), "SUPER + ALT + Q")

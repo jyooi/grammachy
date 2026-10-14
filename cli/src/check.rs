@@ -14,7 +14,6 @@ pub use crate::text::utf16_len;
 /// `limit` is the Check size limit of the selected Engine, which
 /// [`crate::args::EngineSlug::check_limit_utf16`] owns.
 pub fn validate(text: &str, limit: usize) -> Option<Envelope> {
-    // A selection of only whitespace has nothing to check, so it is empty.
     if text.trim().is_empty() {
         return Some(Envelope::error(
             ErrorCode::EmptySelection,

@@ -1,5 +1,3 @@
-//! The envelopes must match spec section 5.1 field for field.
-
 use grammachy::envelope::{Category, Envelope, ErrorCode, Issue};
 use serde_json::{json, Value};
 
@@ -23,7 +21,6 @@ fn sample_issue() -> Issue {
 fn result_envelope_matches_the_spec() {
     let envelope = Envelope::result("languagetool", 23, vec![sample_issue()]);
 
-    // Comparing parsed values, so key order in the JSON text does not matter.
     assert_eq!(
         parse(&envelope),
         json!({

@@ -69,8 +69,6 @@ pub struct Block {
 }
 
 impl Block {
-    /// The exact region the file carries, newline before the begin marker and
-    /// newline after the end marker included.
     fn region(&self) -> String {
         format!(
             "\n{}\n{}{}\n",
@@ -120,10 +118,6 @@ pub fn is_present(content: &str, markers: &Markers) -> bool {
     find(content, markers).is_some()
 }
 
-/// The byte range of the block region, or `None` when the file holds none.
-///
-/// A marker only counts on a line of its own, so a binding line that mentions
-/// the words in a payload never matches.
 fn find(content: &str, markers: &Markers) -> Option<Range<usize>> {
     let begin = markers.begin();
     let end = markers.end();
@@ -132,8 +126,6 @@ fn find(content: &str, markers: &Markers) -> Option<Range<usize>> {
     let end_line = marker_line(&content[begin_line.end..], &end)
         .map(|line| (begin_line.end + line.start)..(begin_line.end + line.end))?;
 
-    // The region carries the newline on each side, which is what makes
-    // removal put the file back exactly as it was.
     let start = begin_line.start.saturating_sub(1);
     let mut stop = end_line.end;
     if content[stop..].starts_with('\n') {
@@ -142,7 +134,6 @@ fn find(content: &str, markers: &Markers) -> Option<Range<usize>> {
     Some(start..stop)
 }
 
-/// The byte range of the line that holds nothing but this marker.
 fn marker_line(content: &str, marker: &str) -> Option<Range<usize>> {
     let mut offset = 0;
     for line in content.split_inclusive('\n') {
@@ -155,7 +146,6 @@ fn marker_line(content: &str, marker: &str) -> Option<Range<usize>> {
     None
 }
 
-/// The offset just after the opening brace of a JSON object.
 fn object_start(content: &str) -> Result<usize, String> {
     content
         .find('{')

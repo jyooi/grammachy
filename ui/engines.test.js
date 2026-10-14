@@ -1,11 +1,3 @@
-// Node tests for the Engines list. Spec sections 5.4, 7, and 13. HUF-237.
-// Run with `node --test ui/engines.test.js`.
-//
-// The last block runs stub binaries that print exactly what `grammachy engine`
-// prints for each verb and for each failure. A stub is the only safe seam here:
-// a test must never fetch a 250 MB release, write the real engines directory,
-// or stop the LanguageTool unit the live shell uses.
-
 const test = require("node:test")
 const assert = require("node:assert/strict")
 const fs = require("node:fs")
@@ -48,7 +40,6 @@ const {
 
 const { ENGINE_OPTIONS, engineOptions, engineAfterRemoval, BUILT_IN_ENGINE } = require("./settings.js")
 
-// The one catalogue row, as `grammachy engine list` prints it.
 const ABSENT_ROW = {
   slug: "languagetool",
   name: "LanguageTool",
@@ -79,8 +70,6 @@ function envelope(verb, engines) {
   })
 }
 
-// ------------------------------------------------------------- reading stdout
-
 test("a report becomes the rows the view draws", () => {
   const answer = read(envelope("list", [ABSENT_ROW]))
 
@@ -101,8 +90,6 @@ test("an error envelope becomes a code and a message", () => {
   assert.equal(answer.error.message, "curl could not fetch it.")
 })
 
-// A companion tool that is missing or out of date leaves nothing the shell can
-// trust, so both read as the same refusal.
 test("stdout that is not the contract reads as bad arguments", () => {
   for (const stdout of ["", "not json", JSON.stringify({ contractVersion: 2, engines: [] }),
     JSON.stringify({ contractVersion: 1 })]) {
@@ -130,8 +117,6 @@ test("an unknown state reads as absent, so Install is still offered", () => {
   assert.deepEqual(STATES, [ABSENT, PARTIAL, READY])
 })
 
-// ------------------------------------------------------------------ the list
-
 test("install and remove answer one row, which is merged into the list", () => {
   const settled = absorbed([ABSENT_ROW], read(envelope("install", [READY_ROW])).report)
 
@@ -140,8 +125,6 @@ test("install and remove answer one row, which is merged into the list", () => {
   assert.equal(settled.freeBytes, 700000000000)
 })
 
-// A poll that fired while the install was hashing lands afterwards still
-// calling the row `partial`, so the older run loses.
 test("a list answer older than the verb that already spoke is dropped", () => {
   const report = read(envelope("list", [PARTIAL_ROW])).report
 
@@ -152,8 +135,6 @@ test("a list answer older than the verb that already spoke is dropped", () => {
 test("the list is only replaced when it says something new", () => {
   assert.ok(sameRows([ABSENT_ROW], [{ ...ABSENT_ROW }]))
   assert.ok(!sameRows([ABSENT_ROW], [READY_ROW]))
-  // The one number the poll is there to move rides beside the list, so a
-  // change to it alone never rebuilds the row.
   assert.ok(sameRows([PARTIAL_ROW], [{ ...PARTIAL_ROW, partialBytes: 9 }], "languagetool"))
   assert.ok(!sameRows([PARTIAL_ROW], [{ ...PARTIAL_ROW, partialBytes: 9 }], "other"))
 })
@@ -163,8 +144,6 @@ test("the moving part length is read out of the list by slug", () => {
   assert.equal(partialOf([PARTIAL_ROW], "harper"), 0)
   assert.equal(partialOf([PARTIAL_ROW], ""), 0)
 })
-
-// -------------------------------------------------------------- what it says
 
 test("a byte count is the unit a reader compares at a glance", () => {
   assert.equal(bytes(251998221), "240.3 MB")
@@ -176,12 +155,9 @@ test("progress is what the part file holds against the pinned size", () => {
   assert.equal(share(ABSENT_ROW), 0)
   assert.equal(Math.round(share(PARTIAL_ROW) * 100), 50)
   assert.equal(share(READY_ROW), 1)
-  // A live count from the poll wins over the list it came beside.
   assert.equal(share(ABSENT_ROW, 251998221 / 4), 0.25)
 })
 
-// The whole cost of the button is on screen before it is pressed: the download
-// size and the runtime this install cannot put in place itself.
 test("the hint names the size and the Java requirement while it is absent", () => {
   assert.equal(hint(ABSENT_ROW, false), "About 240.3 MB, needs Java, LGPL-2.1-or-later")
   assert.equal(hint(PARTIAL_ROW, false),
@@ -190,22 +166,16 @@ test("the hint names the size and the Java requirement while it is absent", () =
   assert.equal(hint(ABSENT_ROW, true, 251998221 / 2), "Downloading 120.2 MB of 240.3 MB, 50%")
 })
 
-// A component the pacman package supplies is reachable, and Remove here would
-// not take it off the machine, so the line says where it came from.
 test("a package supplied row says so rather than offering to fetch it", () => {
   assert.equal(hint(PACKAGE_ROW, false),
     "From the languagetool package, LGPL-2.1-or-later, needs Java")
   assert.deepEqual(actions(PACKAGE_ROW, { busy: "" }), [])
 })
 
-// ------------------------------------------------------------- what it offers
-
 test("each state offers the buttons spec section 7 gives it", () => {
   assert.deepEqual(actions(ABSENT_ROW, { busy: "" }), [INSTALL])
   assert.deepEqual(actions(PARTIAL_ROW, { busy: "" }), [INSTALL, REMOVE])
   assert.deepEqual(actions(READY_ROW, { busy: "" }), [REMOVE])
-  // The row a transfer is running on offers Cancel alone: Remove is about a
-  // tree that is not there yet.
   assert.deepEqual(actions(PARTIAL_ROW, { busy: "languagetool" }), [CANCEL])
 })
 
@@ -218,23 +188,16 @@ test("every action has an icon and a tooltip", () => {
   assert.equal(ACTION_ICONS[REMOVE], "󰩹")
 })
 
-// One verb runs at a time, so every row but the one being installed is drawn
-// disabled rather than live over a press that goes nowhere.
 test("a verb in flight blocks every row but the one it is about", () => {
   assert.ok(!isBlocked(ABSENT_ROW, { working: false, busy: "" }))
   assert.ok(isBlocked(ABSENT_ROW, { working: true, busy: "" }))
   assert.ok(!isBlocked(ABSENT_ROW, { working: true, busy: "languagetool" }))
 })
 
-// ------------------------------------------------- what the dropdown may show
-
 test("an engine that is not on this machine is not offered", () => {
   assert.ok(!isAvailable([ABSENT_ROW], "languagetool"))
   assert.ok(isAvailable([READY_ROW], "languagetool"))
-  // The adapter runs the pacman package when no installed tree is there, so
-  // that LanguageTool is one the dropdown may offer.
   assert.ok(isAvailable([PACKAGE_ROW], "languagetool"))
-  // An engine with nothing to install is never in the list and is always there.
   assert.ok(isAvailable([ABSENT_ROW], "harper"))
 })
 
@@ -249,8 +212,6 @@ test("the dropdown drops the engines the list says are absent", () => {
   assert.deepEqual(whole, ENGINE_OPTIONS.map(option => option.value))
 })
 
-// A dropdown that drops its own value shows a blank box, and the stored value
-// is untouched until the reader chooses something else.
 test("the engine the reader is on stays in the list whatever the disk says", () => {
   const offered = engineOptions(unavailable([ABSENT_ROW]), "languagetool")
     .map(option => option.value)
@@ -258,15 +219,11 @@ test("the engine the reader is on stays in the list whatever the disk says", () 
   assert.deepEqual(offered, ["languagetool", "harper"])
 })
 
-// The acceptance criterion: removing the selected engine leaves Settings
-// consistent, and the one engine that cannot go away is where it lands.
 test("removing the selected engine falls back to the built in one", () => {
   assert.equal(BUILT_IN_ENGINE, "harper")
   assert.equal(engineAfterRemoval("languagetool", "languagetool"), "harper")
   assert.equal(engineAfterRemoval("harper", "languagetool"), null)
 })
-
-// ---------------------------------------------------------------- the notes
 
 test("a cancel is a notice and a failure is not", () => {
   const cancelled = note(CANCELLED, "", "LanguageTool")
@@ -282,8 +239,6 @@ test("a cancel is a notice and a failure is not", () => {
   assert.ok(missing.body.includes("out of date"))
 })
 
-// ------------------------------------------- a whole run against a stub binary
-
 let stubDirectory = ""
 
 test.before(() => {
@@ -294,8 +249,6 @@ test.after(() => {
   if (stubDirectory) fs.rmSync(stubDirectory, { recursive: true, force: true })
 })
 
-// A stub that answers all three verbs off one JSON file, the way the real
-// binary answers off the directory on disk.
 function stub(name) {
   const state = path.join(stubDirectory, name + ".json")
   fs.writeFileSync(state, JSON.stringify([ABSENT_ROW]))
@@ -341,7 +294,6 @@ function stub(name) {
   return file
 }
 
-// One verb, read back the way Overlay.qml reads it.
 function runEngine(binary, args) {
   const run = spawnSync(binary, ["engine"].concat(args), { encoding: "utf8" })
   assert.equal(run.error, undefined)
@@ -357,12 +309,9 @@ test("a list from a real process becomes the row the view draws", () => {
   assert.deepEqual(answer.report.engines.map(row => row.state), [ABSENT])
   assert.equal(hint(answer.report.engines[0], false),
     "About 240.3 MB, needs Java, LGPL-2.1-or-later")
-  // The engine the dropdown must not offer yet.
   assert.deepEqual(unavailable(answer.report.engines), ["languagetool"])
 })
 
-// The acceptance criterion of this ticket: the bar moves while the install
-// runs, and the row is Ready only once the whole release is unpacked.
 test("an install run to the end moves the bar and lands on Ready", () => {
   const binary = stub("install")
   const seen = []
@@ -373,7 +322,6 @@ test("an install run to the end moves the bar and lands on Ready", () => {
     assert.equal(answer.error, null)
     list = merged(list, answer.report.engines)
     seen.push(share(list[0]))
-    // Every poll of `list` sees the same row the install answered.
     const polled = runEngine(binary, ["list"]).report.engines[0]
     assert.equal(polled.state, list[0].state)
     assert.equal(polled.partialBytes, list[0].partialBytes)
@@ -382,7 +330,6 @@ test("an install run to the end moves the bar and lands on Ready", () => {
   assert.deepEqual(seen, [0.25, 0.5, 0.75, 1])
   assert.equal(list[0].state, READY)
   assert.equal(list[0].partialBytes, 0)
-  // Only now may the dropdown offer it, and only now does it offer Remove.
   assert.deepEqual(unavailable(list), [])
   assert.deepEqual(actions(list[0], { busy: "" }), [REMOVE])
 })
@@ -399,8 +346,6 @@ test("a part downloaded row offers Install again, and it resumes", () => {
   assert.ok(resumed.partialBytes > row.partialBytes, "the second run carried on")
 })
 
-// The whole round trip of the acceptance criteria: install, then remove, then
-// the dropdown drops the row and the setting falls back to Harper.
 test("a remove from a real process leaves the row absent and Settings consistent", () => {
   const binary = stub("remove")
   for (let step = 0; step < 4; step++) runEngine(binary, ["install", "languagetool"])
@@ -454,7 +399,6 @@ test("a missing package blocks Install alone, and never Remove or Cancel", () =>
   assert.equal(EnginesModule.actionBlocked(EnginesModule.INSTALL, row, { missing }), true)
   assert.equal(EnginesModule.actionBlocked(EnginesModule.REMOVE, row, { missing }), false)
   assert.equal(EnginesModule.actionBlocked(EnginesModule.INSTALL, row, { missing: [] }), false)
-  // A verb in flight still blocks every row but its own.
   assert.equal(EnginesModule.actionBlocked(EnginesModule.INSTALL, row, { missing: [], working: true, busy: "other" }), true)
   assert.equal(EnginesModule.actionBlocked(EnginesModule.CANCEL, row, { missing, working: true, busy: "languagetool" }), false)
 })

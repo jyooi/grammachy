@@ -1,6 +1,3 @@
-// Node tests for the setup card of spec section 10. Run with
-// `node --test ui/setupCard.test.js`.
-
 const test = require("node:test")
 const assert = require("node:assert/strict")
 

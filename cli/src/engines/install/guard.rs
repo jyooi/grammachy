@@ -1,31 +1,12 @@
-//! The checks on every path the install writes, made before the write.
-//!
-//! The engines directory is under HOME, and `curl --output` follows a
-//! symbolic link that stands where the `.part` file goes. So nothing here
-//! writes to a path it did not look at first. A path the install writes must
-//! be absent, or a plain file or directory this user owns. A symbolic link,
-//! a device, or another user's file refuses the install and names itself.
-//!
-//! The directory the unpack fills is made with an exclusive create, so a
-//! directory that appears between the removal and the create refuses too.
-//!
-//! What the checks cannot close is the moment between a check and the write
-//! that follows it. Only a program that runs as this user can act in that
-//! moment, and such a program already owns the directory outright.
-
 use std::fs::{self, OpenOptions};
 use std::io::ErrorKind;
 use std::os::unix::fs::MetadataExt;
 use std::path::Path;
 
-/// The user this process runs as.
 fn own_uid() -> u32 {
-    // Safety: geteuid takes no arguments and cannot fail.
     unsafe { libc::geteuid() }
 }
 
-/// Make sure `directory` is a plain directory this user owns, and make it
-/// when it is absent.
 pub fn private_directory(directory: &Path) -> Result<(), String> {
     let data = match fs::symlink_metadata(directory) {
         Ok(data) => data,
@@ -55,8 +36,6 @@ pub fn private_directory(directory: &Path) -> Result<(), String> {
     owned_here(directory, data.uid())
 }
 
-/// Refuse anything at `path` but a plain file this user owns. An absent path
-/// passes.
 pub fn plain_file_or_absent(path: &Path) -> Result<(), String> {
     let data = match fs::symlink_metadata(path) {
         Ok(data) => data,
@@ -78,8 +57,6 @@ pub fn plain_file_or_absent(path: &Path) -> Result<(), String> {
     owned_here(path, data.uid())
 }
 
-/// Make an empty plain file at `path` when nothing is there. The transfer
-/// then appends to a file this process made, not to whatever it finds.
 pub fn create_if_absent(path: &Path) -> Result<(), String> {
     match OpenOptions::new().write(true).create_new(true).open(path) {
         Ok(_) => Ok(()),
@@ -88,10 +65,6 @@ pub fn create_if_absent(path: &Path) -> Result<(), String> {
     }
 }
 
-/// An empty directory at `path` that this call made.
-///
-/// Whatever stood there goes first, link or tree, and the create is
-/// exclusive, so the directory is one nothing else put in place.
 pub fn fresh_directory(path: &Path) -> Result<(), String> {
     match fs::remove_dir_all(path) {
         Ok(()) => {}
@@ -189,7 +162,6 @@ mod tests {
         fresh_directory(&staging).expect("a tree");
         assert!(fs::read_dir(&staging).unwrap().next().is_none());
 
-        // The removal must not follow the link and empty its target.
         let target = directory.join("target");
         fs::create_dir(&target).unwrap();
         fs::write(target.join("marker"), b"keep me").unwrap();

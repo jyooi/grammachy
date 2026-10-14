@@ -1,17 +1,3 @@
-// The setup card of spec section 10, drawn when bin/grammachy is missing.
-//
-// Loaded twice: by QML as `SetupCard`, and by `setupCard.test.js` under
-// node. Nothing here may touch a QML or a node API, because each side only
-// has one of them.
-//
-// This file owns the whole route from cli.lock's text and one run of
-// bin/bootstrap.sh to the card ui/SetupCard.qml draws: `readLock` reads the
-// two fields the card needs from cli.lock, and `card` turns those fields
-// plus the run's state into the title, the body, and what the card offers.
-// A cli.lock with no sha256 yet pins no release, so there is no Install
-// button and the body points at the developer path instead (docs/dev.md
-// section 18).
-
 var ASSET = "grammachy-x86_64-linux"
 
 var UNPINNED = "unpinned"
@@ -28,9 +14,6 @@ function isPlainObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value)
 }
 
-// The required rows of a `ui/deps.js` table that are absent. The rule lives
-// in deps.js too; it is repeated here because QML gives a `.js` no way to
-// import another one that a node `require` also understands.
 function missingRequired(dependencies) {
   var list = Array.isArray(dependencies) ? dependencies : []
   return list.filter(function(dependency) {
@@ -42,28 +25,16 @@ function packageList(dependencies) {
   return dependencies.map(function(dependency) { return String(dependency.package) }).join(" and ")
 }
 
-// Whether a launch must open the setup card instead of a Check.
-// Pass true when bin/grammachy exists and the file is executable.
-// A missing binary opens the setup card on both surfaces, before capture
-// or chunking. Spec section 12 step 2 is a bar click with no Check first.
 function companionMissing(present) {
   return present !== true
 }
 
-// Where Retry on the setup card goes.
-// Compose returns to the Draft Check.
-// An empty Selection on the quick surface starts a new capture.
-// A populated Selection retries the failed Check with no new capture.
 function retryAfterSetup(surface, selectionText) {
   if (surface === "compose") return "compose"
   if (typeof selectionText !== "string" || selectionText.length === 0) return "startQuick"
   return "retryCheck"
 }
 
-// The two fields the card reads from cli.lock, spec section 10. The
-// sizeBytes pin is bootstrap.sh's concern, not the card's. Text that will
-// not parse, or that carries no string for either field, reads the same as
-// an empty lock: nothing is pinned, so there is nothing to install from.
 function readLock(text) {
   var parsed = null
   try {
@@ -78,26 +49,6 @@ function readLock(text) {
   }
 }
 
-// The card model for the current state.
-//
-// `lockText` is the raw text of cli.lock, `running` is whether
-// bin/bootstrap.sh is still going, `exitCode` is its exit status once it has
-// finished (null while none has run this session), and `log` is its stdout
-// and stderr, streamed in the order they arrived.
-//
-// `dependencies` is the table of `ui/deps.js` for this machine, or null
-// while it is unread. A package the bootstrap needs that is absent is listed
-// with its purpose. The bootstrap Install stays disabled with the reason
-// shown, because bin/bootstrap.sh needs curl before it can fetch anything
-// (spec section 10).
-//
-// States:
-// - `unpinned`: no sha256 yet, so the card names the developer path and
-//   offers no Install button.
-// - `ready`: a hash is pinned and idle, so Install runs bin/bootstrap.sh.
-// - `running`: the run is going, and the log grows as its output streams in.
-// - `done`: the run finished with the binary in place.
-// - `failed`: the run finished without it, and the log carries why.
 function card(options) {
   var context = isPlainObject(options) ? options : ({})
   var lock = readLock(typeof context.lockText === "string" ? context.lockText : "")
@@ -120,15 +71,11 @@ function card(options) {
     log: log,
     title: "",
     body: "",
-    // The button stays on screen through the run, disabled while it goes, so
-    // the reader watching the log also sees why nothing else is happening.
     showsInstall: state === READY || state === RUNNING || state === FAILED,
     installEnabled: state !== RUNNING && missing.length === 0,
     installReason: "",
     showsLog: state === RUNNING || state === DONE || state === FAILED,
     showsRetry: state === DONE,
-    // The packages this machine lacks that the bootstrap needs, each with
-    // its purpose. The card names them. It does not install them.
     missingDependencies: missing,
     showsDependencies: missing.length > 0 && state !== DONE
   }

@@ -92,7 +92,6 @@ impl Facts {
     }
 }
 
-/// Whether `PATH` carries one executable, the same lookup a shell makes.
 fn on_path(name: &str) -> bool {
     let Some(path) = std::env::var_os("PATH") else {
         return false;
@@ -105,8 +104,6 @@ fn existing_file(path: &str) -> Option<PathBuf> {
     path.is_file().then_some(path)
 }
 
-/// Ask systemd whether one transient unit runs.
-///
 /// `is-active` exits non-zero for an inactive unit, so the exit status says
 /// nothing useful and only the word on stdout does.
 fn unit_state(unit: &str) -> UnitState {

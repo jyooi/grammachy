@@ -50,7 +50,6 @@ pub fn admit(archive: &Path, admission: &Admission) -> Result<Inventory, String>
     admit_central_directory(&bytes, admission)
 }
 
-/// The central directory bytes of one zip file.
 fn central_directory(archive: &Path) -> Result<Vec<u8>, String> {
     let mut file = File::open(archive)
         .map_err(|error| format!("{} could not be opened: {error}", archive.display()))?;
@@ -89,7 +88,6 @@ struct EndRecord {
     offset: u64,
 }
 
-/// The last end of central directory record in this tail, if there is one.
 fn end_record(tail: &[u8]) -> Option<EndRecord> {
     if tail.len() < END_RECORD_LEN {
         return None;
@@ -168,7 +166,6 @@ pub fn admit_central_directory(bytes: &[u8], admission: &Admission) -> Result<In
     Ok(inventory)
 }
 
-/// A member path is relative, has no `..`, and sits under the pinned directory.
 fn admit_name(name: &str, directory_name: &str) -> Result<(), String> {
     if name.is_empty() || name.starts_with('/') || name.contains('\\') || name.contains('\0') {
         return Err(format!(

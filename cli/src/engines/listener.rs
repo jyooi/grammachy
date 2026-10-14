@@ -92,20 +92,12 @@ pub struct UnitFacts {
     pub exec_start: ExecStart,
 }
 
-/// The `LISTEN` state in `/proc/net/tcp`.
 const LISTEN: &str = "0A";
 
-/// The `ESTABLISHED` state in `/proc/net/tcp`.
 const ESTABLISHED: &str = "01";
 
-/// How long [`accepted_by`] waits for the server to accept the connection.
-///
-/// A connection the server did not accept yet sits in its queue with no
-/// inode, so the proof has to wait for the `accept`. A JVM under load takes
-/// milliseconds. This is far above that and far below the Check timeout.
 const ACCEPT_BUDGET: Duration = Duration::from_secs(2);
 
-/// Time between two reads while the server accepts.
 const ACCEPT_PROBE: Duration = Duration::from_millis(10);
 
 /// Read the machine and answer what the unit owns.
@@ -186,7 +178,6 @@ pub fn accepted_by(stream: &TcpStream, pid: u32) -> Result<(), String> {
     }
 }
 
-/// Ask systemd about one unit.
 fn unit_facts(unit: &str) -> Result<UnitFacts, String> {
     let output = Command::new("systemctl")
         .args([
@@ -247,7 +238,6 @@ pub fn is_active(state: &str) -> bool {
     matches!(state, "active" | "activating" | "reloading")
 }
 
-/// The socket inodes one process holds open.
 fn socket_inodes(pid: u32) -> HashSet<u64> {
     let Ok(entries) = std::fs::read_dir(format!("/proc/{pid}/fd")) else {
         return HashSet::new();
@@ -268,7 +258,6 @@ pub fn socket_inode(target: &str) -> Option<u64> {
         .ok()
 }
 
-/// Every loopback TCP socket on the machine, both address families.
 fn loopback_sockets() -> Vec<Socket> {
     let mut sockets = Vec::new();
     if let Ok(text) = std::fs::read_to_string("/proc/net/tcp") {
@@ -312,10 +301,6 @@ pub fn parse_proc_net_tcp(text: &str) -> Vec<Socket> {
         .collect()
 }
 
-/// `0100007F:1F91` or its 32 hex character IPv6 form, as a socket address.
-///
-/// An IPv4-mapped IPv6 address answers as the IPv4 one, so the URL the
-/// adapter builds is the plain `127.0.0.1:port`.
 fn parse_address(field: &str) -> Option<SocketAddr> {
     let (hex, port) = field.split_once(':')?;
     let port = u16::from_str_radix(port, 16).ok()?;
@@ -399,8 +384,6 @@ mod tests {
    1: 00000000000000000000000001000000:1F92 00000000000000000000000000000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 77778 1 0000000000000000 100 0 0 10 0\n\
    2: 00000000000000000000000000000000:0050 00000000000000000000000000000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 77779 1 0000000000000000 100 0 0 10 0\n";
 
-    /// One process holds two loopback listeners: a debug agent on 5005 and
-    /// the server on 8081, with the debug row first.
     const TWO_LISTENERS: &str = "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n\
    0: 0100007F:138D 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 66661 1 0000000000000000 100 0 0 10 0\n\
    1: 0100007F:1F91 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 66662 1 0000000000000000 100 0 0 10 0\n";
@@ -444,7 +427,6 @@ mod tests {
         let sockets = parse_proc_net_tcp(TCP);
         let held: HashSet<u64> = [55555, 55556].into_iter().collect();
         let other: HashSet<u64> = [10811].into_iter().collect();
-        // An established socket is never a listener, whoever holds it.
         let established: HashSet<u64> = [55557].into_iter().collect();
 
         assert_eq!(
@@ -455,8 +437,6 @@ mod tests {
         assert_eq!(owned_by(&sockets, &established, 8081), None);
     }
 
-    /// The ports one process listens on go into the timeout message of the
-    /// wait, so a unit that binds another port first is diagnosable.
     #[test]
     fn the_ports_one_process_listens_on_separate_starting_from_foreign() {
         let sockets = parse_proc_net_tcp(TWO_LISTENERS);
@@ -467,8 +447,6 @@ mod tests {
         assert!(held_ports(&sockets, &none).is_empty());
     }
 
-    /// A JVM with a debug agent holds two loopback listeners, and the debug
-    /// one may come first. The unit's own `--port` picks the server.
     #[test]
     fn the_port_of_the_command_line_picks_the_listener() {
         let sockets = parse_proc_net_tcp(TWO_LISTENERS);
@@ -484,7 +462,6 @@ org.languagetool.server.HTTPServer --port 8081 --config /run/x.properties",
             owned_by(&sockets, &held, port),
             Some(address("127.0.0.1:8081"))
         );
-        // The debug listener is the first row, and it is never the answer.
         assert_eq!(
             owned_by(&sockets, &held, 5005),
             Some(address("127.0.0.1:5005"))
@@ -502,9 +479,6 @@ org.languagetool.server.HTTPServer --port 8081 --config /run/x.properties",
         assert_eq!(port_of("/usr/bin/x"), None);
     }
 
-    /// The server end of a connection is the row whose local address is the
-    /// server's and whose remote address is the client's. A row with inode 0
-    /// is a connection that still waits in the accept queue.
     #[test]
     fn the_server_end_of_a_connection_is_read_by_both_addresses() {
         let sockets = parse_proc_net_tcp(TCP);
@@ -559,8 +533,6 @@ org.languagetool.server.HTTPServer --port 8081 --config /run/x.properties",
         assert_eq!(socket_inode("/dev/null"), None);
     }
 
-    /// The proof runs against a listener this process holds: the accepted
-    /// end is ours, so our pid passes and any other pid is refused.
     #[test]
     fn a_connection_is_proven_against_the_process_that_accepted_it() {
         let server = TcpListener::bind("127.0.0.1:0").expect("a loopback port is free");
@@ -568,7 +540,6 @@ org.languagetool.server.HTTPServer --port 8081 --config /run/x.properties",
         let (release, released) = mpsc::channel::<()>();
         let accepting = std::thread::spawn(move || {
             let (accepted, _) = server.accept().expect("the client connects");
-            // Hold the server end open until the proofs below are done.
             let _ = released.recv();
             drop(accepted);
         });

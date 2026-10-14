@@ -1,9 +1,6 @@
 import QtQuick
 import qs.Ui
 
-// The bar button, spec section 2. It carries no popup of its own: the shell
-// routes `summon` to the overlay because the manifest declares a second kind,
-// so the popup QML lives in Overlay.qml.
 BarWidget {
   id: root
 

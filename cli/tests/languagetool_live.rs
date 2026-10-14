@@ -1,14 +1,3 @@
-//! End to end runs against a real LanguageTool server.
-//!
-//! Every case skips unless the `grammachy-languagetool` user unit is active,
-//! so CI stays green on a machine without the `languagetool` package (spec
-//! section 13). A developer starts the unit with one Check by hand, so the
-//! suite never starts a real unit itself.
-//!
-//! The cold start case is `#[ignore]` because it stops and starts a systemd
-//! unit. Run it by hand with
-//! `cargo test --test languagetool_live -- --ignored --nocapture`.
-
 use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -17,7 +6,6 @@ use serde_json::Value;
 
 const UNIT: &str = "grammachy-languagetool";
 
-/// Whether the plugin-owned LanguageTool unit is active in the user manager.
 fn unit_is_active() -> bool {
     Command::new("systemctl")
         .args(["--user", "is-active", UNIT])
@@ -26,12 +14,9 @@ fn unit_is_active() -> bool {
         .unwrap_or(false)
 }
 
-/// Run the binary with `text` on stdin and answer the parsed envelope.
 fn check(text: &str) -> Value {
     let mut child = Command::new(env!("CARGO_BIN_EXE_grammachy"))
         .arg("check")
-        // The default engine is `harper` since HUF-237, so this engine is now
-        // named rather than assumed.
         .args(["--engine", "languagetool"])
         .env(
             "GRAMMACHY_SHELL_JSON",
@@ -53,7 +38,6 @@ fn check(text: &str) -> Value {
     serde_json::from_slice(&output.stdout).expect("stdout is one JSON object")
 }
 
-/// The guarantee the shell relies on: `text.slice(start, end) === original`.
 fn assert_spans_slice_back(text: &str, envelope: &Value) {
     let units: Vec<u16> = text.encode_utf16().collect();
     for issue in envelope["issues"].as_array().expect("issues is an array") {
@@ -140,7 +124,6 @@ fn the_second_check_reuses_the_running_unit() {
     let second = check("He go to school yesterday.");
 
     assert_eq!(first["issues"], second["issues"]);
-    // A reused server answers well inside the 10 s Check timeout.
     let elapsed = second["elapsedMs"].as_u64().expect("elapsedMs is a number");
     assert!(elapsed < 10_000, "the reused unit answered in {elapsed} ms");
 }
@@ -164,6 +147,5 @@ fn a_cold_start_brings_the_unit_up() {
 
     assert!(unit_is_active(), "the Check started the unit");
 
-    // The second Check reuses what the first one started.
     assert!(!check(text)["issues"].as_array().expect("issues").is_empty());
 }

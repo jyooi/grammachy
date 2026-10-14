@@ -1,20 +1,8 @@
-//! The chunked Check of spec section 9 makes promises no node test can reach.
-//!
-//! `ui/errors.test.js` runs the whole route against a stub binary, but it drives
-//! the loop itself: the shared functions it calls are only the right ones if
-//! `Overlay.qml` calls the same ones in the same order. The overlay cannot be
-//! instantiated outside the shell's plugin loader, so this test reads the file
-//! the shell ships and holds those calls in place, the way `overlay_errors.rs`
-//! holds Retry in place.
-//!
-//! No test here starts an engine, a server, or a unit.
-
 fn read(relative: &str) -> String {
     let path = format!("{}/../{relative}", env!("CARGO_MANIFEST_DIR"));
     std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("{relative} is readable: {error}"))
 }
 
-/// The body of one `function <name>(...)` in a QML or JavaScript file.
 fn function_body(source: &str, name: &str) -> String {
     let needle = format!("function {name}(");
     let start = source
@@ -41,8 +29,6 @@ fn function_body(source: &str, name: &str) -> String {
     panic!("{name} has a closing brace")
 }
 
-/// Spec section 9: a Compose Check is one `grammachy chunk` and then one
-/// `grammachy check` per Chunk, never one Check on the whole Draft.
 #[test]
 fn a_compose_check_starts_with_the_chunk_list() {
     let source = read("Overlay.qml");
@@ -62,7 +48,6 @@ fn a_compose_check_starts_with_the_chunk_list() {
     );
 }
 
-/// The Chunk list arrives, the run walks it from the first Chunk.
 #[test]
 fn the_chunk_list_starts_the_walk_at_the_first_chunk() {
     let body = function_body(&read("Overlay.qml"), "onChunkListOutput");
@@ -77,8 +62,6 @@ fn the_chunk_list_starts_the_walk_at_the_first_chunk() {
     );
 }
 
-/// The acceptance criterion of this ticket: every Chunk's spans move by that
-/// Chunk's own start, and the moved spans are verified against the whole Draft.
 #[test]
 fn every_chunk_is_shifted_by_its_own_start_and_verified_against_the_draft() {
     let body = function_body(&read("Overlay.qml"), "absorbChunk");
@@ -95,16 +78,12 @@ fn every_chunk_is_shifted_by_its_own_start_and_verified_against_the_draft() {
         body.contains("Splice.mergeIssues(root.issues,"),
         "the Chunk's Issues merge into the one list: {body}"
     );
-    // The Chunk's own text is sliced with the same helper the node test uses,
-    // so a boundary is never read one way here and another way there.
     assert!(
         function_body(&read("Overlay.qml"), "runChunk").contains("Splice.chunkText("),
         "runChunk sends the Chunk's own text"
     );
 }
 
-/// Spec section 9: Cancel stops after the Chunk in flight and keeps what
-/// finished, so it never kills the process and never drops an Issue.
 #[test]
 fn cancel_stops_after_the_chunk_in_flight_and_keeps_what_finished() {
     let source = read("Overlay.qml");
@@ -134,8 +113,6 @@ fn cancel_stops_after_the_chunk_in_flight_and_keeps_what_finished() {
     );
 }
 
-/// A failed Chunk keeps the Issues from the finished ones and leaves
-/// `chunkIndex` on itself, so `Retry remaining` resumes there.
 #[test]
 fn a_failed_chunk_keeps_its_issues_and_retry_resumes_at_it() {
     let source = read("Overlay.qml");
@@ -177,8 +154,6 @@ fn a_failed_chunk_keeps_its_issues_and_retry_resumes_at_it() {
     }
 }
 
-/// Spec section 2: a payload or a button that carries a text replaces a
-/// non-empty Draft only after a confirm.
 #[test]
 fn a_carried_text_replaces_a_non_empty_draft_only_after_a_confirm() {
     let source = read("Overlay.qml");
@@ -193,7 +168,6 @@ fn a_carried_text_replaces_a_non_empty_draft_only_after_a_confirm() {
         "a non-empty Draft goes through the confirm: {compose_with}"
     );
 
-    // Only the confirm may put the pending Draft in place.
     let replace = function_body(&source, "replaceDraft");
     assert!(
         replace.contains("root.phase !== \"confirm\"")
@@ -201,7 +175,6 @@ fn a_carried_text_replaces_a_non_empty_draft_only_after_a_confirm() {
         "the confirm is what replaces the Draft: {replace}"
     );
 
-    // Both triggers of spec section 2 that carry the Selection land here.
     assert!(
         source.contains("onComposeRequested: root.composeWith(root.capturedText)"),
         "the popup's Compose button and the too-long card carry the Selection over"
@@ -212,12 +185,6 @@ fn a_carried_text_replaces_a_non_empty_draft_only_after_a_confirm() {
     );
 }
 
-/// The Check limit belongs to the Engine (spec section 4), so a Chunk list fits
-/// only the size it was packed to. The Settings view is reachable while the
-/// failure is on screen, so `Retry remaining` has to pack the Draft again when
-/// the reader picked an Engine of another size rather than resend a Chunk it
-/// cannot read. Two Engines of one size share the list, so the retry resumes on
-/// the new one instead of paying for a re-check.
 #[test]
 fn a_retry_after_an_engine_change_packs_the_draft_again() {
     let source = read("Overlay.qml");
@@ -243,8 +210,6 @@ fn a_retry_after_an_engine_change_packs_the_draft_again() {
         "a dropped Chunk list is packed again: {retry}"
     );
 
-    // The new list covers the whole Draft, so the Issues of the old one go with
-    // it or every one of them would be reported twice.
     let dropped = function_body(&source, "dropChunkListForNewEngine");
     for cleared in [
         "root.chunks = []",
@@ -258,10 +223,6 @@ fn a_retry_after_an_engine_change_packs_the_draft_again() {
     }
 }
 
-/// A Chunk is cut to the size one Engine reads, so that Engine is the one that
-/// reads it. The Settings view has no phase guard, so the setting can move
-/// while the walk runs, and a Chunk sent to a narrower Engine answers
-/// `text_too_long` for a size the shell itself chose.
 #[test]
 fn every_chunk_is_checked_on_the_engine_its_list_was_packed_for() {
     let source = read("Overlay.qml");
@@ -280,8 +241,6 @@ fn every_chunk_is_checked_on_the_engine_its_list_was_packed_for() {
         "the run's Engine is the recorded one"
     );
 
-    // The command carries whatever the caller named, so nothing under it can
-    // reach back to the setting.
     let command = function_body(&source, "checkCommand");
     assert!(
         command.contains("command.push(\"--engine\", engineSlug)"),
@@ -292,8 +251,6 @@ fn every_chunk_is_checked_on_the_engine_its_list_was_packed_for() {
         "the check command must not read the setting itself: {command}"
     );
 
-    // The failure card names the Engine that actually ran, or it blames one the
-    // Chunk never reached.
     let failed = function_body(&source, "showChunkError");
     assert!(
         failed.contains("engineSlug: root.runEngine()")

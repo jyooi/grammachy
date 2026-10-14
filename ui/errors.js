@@ -1,22 +1,5 @@
-// The error cards of spec section 8.
-//
-// Loaded twice: by QML as `Errors`, and by `errors.test.js` under node.
-// Nothing here may touch a QML or a node API, because each side only has one
-// of them.
-//
-// This file owns the whole route from one run of `grammachy check` to the card
-// the popup draws: `readCheck` reads the stdout of spec section 5.1, and `card`
-// turns a code into the title, the body, and the buttons of section 8. Keeping
-// both halves here is what lets a node test run a stub binary and read the
-// card back, which no test of the QML could do.
-//
-// A chunked Check reads two envelopes rather than one, so `readChunks` reads
-// the stdout of spec section 5.2 the same way, and `chunkCard` is the inline
-// failure of one Chunk from spec section 9.
-
 var CONTRACT_VERSION = 1
 
-// The codes of spec section 5.1, in the order section 8 lists their cards.
 var EMPTY_SELECTION = "empty_selection"
 var TEXT_TOO_LONG = "text_too_long"
 var ENGINE_UNAVAILABLE = "engine_unavailable"
@@ -33,13 +16,11 @@ var CODES = [
   BAD_ARGUMENTS
 ]
 
-// The buttons a card can carry, spec section 8, with the label each one shows.
 var CLOSE = "close"
 var RETRY = "retry"
 var SETTINGS = "settings"
 var SETUP = "setup"
 var COMPOSE = "compose"
-// The two recovery buttons of a failed Chunk, spec section 9.
 var RETRY_REMAINING = "retryRemaining"
 var REVIEW_PARTIAL = "reviewPartial"
 
@@ -53,17 +34,11 @@ var BUTTON_LABELS = {
   reviewPartial: "Review what we have"
 }
 
-// The Check timeout of each engine, in seconds. The `engine_timeout` body
-// names it, and a run that never answered leaves the shell nothing to read it
-// from, so the popup carries its own copy. `cli/tests/overlay_errors.rs` keeps
-// the copy in step with the `DEFAULT_TIMEOUT` of each adapter.
 var TIMEOUT_SECONDS = {
   languagetool: 10,
   harper: 10
 }
 
-// What an engine with no entry above would wait. Every slug the Settings layer
-// hands over is one of the two keys, so this only guards a hand-edited file.
 var FALLBACK_TIMEOUT_SECONDS = 10
 
 function isPlainObject(value) {
@@ -75,24 +50,11 @@ function timeoutSeconds(engineSlug) {
   return typeof seconds === "number" ? seconds : FALLBACK_TIMEOUT_SECONDS
 }
 
-// The code the shell draws a card for. Spec section 5.1: an unknown code reads
-// as `engine_error`, because the Check did not finish and Retry is still the
-// right offer.
 function known(code) {
   var value = String(code)
   return CODES.indexOf(value) === -1 ? ENGINE_ERROR : value
 }
 
-// What one run of `grammachy check` left on stdout, spec section 5.1.
-//
-// The answer carries either `result`, the envelope whose Issues the popup
-// draws, or `error`, the code and message a card is made from. Exactly one of
-// the two is set, so the caller parses the stdout once and never twice.
-//
-// A missing or mismatched `contractVersion` and no JSON at all both read as
-// `bad_arguments`, because both say the same thing about the companion tool:
-// it is missing or out of date, and the card that offers Setup is the one that
-// helps. Neither leaves a message the shell could trust.
 function readCheck(stdout) {
   var envelope = null
   try {
@@ -115,16 +77,6 @@ function readCheck(stdout) {
   }
 }
 
-// The card one code shows, spec section 8, or `null` for `text_too_long`,
-// whose card is the one of section 6 and belongs to the quick popup.
-//
-// `engineLabel` is the display name of the current engine setting rather than
-// of the engine that ran: the card offers Settings, so the reader has to
-// recognise the engine that dropdown names. `message` is what the CLI said,
-// which every card prints in monospace under the body.
-//
-// `needsDiagnosis` asks the caller for the one-line `grammachy doctor` answer,
-// which only the `engine_unavailable` card shows.
 function card(code, options) {
   var context = isPlainObject(options) ? options : ({})
   var settled = known(code)
@@ -142,9 +94,6 @@ function card(code, options) {
     message: message,
     needsDiagnosis: false,
     buttons: [],
-    // The one button the card leads with, drawn in the accent colour. It is
-    // Retry wherever Retry is offered, because running the Check again is what
-    // the reader came to do.
     primary: ""
   }
 
@@ -193,12 +142,6 @@ function card(code, options) {
   return model
 }
 
-// What one run of `grammachy chunk` left on stdout, spec section 5.2.
-//
-// The answer carries either `chunks`, the tiling of the Draft the chunked Check
-// walks, or `error`, read the same way `readCheck` reads one. A list that is
-// not an array is the same statement as no JSON at all: the companion tool is
-// out of step with this contract.
 function readChunks(stdout) {
   var envelope = null
   try {
@@ -226,17 +169,6 @@ function readChunks(stdout) {
   return { chunks: envelope.chunks, error: null }
 }
 
-// The card a chunked Check shows when one Chunk fails, spec section 9.
-//
-// The title, the body, and the engine message are the section 8 card of the
-// same code, because what went wrong is the same thing. Only the buttons
-// differ, and only when Chunks have already finished: their Issues are still
-// worth reviewing, so the card offers that beside resuming at the Chunk that
-// failed. With nothing behind it there is nothing to review, so the card falls
-// back to the offers of section 8 around the same resume.
-//
-// `text_too_long` cannot come from a Chunk, which the CLI cut to fit, so it
-// reads here as the engine failing rather than as the too-long card.
 function chunkCard(code, options) {
   var context = isPlainObject(options) ? options : ({})
   var settled = known(code)

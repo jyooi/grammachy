@@ -86,8 +86,6 @@ pub fn path() -> Option<PathBuf> {
     Some(PathBuf::from(home).join(".config/hypr/bindings.lua"))
 }
 
-/// Escape a value for a Lua double-quoted string. Hyprland key syntax is not
-/// parsed here: this is only so a quote or newline cannot break `bindings.lua`.
 fn lua_string(value: &str) -> String {
     value
         .replace('\\', "\\\\")
@@ -95,7 +93,6 @@ fn lua_string(value: &str) -> String {
         .replace('\n', "\\n")
 }
 
-/// One hotkey: the default it replaces goes first, the new binding second.
 fn binding(keys: &str, description: &str, payload: &str) -> String {
     let keys = lua_string(keys);
     format!(
@@ -155,8 +152,6 @@ fn write(path: &Path, change: impl FnOnce(&str) -> Result<String, String>) -> Re
     Ok(true)
 }
 
-/// The file as it stands. A file that is not there yet reads as empty, because
-/// a fresh Omarchy install may carry no user bindings at all.
 fn read(path: &Path) -> Result<String, String> {
     match std::fs::read_to_string(path) {
         Ok(content) => Ok(content),
@@ -226,8 +221,6 @@ mod tests {
 
     #[test]
     fn the_payload_needs_no_escape_inside_the_long_bracket() {
-        // A `]]` in the command would close the long bracket early. The two
-        // payloads carry none, and this is the guard if one ever does.
         for line in block(&Hotkeys::default())
             .body
             .lines()

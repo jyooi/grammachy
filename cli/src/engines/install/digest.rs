@@ -1,11 +1,3 @@
-//! The pinned digest of a downloaded archive, spec section 10.
-//!
-//! The catalogue pins every component by sha256, the way `cli.lock` pins the
-//! CLI binary, and the `.part` file is renamed only when the digest matches.
-//! That is one small hash over a few hundred megabytes, so it is written here
-//! rather than pulled in as a dependency: the release binary is about 13 MB
-//! and this is the only thing in it that needs sha256 at all.
-
 use std::io::Read;
 use std::path::Path;
 
@@ -63,16 +55,9 @@ impl Sha256 {
         }
     }
 
-    /// Take these bytes a block at a time.
-    ///
-    /// A component archive is hundreds of megabytes, so this walks whole
-    /// 64-byte blocks rather than single bytes: one bounds check and one
-    /// branch per block instead of per byte. The digest is the same either
-    /// way.
     fn update(&mut self, data: &[u8]) {
         let mut rest = data;
 
-        // Finish the block a previous call left part filled.
         if self.filled > 0 {
             let wanted = (64 - self.filled).min(rest.len());
             self.buffer[self.filled..self.filled + wanted].copy_from_slice(&rest[..wanted]);
@@ -93,7 +78,6 @@ impl Sha256 {
             self.bit_len += 512;
         }
 
-        // Whatever is left over waits for the next call or for `finalize`.
         let tail = blocks.remainder();
         self.buffer[..tail.len()].copy_from_slice(tail);
         self.filled = tail.len();
@@ -210,42 +194,28 @@ mod tests {
         );
     }
 
-    /// The vectors above all fit in one block, so none of them reaches the two
-    /// branches every real archive takes: the compress in `update` when the
-    /// buffer fills, and the two-block padding in `finalize` when the last
-    /// block has no room for the length. These are the published FIPS 180-4
-    /// vectors, so the expected digests are right independently of this code.
     #[test]
     fn sha256_matches_the_multi_block_vectors() {
-        // 56 bytes: one block plus a tail with no room for the 8-byte length,
-        // which is the two-block padding path.
         assert_eq!(
             sha256_hex(b"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq"),
             "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1"
         );
-        // 112 bytes: an exact two blocks, so `update` compresses twice and the
-        // padding takes a third block of its own.
         const TWO_BLOCKS: &[u8] = b"abcdefghbcdefghicdefghijdefghijkefghijklfghijklmghijklmnhijklmnoijklmnopjklmnopqklmnopqrlmnopqrsmnopqrstnopqrstu";
         assert_eq!(TWO_BLOCKS.len(), 112);
         assert_eq!(
             sha256_hex(TWO_BLOCKS),
             "cf5b16a778af8380036ce59e7b0492370b249b11e8f07a51afac45037afee9d1"
         );
-        // A million bytes, which is the streaming case a large archive is.
         assert_eq!(
             sha256_hex(&vec![b'a'; 1_000_000]),
             "cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0"
         );
     }
 
-    /// `update` takes whole blocks at a time, so a call that ends part way
-    /// through one has to carry the remainder into the next call. A short read
-    /// is what does that to a real file, and the digest must not notice.
     #[test]
     fn a_vector_split_across_calls_hashes_the_same_as_one_call() {
         const TWO_BLOCKS: &[u8] = b"abcdefghbcdefghicdefghijdefghijkefghijklfghijklmghijklmnhijklmnoijklmnopjklmnopqklmnopqrlmnopqrsmnopqrstnopqrstu";
 
-        // Every split, so no offset inside or across a block goes untried.
         for split in 0..=TWO_BLOCKS.len() {
             let mut hasher = Sha256::new();
             hasher.update(&TWO_BLOCKS[..split]);
@@ -258,9 +228,6 @@ mod tests {
         }
     }
 
-    /// `sha256_path` reads in 64 KB chunks, so a file larger than one chunk is
-    /// the only thing that proves a block split across two reads still hashes
-    /// to the same digest as the whole buffer.
     #[test]
     fn a_file_larger_than_one_read_hashes_the_same_as_its_bytes() {
         let directory = scratch("digest-stream");

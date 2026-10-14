@@ -4,17 +4,9 @@ import qs.Commons
 import qs.Ui
 import "setupCard.js" as Setup
 
-// The setup card of spec section 10, drawn when bin/grammachy is missing.
-//
-// The model comes from `ui/setupCard.js`, which owns the title, the body,
-// and which of Install, the streamed log, and Retry the card shows for the
-// current state. This file draws that model and reports which button was
-// pressed; running bin/bootstrap.sh and reading cli.lock both live in
-// Overlay.qml.
 ColumnLayout {
   id: root
 
-  // A card model from `Setup.card({...})`.
   property var card: null
 
   signal actionRequested(string action)
@@ -56,9 +48,6 @@ ColumnLayout {
     font.pixelSize: Style.font.body
   }
 
-  // Spec section 10: the system packages this machine lacks that the
-  // bootstrap needs, each with its purpose. The card names them. It does not
-  // install them. Add them through Omarchy Install.
   ColumnLayout {
     Layout.fillWidth: true
     visible: root.showsDependencies
@@ -113,8 +102,6 @@ ColumnLayout {
     }
   }
 
-  // What bin/bootstrap.sh has printed so far, streamed line by line while it
-  // runs and kept once it finishes, so a failure shows the reason.
   Flickable {
     Layout.fillWidth: true
     Layout.preferredHeight: Style.space(120)
@@ -142,8 +129,6 @@ ColumnLayout {
     Layout.topMargin: Style.spacing.sm
     spacing: Style.spacing.lg
 
-    // Why the bootstrap Install cannot be pressed, when a package it needs
-    // is still missing.
     Text {
       Layout.fillWidth: true
       visible: root.installReason.length > 0

@@ -1,5 +1,3 @@
-//! The Target English setting reaches Harper as a dialect, spec section 7.
-
 use grammachy::args::{CheckOptions, EngineSlug, NativeLanguage, TargetEnglish};
 use grammachy::engine::Engine;
 use grammachy::engines::harper::Harper;

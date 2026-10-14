@@ -5,16 +5,9 @@ import qs.Ui
 import "engines.js" as EnginesJs
 import "settings.js" as Settings
 
-// The Settings view of the quick popup, spec section 7. The gear in the hero
-// flips the card to it and back.
-//
-// The view draws the stored Settings and reports one changed key at a time.
-// Storage lives in Overlay.qml, which is the only thing that touches
-// `shell.json`. There is no Save button: every control persists on change.
 ColumnLayout {
   id: root
 
-  // The stored values, already resolved through the spec section 7 defaults.
   property string nativeLanguage: "none"
   property string targetEnglish: "en-US"
   property string engine: "harper"
@@ -22,8 +15,6 @@ ColumnLayout {
   property string quickHotkey: "SUPER + SHIFT + Q"
   property string composeHotkey: "SUPER + ALT + Q"
 
-  // The Engines list of spec section 5.4. Everything it needs arrives from
-  // Overlay.qml, which is the only thing that runs `grammachy engine`.
   property var engines: []
   property string engineBusy: ""
   property double engineBusyBytes: 0
@@ -32,8 +23,6 @@ ColumnLayout {
   property string enginesDirectory: ""
   property double enginesFreeBytes: 0
   property var engineNote: null
-  // The dependency table of spec section 10, so a row that needs a system
-  // package can name it.
   property var dependencies: []
 
   signal settingChanged(string name, var value)
@@ -43,20 +32,10 @@ ColumnLayout {
   signal engineRemoveConfirmed(string slug)
   signal engineKeepRequested()
 
-  // Dropdown writes its own `value` when the user picks a row, which drops the
-  // declarative binding. Re-asserting it on every change of the stored value
-  // is what keeps the view live for a write from outside, such as
-  // `omarchy-shell shell setBarWidget <id> engine '"harper"'`.
   onNativeLanguageChanged: nativeLanguageDropdown.value = root.nativeLanguage
   onTargetEnglishChanged: targetEnglishDropdown.value = root.targetEnglish
   onEngineChanged: engineDropdown.value = root.engine
-  // The option list narrows as the Engines list lands, and a Dropdown that
-  // has written its own `value` once no longer follows the binding, so the
-  // value is re-asserted when the rows move as well as when the setting does.
   onEnginesChanged: engineDropdown.value = root.engine
-  // A TextField that has typed its own `text` once no longer follows the
-  // binding either, so a live external write, such as a hand edit of
-  // shell.json, is re-asserted the same way.
   onQuickHotkeyChanged: quickHotkeyField.text = root.quickHotkey
   onComposeHotkeyChanged: composeHotkeyField.text = root.composeHotkey
 
@@ -99,8 +78,6 @@ ColumnLayout {
       onChanged: function(value) { root.settingChanged("targetEnglish", Settings.normalised("targetEnglish", value)) }
     }
 
-    // Spec section 7 and HUF-237: only an engine this machine has is offered.
-    // The Engines list below is where a missing one is added.
     Dropdown {
       id: engineDropdown
 
@@ -114,10 +91,6 @@ ColumnLayout {
     }
   }
 
-  // Spec section 2: the two trigger hotkeys, remappable text fields rather
-  // than a dropdown, because a Hyprland key combination is free text. A
-  // change reaches `~/.config/hypr/bindings.lua` and the compositor through
-  // `Overlay.applyHotkeys`, not through this view.
   RowLayout {
     Layout.fillWidth: true
     spacing: Style.spacing.xxl
@@ -175,8 +148,6 @@ ColumnLayout {
     }
   }
 
-  // Spec section 6 words the hint, because Replace only reaches a Selection
-  // that is still highlighted in the window it came from.
   Toggle {
     Layout.fillWidth: true
     label: "Auto-replace"
@@ -186,9 +157,6 @@ ColumnLayout {
     onClicked: root.settingChanged("autoReplace", !root.autoReplace)
   }
 
-  // Spec section 5.4: the optional engine components this machine keeps. It is
-  // drawn whatever engine is selected, because the whole point is to add one
-  // the dropdown above cannot offer yet.
   EnginesView {
     Layout.fillWidth: true
 

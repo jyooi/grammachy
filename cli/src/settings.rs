@@ -83,7 +83,6 @@ pub fn entry_path() -> Option<PathBuf> {
     Some(PathBuf::from(home).join(".config/omarchy/shell.json"))
 }
 
-/// The plugin's entry, from the bar layout first and the `plugins` array next.
 fn find_entry(document: &Value) -> Option<&Value> {
     for section in ["left", "center", "right"] {
         let entries = document
@@ -106,14 +105,10 @@ fn is_ours(entry: &Value) -> bool {
     entry.get("id").and_then(Value::as_str) == Some(PLUGIN_ID)
 }
 
-/// A string value, or `None` for a missing key or any other JSON type.
 fn string<'a>(entry: &'a Value, key: &str) -> Option<&'a str> {
     entry.get(key).and_then(Value::as_str)
 }
 
-/// A hotkey string, trimmed. Blank or missing reads as unknown, so the
-/// default of spec section 2 applies. The CLI never parses Hyprland key
-/// syntax beyond that.
 fn hotkey(entry: &Value, key: &str) -> Option<String> {
     string(entry, key)
         .map(str::trim)

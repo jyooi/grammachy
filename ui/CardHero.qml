@@ -3,33 +3,16 @@ import QtQuick.Layouts
 import qs.Commons
 import qs.Ui
 
-// The hero both surfaces wear, spec sections 6 and 9: the mark, the name, one
-// meta line, whatever actions the caller hangs on the trailing edge, and the
-// gear that flips the card to Settings.
-//
-// The caller words its own meta line, because what it says is the caller's
-// state, and names its own actions for the same reason. The auto-replace
-// toggle is the popup's alone: spec section 9 says auto-replace never applies
-// in Compose, so a toggle there would promise something the Apply button does
-// not do.
 ColumnLayout {
   id: root
 
-  // The one line under the name: the counts and the engine, or what the card
-  // is waiting on.
   property string metaText: ""
-  // A second line in the accent colour, for a caveat about the meta line
-  // above it. Empty hides it.
   property string noteText: ""
 
   property bool showsAutoReplace: false
   property bool autoReplace: false
   property bool settingsOpen: false
 
-  // The actions on the trailing edge, before the gear. Each entry is
-  // `{ id, text, tooltip, primary }`. The popup puts its Compose button here
-  // (spec section 6) and Compose puts the Cancel of a chunked Check here (spec
-  // section 9), so the hero carries either without knowing what it does.
   property var actions: []
 
   signal autoReplaceToggled()
@@ -84,8 +67,6 @@ ColumnLayout {
       }
     }
 
-    // The auto-replace toggle, spec sections 6 and 7. The Settings view
-    // persists it; the hero holds a session-local override beside that.
     RowLayout {
       Layout.alignment: Qt.AlignVCenter
       visible: root.showsAutoReplace
@@ -121,9 +102,6 @@ ColumnLayout {
       }
     }
 
-    // The one control that flips the body, spec section 7. It sits in the
-    // hero so it is reachable from every phase, the notice card included,
-    // and it stays a gear both ways so the hero never shifts under a click.
     Button {
       Layout.alignment: Qt.AlignVCenter
       iconText: "󰒓"
@@ -136,8 +114,6 @@ ColumnLayout {
     }
   }
 
-  // The hint spans the hero rather than riding beside the switch, so it
-  // stays one line at any theme font and never squeezes the meta line.
   Text {
     Layout.fillWidth: true
     Layout.topMargin: -Style.spacing.sm

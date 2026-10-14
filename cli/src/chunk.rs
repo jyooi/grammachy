@@ -122,10 +122,6 @@ pub fn chunks_of(text: &str, limit: usize) -> Vec<Chunk> {
     chunks
 }
 
-/// The atomic byte ranges the packer may not split further.
-///
-/// Every unit that fits stays whole. A paragraph over the limit becomes its
-/// sentences, and a sentence over the limit becomes hard cuts at the limit.
 fn units(text: &str, limit: usize) -> Vec<(usize, usize)> {
     let mut units = Vec::new();
     for paragraph in paragraphs(text) {
@@ -144,7 +140,6 @@ fn units(text: &str, limit: usize) -> Vec<(usize, usize)> {
     units
 }
 
-/// Pack the units greedily, up to the limit per Chunk.
 fn pack(text: &str, units: Vec<(usize, usize)>, limit: usize) -> Vec<(usize, usize)> {
     let mut packed: Vec<(usize, usize)> = Vec::new();
     let mut filled = 0;
@@ -169,8 +164,6 @@ fn fits(text: &str, range: (usize, usize), limit: usize) -> bool {
     utf16_len(&text[range.0..range.1]) <= limit
 }
 
-/// The paragraphs of `text` as byte ranges, each carrying its own trailing
-/// blank-line separator so that the ranges tile the whole text.
 fn paragraphs(text: &str) -> Vec<(usize, usize)> {
     let bytes = text.as_bytes();
     let mut paragraphs = Vec::new();
@@ -198,9 +191,6 @@ fn paragraphs(text: &str) -> Vec<(usize, usize)> {
     paragraphs
 }
 
-/// The end of the paragraph break that starts at the newline `at`, or `None`
-/// when that newline only ends a line. A break is one newline, then optional
-/// blank space, then another newline; further blank lines join the same break.
 fn blank_line_break(bytes: &[u8], at: usize) -> Option<usize> {
     let mut probe = at + 1;
     while probe < bytes.len() && matches!(bytes[probe], b' ' | b'\t' | b'\r') {
@@ -210,8 +200,6 @@ fn blank_line_break(bytes: &[u8], at: usize) -> Option<usize> {
         return None;
     }
 
-    // Keep the indentation of the next paragraph with it, so the break ends
-    // just after the last newline of the run.
     let mut end = probe + 1;
     let mut scan = end;
     while scan < bytes.len() {
@@ -227,9 +215,6 @@ fn blank_line_break(bytes: &[u8], at: usize) -> Option<usize> {
     Some(end)
 }
 
-/// Split one paragraph into sentences at `.`, `?`, `!`, or a closing quote
-/// after one of them, followed by whitespace. Each sentence keeps the
-/// whitespace that follows it, so the ranges tile the paragraph.
 fn sentences(text: &str, range: (usize, usize)) -> Vec<(usize, usize)> {
     let slice = &text[range.0..range.1];
     let chars: Vec<(usize, char)> = slice.char_indices().collect();
@@ -275,7 +260,6 @@ fn is_closing_quote(c: char) -> bool {
     )
 }
 
-/// Cut one oversize sentence at the limit, never inside a character.
 fn hard_cuts(text: &str, range: (usize, usize), limit: usize) -> Vec<(usize, usize)> {
     let mut cuts = Vec::new();
     let mut start = range.0;
@@ -305,8 +289,6 @@ mod tests {
     use super::*;
     use crate::args::EngineSlug;
 
-    /// The limit every engine packs to (spec section 4): Harper and
-    /// LanguageTool share one Check size limit.
     const LIMIT: usize = EngineSlug::Languagetool.check_limit_utf16();
 
     fn text_of(text: &str, chunk: Chunk) -> String {
@@ -328,8 +310,6 @@ mod tests {
 
     #[test]
     fn whole_paragraphs_pack_greedily_up_to_the_limit() {
-        // Three paragraphs of 2,000 units each, separator included. Two fit,
-        // the third opens a second Chunk.
         let paragraph = "a".repeat(1_998);
         let text = format!("{paragraph}\n\n{paragraph}\n\n{paragraph}");
 
@@ -414,8 +394,6 @@ mod tests {
 
     #[test]
     fn a_hard_cut_never_splits_a_surrogate_pair() {
-        // Every astral character is two units, so the limit lands mid pair
-        // when one single-unit character leads the text.
         let text = format!("a{}", "\u{1F600}".repeat(4_000));
 
         let chunks = chunks_of(&text, LIMIT);
@@ -464,9 +442,6 @@ mod tests {
         assert_eq!(run(&at_limit, LIMIT).exit_code(), 0);
     }
 
-    /// Harper and LanguageTool are the only two engines left, and both read
-    /// the same Check size limit (spec section 4), so `chunk --engine` packs
-    /// every Draft the same way regardless of which one it names.
     #[test]
     fn every_remaining_engine_packs_to_the_same_limit() {
         assert_eq!(

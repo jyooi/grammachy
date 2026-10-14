@@ -1,13 +1,3 @@
-// The key map of both surfaces, spec sections 6 and 9.
-//
-// Loaded twice: by Overlay.qml through `import "keymap.js" as Keymap`, and by
-// `keymap.test.js` under node. Nothing here may touch a QML or a node API,
-// because each side only has one of them.
-//
-// The Qt key codes arrive in `codes` rather than as literals, because `Qt` is
-// a QML global that node does not have. The overlay owns that one table; this
-// file owns which action a key asks for.
-
 var NONE = ""
 var CLOSE = "close"
 var ACCEPT = "accept"
@@ -19,51 +9,26 @@ var COPY = "copy"
 var APPLY = "apply"
 var CHECK = "check"
 var BACK = "back"
-// The Clear of the quick popup, spec section 6.
 var CLEAR = "clear"
-// The Remove confirm of the Engines list, spec sections 5.4 and 7.
 var REMOVE_ENGINE = "removeEngine"
 var KEEP_ENGINE = "keepEngine"
 
-// Which card the press landed on. The popup review keys are the whole map;
-// Compose reuses them in its own review mode and keeps almost nothing in edit
-// mode, because there the Draft text area owns every printable key.
 var MODE_IDLE = "idle"
 var MODE_REVIEW = "review"
 var MODE_COMPOSE_EDIT = "composeEdit"
 var MODE_COMPOSE_REVIEW = "composeReview"
-// The quick popup cards that carry the Clear button and no Issues to decide,
-// spec section 6: the Check in flight, the failure card, the notice, and a
-// result with nothing to fix. Esc leaves and Ctrl + L clears; nothing else is
-// on offer there, because there is nothing to accept, skip, copy, or apply.
 var MODE_QUICK_CLEAR = "quickClear"
-// The Remove confirm of the Engines list, spec sections 5.4 and 7. It sits
-// over the Settings view, which owns every other key, so this mode carries
-// the two answers to that one question and nothing else.
 var MODE_ENGINE_CONFIRM = "engineConfirm"
 
-// The action a key press asks for, or NONE.
-//
-// Esc works from every card, because a summoned overlay that cannot be
-// dismissed from the keyboard is a trap. What it means is the mode's: it
-// leaves the popup, and it leaves Compose review for the Draft behind it.
-// Availability is the caller's call: an action that is asked for while it is
-// disabled is a no-op there, not a different action.
 function action(event, codes, mode) {
   if (!event || !codes) return NONE
 
   var key = event.key
   var modifiers = Number(event.modifiers) || 0
   var control = (modifiers & codes.control) !== 0
-  // Shift is not in the mask: a reader who sees `A` in the map may well hold
-  // it down. Alt and Meta belong to the compositor, so they never land here.
   var foreign = (modifiers & (codes.alt | codes.meta)) !== 0
   var enter = key === codes.enter || key === codes.returnKey
 
-  // The confirm is a question, so Esc answers it rather than leaving the card
-  // with the question still open behind it. Only a bare Enter answers the
-  // other way: Ctrl + Enter is Apply on every other card, and a reader who
-  // pressed it out of habit did not ask for an engine to be removed.
   if (mode === MODE_ENGINE_CONFIRM) {
     if (key === codes.escape) return KEEP_ENGINE
     if (foreign || control) return NONE
@@ -73,14 +38,8 @@ function action(event, codes, mode) {
   if (key === codes.escape) return mode === MODE_COMPOSE_REVIEW ? BACK : CLOSE
   if (foreign) return NONE
 
-  // Edit mode hands every other key to the text area, so that typing a draft
-  // is typing a draft. Ctrl + Enter is the one key the card keeps.
   if (mode === MODE_COMPOSE_EDIT) return control && enter ? CHECK : NONE
 
-  // Clear is the popup's alone, spec section 6: it drops the capture and the
-  // review that came with it. It reaches every quick card that draws the Clear
-  // button, so the button and the key agree. Compose has a Draft behind its
-  // review and keeps it, so the same press must not reach there.
   if (control && key === codes.l)
     return mode === MODE_REVIEW || mode === MODE_QUICK_CLEAR ? CLEAR : NONE
 

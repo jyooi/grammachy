@@ -1,12 +1,3 @@
-//! Harper is initialised only when it is selected.
-//!
-//! Spec section 4 calls `harper-core` loaded only when selected, so the default
-//! LanguageTool path pays nothing for it. The curated dictionary and rule set
-//! are the whole cost, and this case proves nothing builds them until a Check
-//! asks the `harper` engine for Issues.
-//!
-//! The case owns its own test binary, so no other case can move the counter.
-
 use grammachy::args::{CheckOptions, EngineSlug};
 use grammachy::engine;
 use grammachy::engines::harper::initialisations;
@@ -15,7 +6,6 @@ use grammachy::engines::harper::initialisations;
 fn only_a_harper_check_initialises_harper() {
     assert_eq!(initialisations(), 0);
 
-    // Building any adapter, the default one included, costs nothing.
     for slug in [EngineSlug::Languagetool, EngineSlug::Harper] {
         drop(engine::resolve(slug));
     }

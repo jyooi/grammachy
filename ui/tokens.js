@@ -1,13 +1,3 @@
-// Word tokens for the marked text. Spec section 6.
-//
-// Loaded twice: by MarkedText.qml through `import "tokens.js" as Tokens`,
-// and by `tokens.test.js` under node. Nothing here may touch a QML or a node
-// API, because each side only has one of them.
-//
-// Every index is a UTF-16 code unit.
-// A word plus the blanks that follow it is one Flow cell.
-// The Flow wraps where a reader expects. The underline stops at the word.
-
 function isBlank(ch) {
   return ch !== "\n" && ch !== "\r" && /\s/.test(ch)
 }

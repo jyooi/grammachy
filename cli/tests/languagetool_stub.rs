@@ -1,8 +1,3 @@
-//! The failure paths of the LanguageTool adapter, against a stub server.
-//!
-//! No case starts a systemd unit: every configuration sets `start_unit` to
-//! false, so the tests are the same on a developer machine and in CI.
-
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::thread;
@@ -12,17 +7,12 @@ use grammachy::args::CheckOptions;
 use grammachy::engine::{Engine, EngineFailure};
 use grammachy::engines::languagetool::{Config, Endpoint, LanguageTool};
 
-/// How the stub answers one request.
 enum Answer {
-    /// A `/v2/check` body with this JSON.
     Json(&'static str),
-    /// This status line with an empty body.
     Status(&'static str),
-    /// Read the request and never write, so the client runs out of time.
     Silence,
 }
 
-/// A stub server on a port the operating system picks, torn down with the test.
 struct Stub {
     address: String,
 }
@@ -53,7 +43,6 @@ impl Stub {
                             "HTTP/1.1 {line}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
                         );
                     }
-                    // Hold the connection open until the client gives up.
                     Answer::Silence => thread::sleep(Duration::from_secs(30)),
                 }
             }
@@ -103,7 +92,6 @@ fn adapter(address: &str, timeout: Duration) -> LanguageTool {
     })
 }
 
-/// An address on the loopback interface with nothing listening on it.
 fn silent_address() -> String {
     let listener = TcpListener::bind("127.0.0.1:0").expect("a loopback port is free");
     let address = listener
