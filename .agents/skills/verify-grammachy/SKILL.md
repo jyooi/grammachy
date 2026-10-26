@@ -67,6 +67,7 @@ Each `vg.sh run` starts one short CLI process under a 60 second timeout.
 
 1. Build the release binary once: `vg build`.
    It runs `cargo build --release` in `cli/` and prints `grammachy <version>`.
+   It then updates the binary mtime, so `vg doctor` accepts a binary that cargo finds fresh.
    A cold build takes about one minute.
 2. Make a fresh scratch tree: `vg launch`.
    It prints `ready: scratch=<dir> evidence=<dir> binary=<path>`.

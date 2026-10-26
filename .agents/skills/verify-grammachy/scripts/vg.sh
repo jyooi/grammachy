@@ -53,6 +53,7 @@ isolated_env() {
 
 cmd_build() {
   ( cd "$repo/cli" && timeout 900 cargo build --release )
+  touch "$bin"
   "$bin" --version
 }
 
