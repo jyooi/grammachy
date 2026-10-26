@@ -21,6 +21,18 @@ vg() { "$(git rev-parse --show-toplevel)/.agents/skills/verify-grammachy/scripts
 Run `vg` from inside the checkout under test.
 The helper finds the checkout from its own path, so a call from another directory also works with the full path.
 
+## Helpers
+
+| Invocation | What it does |
+|---|---|
+| `vg build` | Builds the release binary in `cli/` and prints its version. |
+| `vg launch` | Makes a fresh scratch tree and the evidence directory. |
+| `vg doctor` | Checks the binary, the scratch tree, and the stub, and changes nothing. |
+| `vg path <name>` | Prints one scratch path, such as `shell-json` or `evidence`. |
+| `vg run <feature-id> [--stdin <file> \| --text <string>] -- <args>` | Runs the CLI with isolated state and records the evidence. |
+| `vg stub start\|stop` | Starts or stops the HTTPS stub for `engine install`. |
+| `vg cleanup` | Stops the stub, deletes the scratch tree, and keeps the evidence. |
+
 ## Isolation
 
 `vg.sh run` gives every CLI call six variables that point all state into a scratch tree.
@@ -72,6 +84,7 @@ It exits 1 and prints a `FAIL:` line when one of these is not true:
 
 - The binary exists, and its version matches `cli/Cargo.toml`.
 - No file under `cli/src` is newer than the binary.
+  The same is true for `cli/Cargo.toml`, `cli/Cargo.lock`, and `cli/rust-toolchain.toml`.
 - The scratch tree exists.
 
 It also prints the commit, the evidence directory, the stub state, and the state of the shared unit.

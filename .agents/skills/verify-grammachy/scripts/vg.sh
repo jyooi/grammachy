@@ -73,7 +73,7 @@ cmd_doctor() {
     got=$("$bin" --version | awk '{print $2}')
     echo "binary: $bin ($got, Cargo.toml $want)"
     [[ "$got" == "$want" ]] || { echo "FAIL: binary version is not the checkout version. Run: vg.sh build"; status=1; }
-    if [[ -n $(find "$repo/cli/src" "$repo/cli/Cargo.toml" -newer "$bin" -print -quit) ]]; then
+    if [[ -n $(find "$repo/cli/src" "$repo/cli/Cargo.toml" "$repo/cli/Cargo.lock" "$repo/cli/rust-toolchain.toml" -newer "$bin" -print -quit) ]]; then
       echo "FAIL: cli sources are newer than the binary. Run: vg.sh build"; status=1
     fi
   else
