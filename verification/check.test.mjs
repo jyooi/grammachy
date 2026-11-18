@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { execFileSync } from "node:child_process"
 import { createHash } from "node:crypto"
-import { copyFileSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs"
+import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import test from "node:test"
@@ -19,8 +19,11 @@ const record = {
 }
 const covered = sha256(`${"b".repeat(64)}  Overlay.qml\n${"a".repeat(64)}  verification/Model.tla\n`)
 
+const scratchFolder = mkdtempSync(join(tmpdir(), "check-test-"))
+test.after(() => rmSync(scratchFolder, { recursive: true, force: true }))
+
 async function scratch(files) {
-  const root = mkdtempSync(join(tmpdir(), "check-test-"))
+  const root = mkdtempSync(join(scratchFolder, "repo-"))
   const git = (...args) =>
     execFileSync("git", ["-c", "user.name=test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false", ...args], {
       cwd: root,
