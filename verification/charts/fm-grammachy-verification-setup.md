@@ -65,8 +65,8 @@ stateDiagram-v2
   s12 --> s4: the paste lands, the highlight is released
   s13 --> s4: you close it
   s11 --> s13: the source window is gone
-  s14 --> s15: the paste lands, the highlight is released
-  s14 --> s4: the paste lands, the highlight is released
+  s14 --> s15: the paste lands where the primary highlight was
+  s14 --> s4: the paste lands, the text came from Ctrl + C
   classDef breaks fill:#ffecee,stroke:#e72e3b,stroke-width:2.5px,color:#cd2834
   class s0 teal
   class s0 bugPath
