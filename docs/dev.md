@@ -732,6 +732,18 @@ cargo test
 
 No case reaches the network.
 
+The Verification job of CI model-checks the quick popup run, from the repo root:
+
+```bash
+node --test verification/check.test.mjs
+node verification/check.mjs
+```
+
+`check.mjs` needs `java` on `PATH`.
+On its first run, it downloads `tla2tools.jar` into `verification/.cache/`.
+A branch with changes from `origin/main` also needs its own state chart in `verification/charts/`.
+The `verify-quick-run` skill gives the procedure for a failure.
+
 ## 17. Removing it
 
 The Uninstall section of `README.md` has the removal steps.

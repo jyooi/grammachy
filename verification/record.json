@@ -1,0 +1,155 @@
+{
+  "syncCommit": "b2737decf817dcb6b1ba8dc51b624af32ca90eda",
+  "tool": {
+    "name": "TLC",
+    "version": "1.7.4",
+    "url": "https://github.com/tlaplus/tlaplus/releases/download/v1.7.4/tla2tools.jar",
+    "sha256": "936a262061c914694dfd669a543be24573c45d5aa0ff20a8b96b23d01e050e88"
+  },
+  "model": [
+    {
+      "file": "verification/QuickRun.tla",
+      "sha256": "40a17e596e5d463d9e9d56870a08c24fdc08a88d6824cd6e9b263b2a1a8ee3f5"
+    },
+    {
+      "file": "verification/QuickRun.cfg",
+      "sha256": "31fd4921ecd02183e74f5e8445c634419228948f73a54909703f7c7d131b2abe"
+    }
+  ],
+  "covers": [
+    {
+      "file": "Overlay.qml",
+      "functions": [
+        "open",
+        "close",
+        "resetRun",
+        "startQuick",
+        "probeSourceWindow",
+        "onSourceProbed",
+        "beginPrimaryPaste",
+        "isLive",
+        "isSelection",
+        "consumeCapture",
+        "releasePrimary",
+        "captured",
+        "showNothingNew",
+        "checkLastAgain",
+        "clearCapture",
+        "onPrimaryCaptured",
+        "onClipboardBorrowed",
+        "onCopyKeystrokeSent",
+        "onFallbackCaptured",
+        "restoreBorrowedClipboard",
+        "launchCheck",
+        "runCheck",
+        "onCheckOutput",
+        "canApply",
+        "copyCorrected",
+        "applyCorrected",
+        "runCopy",
+        "focusSourceWindow",
+        "verifySourceFocus",
+        "onSourceFocusVerified",
+        "showSourceGone",
+        "launchPasteKeystroke",
+        "sourceProbe",
+        "primaryPaste",
+        "savedClipboard",
+        "copyKeystroke",
+        "settleTimer",
+        "fallbackPaste",
+        "clearPrimary",
+        "restoreClipboard",
+        "checkProcess",
+        "copyProcess",
+        "pasteTimer",
+        "focusSource",
+        "verifySource",
+        "pasteKeystroke"
+      ],
+      "sha256": "d7b5440ab5865674aeb62395035d6bb493f2d3f82394b1024503447b2baf6c91"
+    },
+    {
+      "file": "ui/capture.js",
+      "functions": [
+        "kept",
+        "isStale",
+        "copiedNothing",
+        "primaryCommand",
+        "borrowCommand",
+        "fallbackCommand"
+      ],
+      "sha256": "32df7218769a65789889ba9a754eb1ff6b10e2bd72d62c25886f63f66353d12e"
+    },
+    {
+      "file": "ui/anchor.js",
+      "functions": [
+        "readActiveWindow",
+        "windowAddress",
+        "activeWindowCommand",
+        "focusCommand",
+        "isFocused"
+      ],
+      "sha256": "6b2088a0611df8149b70cb41d566f36588e3c3558001697a93900838635ff284"
+    }
+  ],
+  "properties": [
+    {
+      "name": "CardShows",
+      "status": "holds",
+      "break": {
+        "code": "Overlay.qml beginPrimaryPaste drops the primary read while the clipboard restore runs, and does not set pendingPrimaryPaste",
+        "find": "                    THEN /\\ pendingPrimaryPaste' = TRUE",
+        "replace": "                    THEN /\\ pendingPrimaryPaste' = FALSE"
+      }
+    },
+    {
+      "name": "PasteNeverStrays",
+      "status": "holds",
+      "break": {
+        "code": "Overlay.qml onSourceFocusVerified types the paste without the Anchor.isFocused check",
+        "find": "  /\\ IF rc.gen = gen /\\ focus = sourceWindow",
+        "replace": "  /\\ IF rc.gen = gen"
+      }
+    },
+    {
+      "name": "ClipboardComesBackWithoutStaleRead",
+      "status": "holds",
+      "break": {
+        "code": "Overlay.qml resetRun does not give the borrowed clipboard back",
+        "find": "  /\\ restore' = IF clipboardBorrowed /\\ restore.st = \"idle\" THEN RestoreLaunch(borrowed) ELSE restore\n  /\\ clipboardBorrowed' = FALSE\n  /\\ borrowed' = \"\"\n  /\\ phase' = \"capturing\"",
+        "replace": "  /\\ restore' = restore\n  /\\ clipboardBorrowed' = FALSE\n  /\\ borrowed' = \"\"\n  /\\ phase' = \"capturing\""
+      }
+    },
+    {
+      "name": "ReleaseOnceWithoutStaleRead",
+      "status": "holds",
+      "break": {
+        "code": "Overlay.qml releasePrimary does not clear runCaptured",
+        "find": "    THEN /\\ runCaptured' = FALSE\n         /\\ primary' = \"\"",
+        "replace": "    THEN /\\ runCaptured' = runCaptured\n         /\\ primary' = \"\""
+      }
+    },
+    {
+      "name": "HighlightOutlivesReplaceWithoutEarlyClose",
+      "status": "holds",
+      "break": {
+        "code": "Overlay.qml copyProcess.onExited calls close() before it sets replacePending",
+        "find": "            /\\ Release(TRUE)",
+        "replace": "            /\\ Release(FALSE)"
+      }
+    },
+    {
+      "name": "ClipboardComesBack",
+      "status": "finding"
+    },
+    {
+      "name": "ReleaseOnce",
+      "status": "finding"
+    },
+    {
+      "name": "HighlightOutlivesReplace",
+      "status": "finding"
+    }
+  ]
+}
