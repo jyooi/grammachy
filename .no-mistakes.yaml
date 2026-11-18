@@ -1,2 +1,2 @@
 commands:
-  test: (cd cli && cargo test --locked) && node --test ui/*.test.js && node verification/check.mjs
+  test: (cd cli && cargo test --locked) && node --test ui/*.test.js verification/check.test.mjs && node verification/check.mjs

@@ -214,7 +214,7 @@ async function checkModel(record) {
   }
 }
 
-async function checkChart(record, branch) {
+export async function checkChart(record, branch) {
   let base
   try {
     base = (await git("merge-base", defaultBranch, "HEAD")).trim()

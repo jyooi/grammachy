@@ -90,5 +90,8 @@ jobs:
           distribution: temurin
           java-version: 21
 
+      - name: Test the verification check
+        run: node --test verification/check.test.mjs
+
       - name: Check the formal verification of the quick popup run
         run: node verification/check.mjs
